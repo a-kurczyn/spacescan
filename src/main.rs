@@ -12,6 +12,7 @@ use std::time::Instant;
 
 // ---------------- Data model ----------------
 
+#[derive(Clone)]
 struct Node {
     name: String,
     path: PathBuf,
@@ -41,6 +42,65 @@ fn format_perms(mode: u32) -> String {
     format!("Perms: {:o} ({})", mode & 0o777, sym)
 }
 
+fn empty_node() -> Node {
+    Node {
+        name: String::new(),
+        path: PathBuf::new(),
+        size: 0,
+        file_count: 0,
+        is_dir: true,
+        children: Vec::new(),
+        mode: 0,
+    }
+}
+
+/// Inserts a completed directory's final stats into the growing live-scan
+/// tree, by path, creating placeholder ancestors on the way down as needed.
+///
+/// `node` starts as the tree root and target_path is always node.path or a
+/// descendant of it. When we reach the exact target, its value is
+/// authoritative (that directory is done) — set directly, don't derive from
+/// children, since files aren't individually streamed and would make a
+/// sum-of-children an undercount. Every *ancestor* on the way back up gets
+/// its aggregate recomputed as "sum of what's known so far", which is
+/// naturally just an interim lower bound until that ancestor's own
+/// SliceDone arrives and overwrites it with the real value the same way.
+fn graft_slice(node: &mut Node, target_path: &Path, size: u64, file_count: u64, mode: u32) {
+    if node.path == target_path {
+        node.size = size;
+        node.file_count = file_count;
+        node.mode = mode;
+        return;
+    }
+    let idx = match node.children.iter().position(|c| target_path.starts_with(&c.path)) {
+        Some(i) => i,
+        None => {
+            let rel = match target_path.strip_prefix(&node.path) {
+                Ok(r) => r,
+                Err(_) => return, // not actually a descendant; ignore
+            };
+            let Some(first) = rel.components().next() else {
+                return;
+            };
+            let child_path = node.path.join(first);
+            node.children.push(Node {
+                name: first.as_os_str().to_string_lossy().to_string(),
+                path: child_path,
+                size: 0,
+                file_count: 0,
+                is_dir: true,
+                children: Vec::new(),
+                mode: 0,
+            });
+            node.children.len() - 1
+        }
+    };
+    graft_slice(&mut node.children[idx], target_path, size, file_count, mode);
+    node.size = node.children.iter().map(|c| c.size).sum();
+    node.file_count = node.children.iter().map(|c| c.file_count).sum();
+    node.children.sort_by(|a, b| b.size.cmp(&a.size));
+}
+
 fn file_name_of(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().to_string())
@@ -60,14 +120,89 @@ fn friendly_io_error(path: &Path, e: &std::io::Error) -> String {
     format!("{} — {}", path.display(), what)
 }
 
+/// Scans a single directory entry: recurses if it's a (same-filesystem)
+/// directory, otherwise builds a leaf file Node. Shared by `scan_dir`'s
+/// normal recursion and the top-level streaming scan in `start_scan`.
+fn scan_entry(
+    entry: &std::fs::DirEntry,
+    root_dev: u64,
+    progress: &Sender<ScanMsg>,
+    counter: &std::sync::atomic::AtomicU64,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+) -> Node {
+    use std::os::unix::fs::MetadataExt;
+    let p = entry.path();
+    let ft = entry.file_type();
+    let node = match ft {
+        Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
+            // Don't cross filesystem/mount boundaries (matches `du -x`):
+            // a drive/mount-point scan should not silently absorb other
+            // mounted filesystems nested under it.
+            let meta = entry.metadata().ok();
+            let dev = meta.as_ref().map(|m| m.dev()).unwrap_or(root_dev);
+            if dev != root_dev {
+                Node {
+                    name: format!("{} [other filesystem]", file_name_of(&p)),
+                    path: p,
+                    size: 0,
+                    file_count: 0,
+                    is_dir: true,
+                    children: Vec::new(),
+                    mode: meta.map(|m| m.mode()).unwrap_or(0),
+                }
+            } else {
+                scan_dir(&p, root_dev, progress, counter, cancel)
+            }
+        }
+        _ => {
+            let (sz, mode) = match entry.metadata() {
+                Ok(m) => (m.len(), m.mode()),
+                Err(e) => {
+                    let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
+                    (0, 0)
+                }
+            };
+            Node {
+                name: file_name_of(&p),
+                path: p,
+                size: sz,
+                file_count: 1,
+                is_dir: false,
+                children: Vec::new(),
+                mode,
+            }
+        }
+    };
+    let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if n % 512 == 0 {
+        let _ = progress.send(ScanMsg::Progress(n));
+    }
+    node
+}
+
 fn scan_dir(
     path: &Path,
     root_dev: u64,
     progress: &Sender<ScanMsg>,
     counter: &std::sync::atomic::AtomicU64,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Node {
     use std::os::unix::fs::MetadataExt;
+    use std::sync::atomic::Ordering;
     let name = file_name_of(path);
+    if cancel.load(Ordering::Relaxed) {
+        // A newer scan superseded this one: stop doing work immediately.
+        // The result is discarded by the caller either way.
+        return Node {
+            name,
+            path: path.to_path_buf(),
+            size: 0,
+            file_count: 0,
+            is_dir: true,
+            children: Vec::new(),
+            mode: 0,
+        };
+    }
     let self_mode = std::fs::metadata(path).map(|m| m.mode()).unwrap_or(0);
     let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(path) {
         Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
@@ -79,55 +214,7 @@ fn scan_dir(
 
     let children: Vec<Node> = entries
         .par_iter()
-        .map(|entry| {
-            let p = entry.path();
-            let ft = entry.file_type();
-            let node = match ft {
-                Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
-                    // Don't cross filesystem/mount boundaries (matches `du -x`):
-                    // a drive/mount-point scan should not silently absorb other
-                    // mounted filesystems nested under it.
-                    let meta = entry.metadata().ok();
-                    let dev = meta.as_ref().map(|m| m.dev()).unwrap_or(root_dev);
-                    if dev != root_dev {
-                        Node {
-                            name: format!("{} [other filesystem]", file_name_of(&p)),
-                            path: p,
-                            size: 0,
-                            file_count: 0,
-                            is_dir: true,
-                            children: Vec::new(),
-                            mode: meta.map(|m| m.mode()).unwrap_or(0),
-                        }
-                    } else {
-                        scan_dir(&p, root_dev, progress, counter)
-                    }
-                }
-                _ => {
-                    let (sz, mode) = match entry.metadata() {
-                        Ok(m) => (m.len(), m.mode()),
-                        Err(e) => {
-                            let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
-                            (0, 0)
-                        }
-                    };
-                    Node {
-                        name: file_name_of(&p),
-                        path: p,
-                        size: sz,
-                        file_count: 1,
-                        is_dir: false,
-                        children: Vec::new(),
-                        mode,
-                    }
-                }
-            };
-            let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n % 512 == 0 {
-                let _ = progress.send(ScanMsg::Progress(n));
-            }
-            node
-        })
+        .map(|entry| scan_entry(entry, root_dev, progress, counter, cancel))
         .collect();
 
     let mut children = children;
@@ -135,6 +222,13 @@ fn scan_dir(
     let size = children.iter().map(|c| c.size).sum();
     let file_count = children.iter().map(|c| c.file_count).sum::<u64>() + if children.is_empty() { 0 } else { 0 };
     let file_count = if children.is_empty() { 0 } else { file_count };
+
+    let _ = progress.send(ScanMsg::SliceDone {
+        path: path.to_path_buf(),
+        size,
+        file_count,
+        mode: self_mode,
+    });
 
     Node {
         name,
@@ -149,6 +243,16 @@ fn scan_dir(
 
 enum ScanMsg {
     Progress(u64),
+    /// A directory (any depth) just finished — its final size/count, not the
+    /// subtree itself (cheap: no cloning). The UI grafts it into the growing
+    /// partial tree by path, so the sunburst blossoms slice by slice at
+    /// every level, not just the top one.
+    SliceDone {
+        path: PathBuf,
+        size: u64,
+        file_count: u64,
+        mode: u32,
+    },
     Done(Node, f64),
     Error(String),
     LogError(String),
@@ -257,6 +361,51 @@ struct ContextMenuState {
     screen_pos: Pos2,
 }
 
+/// Every tunable knob for the sunburst, in one place with safe slider
+/// ranges so nothing the user can dial in from the UI can crash the app
+/// (divide-by-zero, degenerate geometry, etc.) — see `Settings::default()`
+/// for the factory values and `ui_settings_window` for the bounds.
+#[derive(Clone, PartialEq)]
+struct Settings {
+    max_render_depth: usize,
+    min_segment_angle_deg: f32,
+    max_children_shown: usize,
+    hub_radius_frac: f32,
+    ring_sat: f32,
+    ring_val_base: f32,
+    ring_val_falloff: f32,
+    ring_val_floor: f32,
+    other_sat: f32,
+    other_val: f32,
+    free_space_gamma: f32,
+    stroke_width: f32,
+    stroke_alpha: u8,
+    tess_px_per_step: f32,
+    max_log_lines: usize,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            max_render_depth: 6,
+            min_segment_angle_deg: 0.75,
+            max_children_shown: 64,
+            hub_radius_frac: 0.22,
+            ring_sat: 0.55,
+            ring_val_base: 0.95,
+            ring_val_falloff: 0.08,
+            ring_val_floor: 0.45,
+            other_sat: 0.38,
+            other_val: 0.80,
+            free_space_gamma: 0.7,
+            stroke_width: 1.0,
+            stroke_alpha: 90,
+            tess_px_per_step: 3.0,
+            max_log_lines: 500,
+        }
+    }
+}
+
 struct DiskScanApp {
     mounts: Vec<(String, PathBuf)>,
     selected_mount: usize,
@@ -276,9 +425,16 @@ struct DiskScanApp {
     free_space: Option<(u64, u64)>,
     log: Vec<String>,
     log_truncated: u64,
+    cancel_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Top-level children streamed in so far by the scan in progress, so the
+    /// sunburst can render (read-only) while scanning instead of just a
+    /// spinner.
+    partial_root: Node,
+    settings: Settings,
+    show_settings: bool,
+    path_input: String,
+    path_input_focused: bool,
 }
-
-const MAX_LOG_LINES: usize = 500;
 
 impl Default for DiskScanApp {
     fn default() -> Self {
@@ -300,6 +456,12 @@ impl Default for DiskScanApp {
             free_space: None,
             log: Vec::new(),
             log_truncated: 0,
+            cancel_flag: None,
+            partial_root: empty_node(),
+            settings: Settings::default(),
+            show_settings: false,
+            path_input: String::new(),
+            path_input_focused: false,
         };
         if let Some((_, path)) = app.mounts.first().cloned() {
             app.start_scan(path);
@@ -317,8 +479,19 @@ impl DiskScanApp {
         self.hidden.clear();
         self.log.clear();
         self.log_truncated = 0;
+        self.partial_root = empty_node();
+        self.partial_root.path = path.clone();
         let is_mount_point = self.mounts.iter().any(|(_, p)| p == &path);
         self.free_space = if is_mount_point { fs_space(&path) } else { None };
+
+        // Tell any still-running previous scan to stop wasting CPU/IO: its
+        // result would just be thrown away once superseded anyway.
+        if let Some(prev) = &self.cancel_flag {
+            prev.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.cancel_flag = Some(cancel.clone());
+
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
         std::thread::spawn(move || {
@@ -338,8 +511,13 @@ impl DiskScanApp {
                     return;
                 }
             };
-            let root = scan_dir(&path, root_dev, &tx, &counter);
-            let _ = tx.send(ScanMsg::Done(root, start.elapsed().as_secs_f64()));
+            // scan_dir streams a SliceDone for every directory as it
+            // finishes (any depth), so the sunburst blossoms slice by slice
+            // throughout the scan — see SliceDone's doc comment.
+            let root = scan_dir(&path, root_dev, &tx, &counter, &cancel);
+            if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = tx.send(ScanMsg::Done(root, start.elapsed().as_secs_f64()));
+            }
         });
     }
 
@@ -356,11 +534,14 @@ impl DiskScanApp {
                         self.scanned_count = n;
                     }
                     Ok(ScanMsg::LogError(msg)) => {
-                        if self.log.len() < MAX_LOG_LINES {
+                        if self.log.len() < self.settings.max_log_lines {
                             self.log.push(msg);
                         } else {
                             self.log_truncated += 1;
                         }
+                    }
+                    Ok(ScanMsg::SliceDone { path, size, file_count, mode }) => {
+                        graft_slice(&mut self.partial_root, &path, size, file_count, mode);
                     }
                     Ok(ScanMsg::Done(node, secs)) => {
                         self.root = Some(Arc::new(node));
@@ -397,10 +578,6 @@ fn get_node<'a>(root: &'a Node, idx_path: &[usize]) -> &'a Node {
     n
 }
 
-const MAX_RENDER_DEPTH: usize = 6;
-const MIN_SEGMENT_ANGLE_DEG: f32 = 0.75;
-const MAX_CHILDREN_SHOWN: usize = 64;
-
 struct Segment {
     idx_path: Vec<usize>,
     start_angle: f32,
@@ -423,9 +600,10 @@ fn layout_sunburst(
     ring: usize,
     hidden: &HashSet<PathBuf>,
     extra_free_bytes: u64,
+    settings: &Settings,
     out: &mut Vec<Segment>,
 ) {
-    if ring >= MAX_RENDER_DEPTH {
+    if ring >= settings.max_render_depth {
         return;
     }
     let visible_children: Vec<(usize, &Node)> = node
@@ -437,7 +615,7 @@ fn layout_sunburst(
     let real_total: u64 = visible_children.iter().map(|(_, c)| c.size).sum();
     let total: u64 = (real_total + extra_free_bytes).max(1);
     let span_abs = (end_angle - start_angle).abs().max(0.0001);
-    let min_frac = (MIN_SEGMENT_ANGLE_DEG.to_radians() / span_abs).max(0.0);
+    let min_frac = (settings.min_segment_angle_deg.to_radians() / span_abs).max(0.0);
 
     // Children are pre-sorted largest-first. Keep showing individual segments
     // only while they'd still be wide enough to render as a real slice; lump
@@ -445,7 +623,7 @@ fn layout_sunburst(
     // producing hundreds of sub-pixel slivers.
     let mut split = 0;
     for (_, c) in &visible_children {
-        if split >= MAX_CHILDREN_SHOWN {
+        if split >= settings.max_children_shown {
             break;
         }
         let frac = c.size as f32 / total as f32;
@@ -482,7 +660,7 @@ fn layout_sunburst(
             mode: Some(child.mode),
         });
         if child.is_dir && !child.children.is_empty() {
-            layout_sunburst(child, cp, a0, a1, ring + 1, hidden, 0, out);
+            layout_sunburst(child, cp, a0, a1, ring + 1, hidden, 0, settings, out);
         }
     }
     if rest_size > 0 {
@@ -559,15 +737,15 @@ fn gamma_lighten(c: Color32, gamma: f32) -> Color32 {
     Color32::from_rgb(f(c.r()), f(c.g()), f(c.b()))
 }
 
-fn segment_color(seg: &Segment, top_branch_hue: f32) -> Color32 {
+fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Settings) -> Color32 {
     if seg.is_other {
         // A pale tint of the *same* branch hue, so the aggregate bucket
         // reads as "more of this folder", not an unrelated color/glitch.
-        return hsv_to_rgb(top_branch_hue, 0.38, 0.80);
+        return hsv_to_rgb(top_branch_hue, settings.other_sat, settings.other_val);
     }
-    let sat = 0.55;
-    let val = (0.95 - (seg.ring as f32) * 0.08).max(0.45);
-    hsv_to_rgb(top_branch_hue, sat, val)
+    let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff)
+        .max(settings.ring_val_floor);
+    hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
 }
 
 /// Arc outline points, traced outer-arc-forward then inner-arc-backward,
@@ -577,12 +755,22 @@ fn arc_dir(t: f32) -> Vec2 {
     Vec2::new(s, -c) // angle 0 = straight up, increasing clockwise
 }
 
-fn draw_arc_mesh(painter: &egui::Painter, center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, color: Color32) {
+fn draw_arc_mesh(
+    painter: &egui::Painter,
+    center: Pos2,
+    r0: f32,
+    r1: f32,
+    a0: f32,
+    a1: f32,
+    color: Color32,
+    settings: &Settings,
+) {
     let span = (a1 - a0).abs();
     // Tessellate based on actual on-screen arc length (at the outer radius)
     // so outer rings stay smooth instead of getting faceted/pixelated.
     let arc_len_px = span * r1.max(1.0);
-    let steps = ((arc_len_px / 3.0).ceil() as usize).clamp(1, 256);
+    let px_per_step = settings.tess_px_per_step.max(0.5);
+    let steps = ((arc_len_px / px_per_step).ceil() as usize).clamp(1, 512);
 
     let mut mesh = egui::epaint::Mesh::default();
     let base = mesh.vertices.len() as u32;
@@ -609,9 +797,12 @@ fn draw_arc_mesh(painter: &egui::Painter, center: Pos2, r0: f32, r1: f32, a0: f3
     }
     painter.add(egui::Shape::mesh(mesh));
 
-    // Crisp, consistent 1px border regardless of theme/background, instead
+    // Crisp, consistent border regardless of theme/background, instead
     // of relying on a radial gap that only sometimes shows through.
-    let stroke = egui::Stroke::new(1.0, Color32::from_black_alpha(90));
+    let stroke = egui::Stroke::new(
+        settings.stroke_width,
+        Color32::from_black_alpha(settings.stroke_alpha),
+    );
     let mut outline = Vec::with_capacity(2 * steps + 2);
     for i in 0..=steps {
         let t = a0 + (a1 - a0) * (i as f32 / steps as f32);
@@ -635,18 +826,128 @@ impl eframe::App for DiskScanApp {
         egui::Panel::top("top").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("diskscan");
+                if ui.button("⚙").on_hover_text("Chart settings").clicked() {
+                    self.show_settings = !self.show_settings;
+                }
                 ui.separator();
-                let breadcrumb = if let Some(h) = &self.hovered {
-                    h.path.display().to_string()
-                } else if let Some(root) = &self.root {
-                    let n = self.current_view_node(root);
-                    n.path.display().to_string()
-                } else {
-                    String::new()
-                };
-                ui.monospace(breadcrumb);
+
+                // Keep the path bar synced to navigation (mount switches,
+                // zooming into the chart) as long as the user isn't
+                // currently typing in it — otherwise we'd clobber their
+                // in-progress edit every frame.
+                if !self.path_input_focused {
+                    let current = if let Some(root) = &self.root {
+                        self.current_view_node(root).path.display().to_string()
+                    } else {
+                        String::new()
+                    };
+                    if self.path_input != current {
+                        self.path_input = current;
+                    }
+                }
+
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.path_input)
+                        .desired_width(ui.available_width().max(200.0))
+                        .hint_text("Type a path and press Enter — e.g. a USB drive or network mount"),
+                );
+                self.path_input_focused = resp.has_focus();
+                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    let p = PathBuf::from(self.path_input.trim());
+                    if p.is_dir() {
+                        self.selected_mount = usize::MAX; // no radio matches a custom path
+                        self.start_scan(p);
+                    } else {
+                        self.status = format!("Not a directory: {}", p.display());
+                    }
+                }
             });
         });
+
+        {
+            let mut show = self.show_settings;
+            egui::Window::new("Chart settings")
+                .open(&mut show)
+                .resizable(false)
+                .collapsible(false)
+                .show(&ctx, |ui| {
+                    let s = &mut self.settings;
+
+                    ui.label("Depth & grouping");
+                    ui.add(
+                        egui::Slider::new(&mut s.max_render_depth, 1..=12)
+                            .text("Depth levels shown"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.min_segment_angle_deg, 0.1..=5.0)
+                            .text("Min slice angle (°)"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.max_children_shown, 4..=256)
+                            .text("Max slices per ring"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.hub_radius_frac, 0.05..=0.5)
+                            .text("Center hub size"),
+                    );
+
+                    ui.separator();
+                    ui.label("Colors");
+                    ui.add(egui::Slider::new(&mut s.ring_sat, 0.0..=1.0).text("Ring saturation"));
+                    ui.add(
+                        egui::Slider::new(&mut s.ring_val_base, 0.3..=1.0)
+                            .text("Ring brightness (outer)"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.ring_val_falloff, 0.0..=0.3)
+                            .text("Brightness falloff per ring"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.ring_val_floor, 0.1..=0.9)
+                            .text("Brightness floor"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.other_sat, 0.0..=1.0)
+                            .text("\"Other\" bucket saturation"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.other_val, 0.3..=1.0)
+                            .text("\"Other\" bucket brightness"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.free_space_gamma, 0.2..=1.5)
+                            .text("Free-space gamma (<1 lightens)"),
+                    );
+
+                    ui.separator();
+                    ui.label("Line rendering");
+                    ui.add(
+                        egui::Slider::new(&mut s.stroke_width, 0.0..=3.0)
+                            .text("Border thickness"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.stroke_alpha, 0..=255)
+                            .text("Border darkness"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut s.tess_px_per_step, 1.0..=10.0)
+                            .text("Curve smoothness (px/step, lower = smoother)"),
+                    );
+
+                    ui.separator();
+                    ui.label("Log");
+                    ui.add(
+                        egui::Slider::new(&mut s.max_log_lines, 50..=5000)
+                            .text("Max stored issue lines"),
+                    );
+
+                    ui.separator();
+                    if ui.button("Defaults").clicked() {
+                        *s = Settings::default();
+                    }
+                });
+            self.show_settings = show;
+        }
 
         egui::Panel::left("left").min_size(220.0).show(ui, |ui| {
             ui.label("Drives / mount points:");
@@ -740,13 +1041,57 @@ impl eframe::App for DiskScanApp {
 
         egui::CentralPanel::default().show(ui, |ui| {
             if self.scanning {
-                ui.centered_and_justified(|ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.label("Scanning...");
-                        ui.spinner();
-                        ui.label(format!("{} items scanned", format_count(self.scanned_count)));
-                    });
-                });
+                // Read-only live preview: draw whatever top-level children
+                // have streamed in so far, so the sunburst blossoms one
+                // petal at a time instead of staying blank until the whole
+                // drive finishes. No hover/click/context-menu here — the
+                // data is still changing underneath every frame.
+                let avail = ui.available_size();
+                let side = avail.x.min(avail.y);
+                let (response, painter) =
+                    ui.allocate_painter(Vec2::new(avail.x, avail.y), egui::Sense::hover());
+                let center = response.rect.center();
+                let max_radius = side / 2.0 - 10.0;
+                let hub_radius = max_radius * self.settings.hub_radius_frac;
+                let ring_thickness = (max_radius - hub_radius) / self.settings.max_render_depth as f32;
+
+                let bg = ui.visuals().panel_fill;
+                painter.circle_filled(center, hub_radius, bg);
+                painter.text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    human_size(self.partial_root.size),
+                    egui::FontId::proportional(18.0),
+                    Color32::WHITE,
+                );
+
+                let mut segs = Vec::new();
+                layout_sunburst(
+                    &self.partial_root,
+                    vec![],
+                    0.0,
+                    std::f32::consts::TAU,
+                    0,
+                    &self.hidden,
+                    0,
+                    &self.settings,
+                    &mut segs,
+                );
+                for seg in &segs {
+                    let r0 = hub_radius + ring_thickness * seg.ring as f32;
+                    let r1 = r0 + ring_thickness;
+                    let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
+                    let color = segment_color(seg, top_hue, &self.settings);
+                    draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
+                }
+
+                ui.put(
+                    egui::Rect::from_min_size(response.rect.left_top() + Vec2::new(8.0, 8.0), Vec2::new(260.0, 40.0)),
+                    egui::Label::new(format!(
+                        "Scanning… {} items",
+                        format_count(self.scanned_count)
+                    )),
+                );
                 return;
             }
 
@@ -761,8 +1106,8 @@ impl eframe::App for DiskScanApp {
                 ui.allocate_painter(Vec2::new(avail.x, avail.y), egui::Sense::click());
             let center = response.rect.center();
             let max_radius = side / 2.0 - 10.0;
-            let hub_radius = max_radius * 0.22;
-            let ring_thickness = (max_radius - hub_radius) / MAX_RENDER_DEPTH as f32;
+            let hub_radius = max_radius * self.settings.hub_radius_frac;
+            let ring_thickness = (max_radius - hub_radius) / self.settings.max_render_depth as f32;
 
             let view_node = get_node(&root, self.view_stack.last().unwrap());
 
@@ -793,7 +1138,7 @@ impl eframe::App for DiskScanApp {
             }
 
             let bg = ui.visuals().panel_fill;
-            let free_color = gamma_lighten(bg, 0.7);
+            let free_color = gamma_lighten(bg, self.settings.free_space_gamma);
 
             // hub (center circle) - click navigates up
             painter.circle_filled(center, hub_radius, bg);
@@ -811,7 +1156,17 @@ impl eframe::App for DiskScanApp {
                 0
             };
             let mut segs = Vec::new();
-            layout_sunburst(view_node, vec![], 0.0, std::f32::consts::TAU, 0, &self.hidden, root_free_bytes, &mut segs);
+            layout_sunburst(
+                view_node,
+                vec![],
+                0.0,
+                std::f32::consts::TAU,
+                0,
+                &self.hidden,
+                root_free_bytes,
+                &self.settings,
+                &mut segs,
+            );
 
             let pointer = ctx.input(|i| i.pointer.hover_pos());
             let mut new_hover: Option<HoverInfo> = None;
@@ -821,8 +1176,8 @@ impl eframe::App for DiskScanApp {
                 let r0 = hub_radius + ring_thickness * seg.ring as f32;
                 let r1 = r0 + ring_thickness;
                 let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
-                let color = if seg.is_free { free_color } else { segment_color(seg, top_hue) };
-                draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color);
+                let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
+                draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
 
                 if let Some(p) = pointer {
                     let v = p - center;
