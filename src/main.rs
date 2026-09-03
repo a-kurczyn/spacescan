@@ -1,4 +1,4 @@
-// diskscan: a portable single-binary disk usage sunburst visualizer.
+// SpaceMap: a portable single-binary disk usage sunburst visualizer.
 // Clone of the "Scanner" Windows utility (sunburst chart of drive/folder usage).
 
 use eframe::egui;
@@ -21,6 +21,11 @@ struct Node {
     is_dir: bool,
     children: Vec<Node>,
     mode: u32,
+    /// All free — same `stat` struct already fetched for size/mode.
+    mtime: i64,
+    ctime: i64,
+    uid: u32,
+    gid: u32,
 }
 
 /// "755 (rwxr-xr-x)" style permission summary.
@@ -39,7 +44,45 @@ fn format_perms(mode: u32) -> String {
         bit(mode, 0o040, 0o020, 0o010),
         bit(mode, 0o004, 0o002, 0o001),
     );
-    format!("Perms: {:o} ({})", mode & 0o777, sym)
+    format!("{:o} ({})", mode & 0o777, sym)
+}
+
+/// Unix epoch seconds -> local "YYYY-MM-DD HH:MM" — free from the same
+/// `stat` struct already fetched, no extra syscall.
+fn format_epoch(secs: i64) -> String {
+    use chrono::TimeZone;
+    match chrono::Local.timestamp_opt(secs, 0) {
+        chrono::LocalResult::Single(dt) => dt.format("%Y-%m-%d %H:%M").to_string(),
+        _ => "-".to_string(),
+    }
+}
+
+/// uid/gid -> username/groupname, cached (uzers hits the system's NSS
+/// lookup each call — cheap, but no reason to repeat it every frame while
+/// the pointer sits still over the same file).
+fn format_owner(
+    uid: u32,
+    gid: u32,
+    user_cache: &mut std::collections::HashMap<u32, String>,
+    group_cache: &mut std::collections::HashMap<u32, String>,
+) -> String {
+    let user = user_cache
+        .entry(uid)
+        .or_insert_with(|| {
+            uzers::get_user_by_uid(uid)
+                .map(|u| u.name().to_string_lossy().into_owned())
+                .unwrap_or_else(|| uid.to_string())
+        })
+        .clone();
+    let group = group_cache
+        .entry(gid)
+        .or_insert_with(|| {
+            uzers::get_group_by_gid(gid)
+                .map(|g| g.name().to_string_lossy().into_owned())
+                .unwrap_or_else(|| gid.to_string())
+        })
+        .clone();
+    format!("{user}:{group}")
 }
 
 fn empty_node() -> Node {
@@ -51,6 +94,10 @@ fn empty_node() -> Node {
         is_dir: true,
         children: Vec::new(),
         mode: 0,
+        mtime: 0,
+        ctime: 0,
+        uid: 0,
+        gid: 0,
     }
 }
 
@@ -65,11 +112,26 @@ fn empty_node() -> Node {
 /// its aggregate recomputed as "sum of what's known so far", which is
 /// naturally just an interim lower bound until that ancestor's own
 /// SliceDone arrives and overwrites it with the real value the same way.
-fn graft_slice(node: &mut Node, target_path: &Path, size: u64, file_count: u64, mode: u32) {
+#[allow(clippy::too_many_arguments)]
+fn graft_slice(
+    node: &mut Node,
+    target_path: &Path,
+    size: u64,
+    file_count: u64,
+    mode: u32,
+    mtime: i64,
+    ctime: i64,
+    uid: u32,
+    gid: u32,
+) {
     if node.path == target_path {
         node.size = size;
         node.file_count = file_count;
         node.mode = mode;
+        node.mtime = mtime;
+        node.ctime = ctime;
+        node.uid = uid;
+        node.gid = gid;
         return;
     }
     let idx = match node.children.iter().position(|c| target_path.starts_with(&c.path)) {
@@ -91,14 +153,53 @@ fn graft_slice(node: &mut Node, target_path: &Path, size: u64, file_count: u64, 
                 is_dir: true,
                 children: Vec::new(),
                 mode: 0,
+                mtime: 0,
+                ctime: 0,
+                uid: 0,
+                gid: 0,
             });
             node.children.len() - 1
         }
     };
-    graft_slice(&mut node.children[idx], target_path, size, file_count, mode);
+    graft_slice(&mut node.children[idx], target_path, size, file_count, mode, mtime, ctime, uid, gid);
     node.size = node.children.iter().map(|c| c.size).sum();
     node.file_count = node.children.iter().map(|c| c.file_count).sum();
     node.children.sort_by(|a, b| b.size.cmp(&a.size));
+}
+
+const MAX_EXTENSIONS_SHOWN: usize = 40;
+
+fn collect_extensions(node: &Node, map: &mut std::collections::HashMap<String, (u64, u64)>) {
+    if node.is_dir {
+        for c in &node.children {
+            collect_extensions(c, map);
+        }
+    } else {
+        let ext = Path::new(&node.name)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .filter(|e| !e.is_empty())
+            .unwrap_or_else(|| "(no extension)".to_string());
+        let entry = map.entry(ext).or_insert((0, 0));
+        entry.0 += node.size;
+        entry.1 += node.file_count.max(1);
+    }
+}
+
+/// (extension, total size, file count), largest-first, with a long tail of
+/// rare extensions folded into a single "(other)" row.
+fn extension_breakdown(node: &Node) -> Vec<(String, u64, u64)> {
+    let mut map = std::collections::HashMap::new();
+    collect_extensions(node, &mut map);
+    let mut v: Vec<(String, u64, u64)> = map.into_iter().map(|(k, (s, c))| (k, s, c)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1));
+    if v.len() > MAX_EXTENSIONS_SHOWN {
+        let rest = v.split_off(MAX_EXTENSIONS_SHOWN);
+        let size: u64 = rest.iter().map(|(_, s, _)| s).sum();
+        let count: u64 = rest.iter().map(|(_, _, c)| c).sum();
+        v.push((format!("({} other extensions)", rest.len()), size, count));
+    }
+    v
 }
 
 fn file_name_of(p: &Path) -> String {
@@ -129,6 +230,7 @@ fn scan_entry(
     progress: &Sender<ScanMsg>,
     counter: &std::sync::atomic::AtomicU64,
     cancel: &Arc<std::sync::atomic::AtomicBool>,
+    progress_interval: u64,
 ) -> Node {
     use std::os::unix::fs::MetadataExt;
     let p = entry.path();
@@ -148,18 +250,22 @@ fn scan_entry(
                     file_count: 0,
                     is_dir: true,
                     children: Vec::new(),
-                    mode: meta.map(|m| m.mode()).unwrap_or(0),
+                    mode: meta.as_ref().map(|m| m.mode()).unwrap_or(0),
+                    mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(0),
+                    ctime: meta.as_ref().map(|m| m.ctime()).unwrap_or(0),
+                    uid: meta.as_ref().map(|m| m.uid()).unwrap_or(0),
+                    gid: meta.as_ref().map(|m| m.gid()).unwrap_or(0),
                 }
             } else {
-                scan_dir(&p, root_dev, progress, counter, cancel)
+                scan_dir(&p, root_dev, progress, counter, cancel, progress_interval)
             }
         }
         _ => {
-            let (sz, mode) = match entry.metadata() {
-                Ok(m) => (m.len(), m.mode()),
+            let (sz, mode, mtime, ctime, uid, gid) = match entry.metadata() {
+                Ok(m) => (m.len(), m.mode(), m.mtime(), m.ctime(), m.uid(), m.gid()),
                 Err(e) => {
                     let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
-                    (0, 0)
+                    (0, 0, 0, 0, 0, 0)
                 }
             };
             Node {
@@ -170,11 +276,15 @@ fn scan_entry(
                 is_dir: false,
                 children: Vec::new(),
                 mode,
+                mtime,
+                ctime,
+                uid,
+                gid,
             }
         }
     };
     let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if n % 512 == 0 {
+    if n % progress_interval.max(1) == 0 {
         let _ = progress.send(ScanMsg::Progress(n));
     }
     node
@@ -186,6 +296,7 @@ fn scan_dir(
     progress: &Sender<ScanMsg>,
     counter: &std::sync::atomic::AtomicU64,
     cancel: &Arc<std::sync::atomic::AtomicBool>,
+    progress_interval: u64,
 ) -> Node {
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
@@ -201,9 +312,18 @@ fn scan_dir(
             is_dir: true,
             children: Vec::new(),
             mode: 0,
+            mtime: 0,
+            ctime: 0,
+            uid: 0,
+            gid: 0,
         };
     }
-    let self_mode = std::fs::metadata(path).map(|m| m.mode()).unwrap_or(0);
+    let self_meta = std::fs::metadata(path).ok();
+    let self_mode = self_meta.as_ref().map(|m| m.mode()).unwrap_or(0);
+    let self_mtime = self_meta.as_ref().map(|m| m.mtime()).unwrap_or(0);
+    let self_ctime = self_meta.as_ref().map(|m| m.ctime()).unwrap_or(0);
+    let self_uid = self_meta.as_ref().map(|m| m.uid()).unwrap_or(0);
+    let self_gid = self_meta.as_ref().map(|m| m.gid()).unwrap_or(0);
     let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(path) {
         Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
         Err(e) => {
@@ -214,7 +334,7 @@ fn scan_dir(
 
     let children: Vec<Node> = entries
         .par_iter()
-        .map(|entry| scan_entry(entry, root_dev, progress, counter, cancel))
+        .map(|entry| scan_entry(entry, root_dev, progress, counter, cancel, progress_interval))
         .collect();
 
     let mut children = children;
@@ -228,6 +348,10 @@ fn scan_dir(
         size,
         file_count,
         mode: self_mode,
+        mtime: self_mtime,
+        ctime: self_ctime,
+        uid: self_uid,
+        gid: self_gid,
     });
 
     Node {
@@ -238,6 +362,10 @@ fn scan_dir(
         is_dir: true,
         children,
         mode: self_mode,
+        mtime: self_mtime,
+        ctime: self_ctime,
+        uid: self_uid,
+        gid: self_gid,
     }
 }
 
@@ -252,6 +380,10 @@ enum ScanMsg {
         size: u64,
         file_count: u64,
         mode: u32,
+        mtime: i64,
+        ctime: i64,
+        uid: u32,
+        gid: u32,
     },
     Done(Node, f64),
     Error(String),
@@ -304,6 +436,23 @@ fn fs_space(path: &Path) -> Option<(u64, u64)> {
     }
 }
 
+/// True if `path` is itself a filesystem root (its device ID differs from
+/// its parent's) — i.e. a genuine mount point. This is independent of
+/// `list_mounts()`'s auto-detected list, so it correctly recognizes a
+/// network share, a just-plugged-in drive not yet refreshed, or any path
+/// typed directly into the path bar, rather than requiring an exact match
+/// against a possibly-stale list.
+fn is_real_mount_point(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Some(parent) = path.parent() else {
+        return true; // "/" has no parent: trivially a mount point
+    };
+    let (Ok(here), Ok(up)) = (std::fs::metadata(path), std::fs::metadata(parent)) else {
+        return false;
+    };
+    here.dev() != up.dev()
+}
+
 // ---------------- Mount listing ----------------
 
 fn list_mounts() -> Vec<(String, PathBuf)> {
@@ -312,7 +461,10 @@ fn list_mounts() -> Vec<(String, PathBuf)> {
         "proc", "sysfs", "devtmpfs", "tmpfs", "devpts", "cgroup", "cgroup2", "pstore", "bpf",
         "autofs", "mqueue", "hugetlbfs", "debugfs", "tracefs", "securityfs", "configfs",
         "fusectl", "binfmt_misc", "rpc_pipefs", "nsfs", "overlay", "efivarfs",
-        "selinuxfs", "fuse.portal", "fuse.gvfsd-fuse", "fuse.gocryptfs", "ramfs",
+        "selinuxfs", "fuse.portal", "fuse.gocryptfs", "ramfs",
+        // Note: fuse.gvfsd-fuse (GVFS network shares — SMB/SFTP/etc.) is
+        // deliberately NOT skipped: those are real, browsable filesystems
+        // users legitimately want to scan.
     ];
     if let Ok(content) = std::fs::read_to_string("/proc/mounts") {
         for line in content.lines() {
@@ -353,12 +505,53 @@ struct HoverInfo {
     size: u64,
     file_count: u64,
     is_dir: bool,
+    is_free: bool,
+    is_other: bool,
     mode: Option<u32>,
+    mtime: Option<i64>,
+    ctime: Option<i64>,
+    uid: Option<u32>,
+    gid: Option<u32>,
 }
 
 struct ContextMenuState {
     node_path: Vec<usize>,
     screen_pos: Pos2,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SortColumn {
+    Size,
+    Files,
+    Name,
+}
+
+#[derive(Clone, Copy)]
+struct SortState {
+    column: SortColumn,
+    ascending: bool,
+}
+
+/// Draws one clickable, sortable column header. Clicking the currently
+/// active column flips its direction; clicking a different column switches
+/// to it with a sensible default direction (descending for numeric columns,
+/// so "biggest first" without an extra click — ascending for the name
+/// column, so alphabetical order reads naturally).
+fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn, state: &mut SortState) {
+    let is_active = state.column == column;
+    let arrow = if is_active {
+        if state.ascending { " ▲" } else { " ▼" }
+    } else {
+        ""
+    };
+    if ui.button(egui::RichText::new(format!("{label}{arrow}")).strong()).clicked() {
+        if is_active {
+            state.ascending = !state.ascending;
+        } else {
+            state.column = column;
+            state.ascending = column == SortColumn::Name;
+        }
+    }
 }
 
 /// Every tunable knob for the sunburst, in one place with safe slider
@@ -382,6 +575,12 @@ struct Settings {
     stroke_alpha: u8,
     tess_px_per_step: f32,
     max_log_lines: usize,
+    /// Exponent, not the value itself: the "N items scanned" counter is
+    /// pushed to the UI every `1 << progress_interval_pow2` filesystem
+    /// entries. Stored as a power-of-two exponent (0..=16) so the slider
+    /// can only ever select a power of two — never an arbitrary interval
+    /// that could over- or under-report.
+    progress_interval_pow2: u32,
 }
 
 impl Default for Settings {
@@ -402,6 +601,7 @@ impl Default for Settings {
             stroke_alpha: 90,
             tess_px_per_step: 3.0,
             max_log_lines: 500,
+            progress_interval_pow2: 9, // 1 << 9 == 512, the original hardcoded value
         }
     }
 }
@@ -434,14 +634,33 @@ struct DiskScanApp {
     show_settings: bool,
     path_input: String,
     path_input_focused: bool,
+    /// Per-extension size/count breakdown for the summary view, cached and
+    /// only recomputed when the viewed folder changes (it's an O(subtree)
+    /// walk, too costly to redo every frame).
+    ext_breakdown: Vec<(String, u64, u64)>,
+    ext_breakdown_for: Option<PathBuf>,
+    contents_sort: SortState,
+    ext_sort: SortState,
+    /// On-demand MIME sniffing for the single file currently hovered in the
+    /// tooltip — never done during the bulk scan (reading file content for
+    /// every file would meaningfully slow it down), only for one file at a
+    /// time on hover, and off the UI thread so a slow/spun-down drive can't
+    /// cause a hitch. `None` cached = looked up, but undetermined.
+    mime_cache: std::collections::HashMap<PathBuf, Option<String>>,
+    mime_inflight: HashSet<PathBuf>,
+    mime_tx: Sender<(PathBuf, Option<String>)>,
+    mime_rx: Receiver<(PathBuf, Option<String>)>,
+    user_cache: std::collections::HashMap<u32, String>,
+    group_cache: std::collections::HashMap<u32, String>,
 }
 
 impl Default for DiskScanApp {
     fn default() -> Self {
         let mounts = list_mounts();
-        let mut app = Self {
+        let (mime_tx, mime_rx) = channel();
+        let app = Self {
             mounts,
-            selected_mount: 0,
+            selected_mount: usize::MAX, // nothing scanned yet, so nothing should read as "selected"
             root: None,
             view_stack: vec![vec![]],
             scanning: false,
@@ -462,10 +681,19 @@ impl Default for DiskScanApp {
             show_settings: false,
             path_input: String::new(),
             path_input_focused: false,
+            ext_breakdown: Vec::new(),
+            ext_breakdown_for: None,
+            // Both tables start sorted by size, descending — matches the
+            // order the sunburst itself already uses (largest slice first).
+            contents_sort: SortState { column: SortColumn::Size, ascending: false },
+            ext_sort: SortState { column: SortColumn::Size, ascending: false },
+            mime_cache: std::collections::HashMap::new(),
+            mime_inflight: HashSet::new(),
+            mime_tx,
+            mime_rx,
+            user_cache: std::collections::HashMap::new(),
+            group_cache: std::collections::HashMap::new(),
         };
-        if let Some((_, path)) = app.mounts.first().cloned() {
-            app.start_scan(path);
-        }
         app
     }
 }
@@ -481,8 +709,8 @@ impl DiskScanApp {
         self.log_truncated = 0;
         self.partial_root = empty_node();
         self.partial_root.path = path.clone();
-        let is_mount_point = self.mounts.iter().any(|(_, p)| p == &path);
-        self.free_space = if is_mount_point { fs_space(&path) } else { None };
+        self.partial_root.name = file_name_of(&path);
+        self.free_space = if is_real_mount_point(&path) { fs_space(&path) } else { None };
 
         // Tell any still-running previous scan to stop wasting CPU/IO: its
         // result would just be thrown away once superseded anyway.
@@ -491,6 +719,8 @@ impl DiskScanApp {
         }
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.cancel_flag = Some(cancel.clone());
+
+        let progress_interval: u64 = 1u64 << self.settings.progress_interval_pow2;
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
@@ -514,7 +744,7 @@ impl DiskScanApp {
             // scan_dir streams a SliceDone for every directory as it
             // finishes (any depth), so the sunburst blossoms slice by slice
             // throughout the scan — see SliceDone's doc comment.
-            let root = scan_dir(&path, root_dev, &tx, &counter, &cancel);
+            let root = scan_dir(&path, root_dev, &tx, &counter, &cancel, progress_interval);
             if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = tx.send(ScanMsg::Done(root, start.elapsed().as_secs_f64()));
             }
@@ -526,9 +756,108 @@ impl DiskScanApp {
         get_node(root, idx_path)
     }
 
+    /// User-requested abort (Esc while scanning). Falls back to whatever
+    /// was scanned previously, if anything — same cooperative cancellation
+    /// used when a new scan supersedes an old one.
+    fn abort_scan(&mut self) {
+        if let Some(cancel) = &self.cancel_flag {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.scanning = false;
+        self.scan_rx = None;
+        self.status = "Scan aborted".to_string();
+    }
+
+    /// Drains completed on-demand MIME lookups into the cache.
+    fn poll_mime(&mut self) {
+        while let Ok((path, result)) = self.mime_rx.try_recv() {
+            self.mime_inflight.remove(&path);
+            self.mime_cache.insert(path, result);
+        }
+    }
+
+    /// Kicks off a background MIME sniff for `path` if it hasn't already
+    /// been resolved (or isn't already in flight) — never on the UI thread,
+    /// so a slow/spun-down drive can't cause a hitch. Only meant to be
+    /// called for a single hovered *file*, never during the bulk scan.
+    fn ensure_mime_lookup(&mut self, path: &Path) {
+        if self.mime_cache.contains_key(path) || self.mime_inflight.contains(path) {
+            return;
+        }
+        if self.mime_cache.len() > 500 {
+            self.mime_cache.clear(); // simple bound for a long-running session
+        }
+        self.mime_inflight.insert(path.to_path_buf());
+        let tx = self.mime_tx.clone();
+        let p = path.to_path_buf();
+        std::thread::spawn(move || {
+            let result = infer::get_from_path(&p).ok().flatten().map(|t| t.mime_type().to_string());
+            let _ = tx.send((p, result));
+        });
+    }
+
+    /// Pushes a message to the bottom "Issues" log — the one consistent
+    /// place scan/input problems are reported, respecting the same cap as
+    /// scan-time LogError messages.
+    fn log_issue(&mut self, msg: String) {
+        if self.log.len() < self.settings.max_log_lines {
+            self.log.push(msg);
+        } else {
+            self.log_truncated += 1;
+        }
+    }
+
+    /// Jumps sideways to the next sibling directory in alphabetical order
+    /// (wrapping past the last back to the first). A no-op at the drive
+    /// root, where "sibling" isn't a meaningful concept.
+    fn goto_next_sibling(&mut self, root: &Node) {
+        let cur_path = self.view_stack.last().unwrap().clone();
+        let Some((&cur_idx, parent_path)) = cur_path.split_last() else {
+            return; // at the drive root: no parent, no siblings
+        };
+        let parent = get_node(root, parent_path);
+
+        // Chart order, not alphabetical: children are already stored
+        // largest-first, which is the same order the sunburst draws them
+        // in, so "next" here means "next clockwise slice", matching what
+        // the user actually sees.
+        let siblings: Vec<usize> = parent
+            .children
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_dir && !self.hidden.contains(&c.path))
+            .map(|(i, _)| i)
+            .collect();
+        if siblings.is_empty() {
+            return;
+        }
+
+        let next_idx = match siblings.iter().position(|&i| i == cur_idx) {
+            Some(p) => siblings[(p + 1) % siblings.len()],
+            None => siblings[0],
+        };
+        let mut new_path = parent_path.to_vec();
+        new_path.push(next_idx);
+        *self.view_stack.last_mut().unwrap() = new_path;
+    }
+
     fn poll_scan(&mut self) {
+        // Cap how much work one frame can do. A directory tree with a huge
+        // number of directories (not just files) can produce a very large
+        // burst of SliceDone messages; without a cap, draining "everything
+        // currently queued" in one frame could take long enough that the
+        // window stops responding to the compositor's ping and gets flagged
+        // as hung. Any leftover messages just get processed on the next
+        // frame(s) instead — request_repaint() during scanning means those
+        // follow immediately.
+        const MAX_MESSAGES_PER_FRAME: u32 = 4000;
+        let mut processed = 0u32;
         if let Some(rx) = &self.scan_rx {
             loop {
+                if processed >= MAX_MESSAGES_PER_FRAME {
+                    break;
+                }
+                processed += 1;
                 match rx.try_recv() {
                     Ok(ScanMsg::Progress(n)) => {
                         self.scanned_count = n;
@@ -540,8 +869,8 @@ impl DiskScanApp {
                             self.log_truncated += 1;
                         }
                     }
-                    Ok(ScanMsg::SliceDone { path, size, file_count, mode }) => {
-                        graft_slice(&mut self.partial_root, &path, size, file_count, mode);
+                    Ok(ScanMsg::SliceDone { path, size, file_count, mode, mtime, ctime, uid, gid }) => {
+                        graft_slice(&mut self.partial_root, &path, size, file_count, mode, mtime, ctime, uid, gid);
                     }
                     Ok(ScanMsg::Done(node, secs)) => {
                         self.root = Some(Arc::new(node));
@@ -600,6 +929,7 @@ fn layout_sunburst(
     ring: usize,
     hidden: &HashSet<PathBuf>,
     extra_free_bytes: u64,
+    total_capacity: u64,
     settings: &Settings,
     out: &mut Vec<Segment>,
 ) {
@@ -613,8 +943,24 @@ fn layout_sunburst(
         .filter(|(_, c)| !hidden.contains(&c.path))
         .collect();
     let real_total: u64 = visible_children.iter().map(|(_, c)| c.size).sum();
-    let total: u64 = (real_total + extra_free_bytes).max(1);
-    let span_abs = (end_angle - start_angle).abs().max(0.0001);
+
+    // Free space gets a *fixed* share of the span, from known filesystem
+    // capacity — it doesn't grow or shrink as the scan progresses. Whatever
+    // has been discovered so far always divides up the *entire* remaining
+    // "content" span among itself (proportional to each other, not to some
+    // eventual/unknown final total): otherwise there'd be an unrendered gap
+    // between "what's mapped" and "known free space" while a scan is still
+    // in progress, since discovered-so-far starts small and grows.
+    let full_span = end_angle - start_angle;
+    let content_end_angle = if extra_free_bytes > 0 && total_capacity > 0 {
+        let free_frac = extra_free_bytes as f32 / total_capacity as f32;
+        start_angle + full_span * (1.0 - free_frac)
+    } else {
+        end_angle
+    };
+
+    let total: u64 = real_total.max(1);
+    let span_abs = (content_end_angle - start_angle).abs().max(0.0001);
     let min_frac = (settings.min_segment_angle_deg.to_radians() / span_abs).max(0.0);
 
     // Children are pre-sorted largest-first. Keep showing individual segments
@@ -636,7 +982,7 @@ fn layout_sunburst(
     let rest: Vec<(usize, &Node)> = visible_children.iter().skip(split).cloned().collect();
     let rest_size: u64 = rest.iter().map(|(_, c)| c.size).sum();
 
-    let span = end_angle - start_angle;
+    let span = content_end_angle - start_angle;
     let mut cursor = start_angle;
 
     for (i, child) in &shown {
@@ -660,14 +1006,13 @@ fn layout_sunburst(
             mode: Some(child.mode),
         });
         if child.is_dir && !child.children.is_empty() {
-            layout_sunburst(child, cp, a0, a1, ring + 1, hidden, 0, settings, out);
+            layout_sunburst(child, cp, a0, a1, ring + 1, hidden, 0, 0, settings, out);
         }
     }
     if rest_size > 0 {
         let frac = rest_size as f32 / total as f32;
         let a0 = cursor;
         let a1 = cursor + span * frac;
-        cursor = a1;
         out.push(Segment {
             idx_path: idx_path.clone(),
             start_angle: a0,
@@ -683,10 +1028,11 @@ fn layout_sunburst(
         });
     }
     if extra_free_bytes > 0 {
-        // Consume exactly the remaining span so there's no float-rounding gap.
+        // Use the precomputed fixed boundary, not `cursor`, so there's no
+        // float-drift gap between mapped content and the free-space slice.
         out.push(Segment {
             idx_path: idx_path.clone(),
-            start_angle: cursor,
+            start_angle: content_end_angle,
             end_angle,
             ring,
             name: "Free space".to_string(),
@@ -746,6 +1092,95 @@ fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Settings) -> Col
     let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff)
         .max(settings.ring_val_floor);
     hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
+}
+
+/// Draws the hub's two-line label — folder name, then size occupied —
+/// wrapped to fit inside the hub circle so a long folder name folds onto
+/// multiple lines instead of spilling out past the circle's edge.
+/// Flat, single-color vector icons drawn with the painter — deliberately
+/// not Unicode/emoji glyphs (📄/📁), since those render in full color via
+/// the system's emoji font on most Linux setups, clashing with the app's
+/// flat, theme-matched look. `color` should track the current theme's text
+/// color so the icon stays flat and readable in both light and dark modes.
+fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.3, color);
+    let fold = rect.width() * 0.35;
+    let body = vec![
+        rect.left_top(),
+        Pos2::new(rect.right() - fold, rect.top()),
+        Pos2::new(rect.right(), rect.top() + fold),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ];
+    painter.add(egui::Shape::closed_line(body, stroke));
+    // Folded corner.
+    painter.line_segment(
+        [Pos2::new(rect.right() - fold, rect.top()), Pos2::new(rect.right() - fold, rect.top() + fold)],
+        stroke,
+    );
+    painter.line_segment(
+        [Pos2::new(rect.right() - fold, rect.top() + fold), Pos2::new(rect.right(), rect.top() + fold)],
+        stroke,
+    );
+    // A couple of text lines, to read unambiguously as a document.
+    let lx0 = rect.left() + rect.width() * 0.2;
+    let lx1 = rect.right() - rect.width() * 0.2;
+    for frac in [0.55, 0.72] {
+        let y = rect.top() + rect.height() * frac;
+        painter.line_segment([Pos2::new(lx0, y), Pos2::new(lx1, y)], stroke);
+    }
+}
+
+fn draw_folder_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.3, color);
+    let tab_h = rect.height() * 0.22;
+    let tab_w = rect.width() * 0.45;
+    let body_top = rect.top() + tab_h;
+    let tab = vec![
+        rect.left_top(),
+        Pos2::new(rect.left() + tab_w, rect.top()),
+        Pos2::new(rect.left() + tab_w + tab_h * 0.6, body_top),
+        Pos2::new(rect.left(), body_top),
+    ];
+    painter.add(egui::Shape::closed_line(tab, stroke));
+    let body = egui::Rect::from_min_max(Pos2::new(rect.left(), body_top), rect.right_bottom());
+    painter.rect_stroke(body, egui::CornerRadius::from(1u8), stroke, egui::StrokeKind::Outside);
+}
+
+fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f32, name: &str, size: u64) {
+    // Width of a rectangle comfortably inscribed in the circle, with a
+    // little margin so wrapped lines don't touch the ring.
+    let wrap_width = (hub_radius * 1.3).max(24.0);
+
+    let display_name = if name.is_empty() { "/" } else { name };
+    let name_job = egui::text::LayoutJob::simple(
+        display_name.to_string(),
+        egui::FontId::proportional(14.0),
+        Color32::WHITE,
+        wrap_width,
+    );
+    let name_galley = painter.layout_job(name_job);
+
+    let size_job = egui::text::LayoutJob::simple(
+        human_size(size),
+        egui::FontId::proportional(18.0),
+        Color32::WHITE,
+        wrap_width,
+    );
+    let size_galley = painter.layout_job(size_job);
+
+    let gap = 4.0;
+    let total_height = name_galley.size().y + gap + size_galley.size().y;
+    let top = center.y - total_height / 2.0;
+
+    let name_pos = Pos2::new(center.x - name_galley.size().x / 2.0, top);
+    painter.galley(name_pos, name_galley.clone(), Color32::WHITE);
+
+    let size_pos = Pos2::new(
+        center.x - size_galley.size().x / 2.0,
+        top + name_galley.size().y + gap,
+    );
+    painter.galley(size_pos, size_galley.clone(), Color32::WHITE);
 }
 
 /// Arc outline points, traced outer-arc-forward then inner-arc-backward,
@@ -819,50 +1254,156 @@ impl eframe::App for DiskScanApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_scan();
-        if self.scanning {
+        self.poll_mime();
+        if self.scanning && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.abort_scan();
+        }
+        if self.scanning || !self.mime_inflight.is_empty() {
             ctx.request_repaint();
         }
 
+        // `Sides` measures the right-hand content first and gives the
+        // left-hand content whatever room remains — unlike a manual
+        // "reserve N pixels" guess, the nav buttons can never end up
+        // clipped regardless of window width, font, or theme. Both
+        // closures below only read pre-cloned local state and report what
+        // happened; every actual `self` mutation happens afterward, since
+        // Sides::show can't hand out two simultaneous `&mut self` closures.
+        let root_arc = self.root.clone();
+        let cur_view_idx = self.view_stack.last().unwrap().clone();
+        let can_go_up = self.view_stack.len() > 1;
+        let can_go_sibling = root_arc.is_some() && !cur_view_idx.is_empty();
+        let can_reload = root_arc.is_some();
+        let mut path_input = self.path_input.clone();
+        let path_input_was_focused = self.path_input_focused;
+
+        enum NavAction {
+            None,
+            Up,
+            Sibling,
+            Reload,
+        }
+        let mut nav_action = NavAction::None;
+        let mut settings_toggled = false;
+        let mut submit: Option<String> = None;
+        let mut path_input_focused = path_input_was_focused;
+
         egui::Panel::top("top").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("diskscan");
-                if ui.button("⚙").on_hover_text("Chart settings").clicked() {
-                    self.show_settings = !self.show_settings;
-                }
-                ui.separator();
-
-                // Keep the path bar synced to navigation (mount switches,
-                // zooming into the chart) as long as the user isn't
-                // currently typing in it — otherwise we'd clobber their
-                // in-progress edit every frame.
-                if !self.path_input_focused {
-                    let current = if let Some(root) = &self.root {
-                        self.current_view_node(root).path.display().to_string()
-                    } else {
-                        String::new()
-                    };
-                    if self.path_input != current {
-                        self.path_input = current;
+            egui::Sides::new().shrink_left().show(
+                ui,
+                |ui| {
+                    ui.heading("SpaceMap");
+                    if ui.button("⚙").on_hover_text("Chart settings").clicked() {
+                        settings_toggled = true;
                     }
-                }
+                    ui.separator();
 
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut self.path_input)
-                        .desired_width(ui.available_width().max(200.0))
-                        .hint_text("Type a path and press Enter — e.g. a USB drive or network mount"),
-                );
-                self.path_input_focused = resp.has_focus();
-                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    let p = PathBuf::from(self.path_input.trim());
-                    if p.is_dir() {
-                        self.selected_mount = usize::MAX; // no radio matches a custom path
-                        self.start_scan(p);
-                    } else {
-                        self.status = format!("Not a directory: {}", p.display());
+                    // Keep the path bar synced to navigation (mount switches,
+                    // zooming into the chart) as long as the user isn't
+                    // currently typing in it — otherwise we'd clobber their
+                    // in-progress edit every frame.
+                    if !path_input_was_focused {
+                        let current = match &root_arc {
+                            Some(root) => get_node(root, &cur_view_idx).path.display().to_string(),
+                            None => String::new(),
+                        };
+                        if path_input != current {
+                            path_input = current;
+                        }
                     }
-                }
-            });
+
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut path_input)
+                            .desired_width(ui.available_width())
+                            .hint_text("Type a path and press Enter — e.g. a USB drive or network mount"),
+                    );
+                    path_input_focused = resp.has_focus();
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        submit = Some(path_input.clone());
+                    }
+                },
+                |ui| {
+                    // Nav buttons: not overlaid on the chart, so they also
+                    // work in Summary view, which has no chart to overlay
+                    // them on. `Sides`' right side lays out right-to-left,
+                    // so list them in mirrored (visually: ⬆ ➡ ⟳) order.
+                    if ui
+                        .add_enabled(can_reload, egui::Button::new("⟳"))
+                        .on_hover_text("Reload this folder")
+                        .clicked()
+                    {
+                        nav_action = NavAction::Reload;
+                    }
+                    if ui
+                        .add_enabled(can_go_sibling, egui::Button::new("➡"))
+                        .on_hover_text("Next sibling folder (chart order)")
+                        .clicked()
+                    {
+                        nav_action = NavAction::Sibling;
+                    }
+                    if ui
+                        .add_enabled(can_go_up, egui::Button::new("⬆"))
+                        .on_hover_text("Up to parent folder")
+                        .clicked()
+                    {
+                        nav_action = NavAction::Up;
+                    }
+                    // Right side lays out right-to-left, so adding this
+                    // last places it leftmost of the group — i.e. right
+                    // next to the path bar, visually separating it from
+                    // the buttons the same way the left separator sets
+                    // the gear icon apart from the heading.
+                    ui.separator();
+                },
+            );
         });
+
+        self.path_input = path_input;
+        self.path_input_focused = path_input_focused;
+        if settings_toggled {
+            self.show_settings = !self.show_settings;
+        }
+        if let Some(trimmed) = submit.as_deref().map(str::trim) {
+            if let Some(scheme_end) = trimmed.find("://") {
+                // A URL like smb://host/share is a virtual URI (KIO/GVFS),
+                // not a real filesystem path — there's no directory to stat
+                // until it's actually mounted. Auto-mounting it ourselves
+                // would mean shelling out to `gio mount` and risking a hang
+                // waiting on a credentials prompt we have no way to
+                // surface, so just say clearly what's needed instead.
+                let scheme = &trimmed[..scheme_end];
+                self.log_issue(format!(
+                    "'{scheme}://' is a network URL, not a mounted path — mount it first \
+                     (e.g. via your file manager's Network browser), then type the real \
+                     local path it mounts to (often under /run/user/<uid>/gvfs/...)."
+                ));
+            } else {
+                let p = PathBuf::from(trimmed);
+                if p.is_dir() {
+                    self.selected_mount = usize::MAX; // no radio matches a custom path
+                    self.start_scan(p);
+                } else {
+                    self.log_issue(format!("Not a directory: {}", p.display()));
+                }
+            }
+        }
+        match nav_action {
+            NavAction::None => {}
+            NavAction::Up => {
+                self.view_stack.pop();
+            }
+            NavAction::Sibling => {
+                if let Some(root) = root_arc.clone() {
+                    self.goto_next_sibling(&root);
+                }
+            }
+            NavAction::Reload => {
+                if let Some(root) = &root_arc {
+                    let p = get_node(root, &cur_view_idx).path.clone();
+                    self.start_scan(p);
+                }
+            }
+        }
 
         {
             let mut show = self.show_settings;
@@ -942,6 +1483,19 @@ impl eframe::App for DiskScanApp {
                     );
 
                     ui.separator();
+                    ui.label("Scanning");
+                    ui.add(
+                        egui::Slider::new(&mut s.progress_interval_pow2, 0..=16)
+                            .custom_formatter(|v, _| format!("{}", 1u64 << (v as u32)))
+                            .custom_parser(|s| {
+                                s.parse::<u64>()
+                                    .ok()
+                                    .map(|v| v.max(1).next_power_of_two().trailing_zeros().min(16) as f64)
+                            })
+                            .text("Progress report interval (items, always a power of 2)"),
+                    );
+
+                    ui.separator();
                     if ui.button("Defaults").clicked() {
                         *s = Settings::default();
                     }
@@ -950,7 +1504,19 @@ impl eframe::App for DiskScanApp {
         }
 
         egui::Panel::left("left").min_size(220.0).show(ui, |ui| {
-            ui.label("Drives / mount points:");
+            ui.horizontal(|ui| {
+                ui.label("Drives / mount points:");
+                if ui.small_button("⟳").on_hover_text("Refresh drive list").clicked() {
+                    // Preserve the current selection across the refresh by
+                    // matching on path, since a re-scan can reorder or
+                    // add/remove entries (newly mounted drives, etc.).
+                    let current_path = self.mounts.get(self.selected_mount).map(|(_, p)| p.clone());
+                    self.mounts = list_mounts();
+                    self.selected_mount = current_path
+                        .and_then(|cp| self.mounts.iter().position(|(_, p)| *p == cp))
+                        .unwrap_or(usize::MAX);
+                }
+            });
             let mut changed = None;
             for (i, (label, _path)) in self.mounts.iter().enumerate() {
                 if ui.radio(self.selected_mount == i, label).clicked() {
@@ -968,18 +1534,11 @@ impl eframe::App for DiskScanApp {
                 let n = self.current_view_node(root);
                 ui.label(format!("Size: {}", human_size(n.size)));
                 ui.label(format!("Files: {}", format_count(n.file_count)));
-                ui.label(format_perms(n.mode));
+                ui.label(format!("Perms: {}", format_perms(n.mode)));
             }
-            if let Some(h) = &self.hovered {
-                ui.separator();
-                ui.label("Hovered:");
-                ui.monospace(h.path.display().to_string());
-                ui.label(format!("Size: {}", human_size(h.size)));
-                ui.label(format!("Files: {}", format_count(h.file_count)));
-                if let Some(m) = h.mode {
-                    ui.label(format_perms(m));
-                }
-            }
+            // "Hovered" details now render as an overlay in the chart's
+            // bottom-left corner (see the chart-drawing code below), next
+            // to what they actually describe, instead of in this sidebar.
             ui.separator();
             if ui.selectable_label(self.summary_view, "Summary view").clicked() {
                 self.summary_view = !self.summary_view;
@@ -1040,6 +1599,12 @@ impl eframe::App for DiskScanApp {
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
+            if !self.scanning && self.root.is_none() {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Pick a drive/mount point on the left, or type a path above and press Enter, to scan it.");
+                });
+                return;
+            }
             if self.scanning {
                 // Read-only live preview: draw whatever top-level children
                 // have streamed in so far, so the sunburst blossoms one
@@ -1047,24 +1612,50 @@ impl eframe::App for DiskScanApp {
                 // drive finishes. No hover/click/context-menu here — the
                 // data is still changing underneath every frame.
                 let avail = ui.available_size();
-                let side = avail.x.min(avail.y);
+
+                // Reserve the exact same bottom strip as the completed
+                // view (see hover_strip_height there) so the chart is
+                // sized identically in both states — otherwise the circle
+                // visibly jumps/shrinks the instant scanning finishes.
+                // The scan-progress readout lives in that strip instead of
+                // a fixed-position overlay: a floating box can't overlap
+                // the chart if the chart's own drawable area already
+                // excludes that space.
+                let status_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
+                let content_height = (avail.y - status_strip_height).max(50.0);
+
                 let (response, painter) =
-                    ui.allocate_painter(Vec2::new(avail.x, avail.y), egui::Sense::hover());
+                    ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::hover());
+                let side = response.rect.width().min(response.rect.height());
                 let center = response.rect.center();
                 let max_radius = side / 2.0 - 10.0;
                 let hub_radius = max_radius * self.settings.hub_radius_frac;
                 let ring_thickness = (max_radius - hub_radius) / self.settings.max_render_depth as f32;
 
                 let bg = ui.visuals().panel_fill;
+                let free_color = gamma_lighten(bg, self.settings.free_space_gamma);
                 painter.circle_filled(center, hub_radius, bg);
-                painter.text(
-                    center,
-                    egui::Align2::CENTER_CENTER,
-                    human_size(self.partial_root.size),
-                    egui::FontId::proportional(18.0),
-                    Color32::WHITE,
-                );
+                draw_hub_text(&painter, center, hub_radius, &self.partial_root.name, self.partial_root.size);
 
+                // Include free space once scanning has actually produced
+                // some content, not from frame one: statvfs answers
+                // instantly, but the first real directory can take a while
+                // to show up (e.g. a dormant HDD spinning up) — showing
+                // free space alone in the meantime looks like a stalled,
+                // near-empty chart. Once content exists, size against total
+                // capacity from then on so proportions stay stable for the
+                // rest of the blossom animation (no jump at completion).
+                let has_content = !self.partial_root.children.is_empty();
+                let live_free_bytes = if has_content {
+                    self.free_space.map(|(_, free)| free).unwrap_or(0)
+                } else {
+                    0
+                };
+                let live_total_capacity = if has_content {
+                    self.free_space.map(|(total, _)| total).unwrap_or(0)
+                } else {
+                    0
+                };
                 let mut segs = Vec::new();
                 layout_sunburst(
                     &self.partial_root,
@@ -1073,7 +1664,8 @@ impl eframe::App for DiskScanApp {
                     std::f32::consts::TAU,
                     0,
                     &self.hidden,
-                    0,
+                    live_free_bytes,
+                    live_total_capacity,
                     &self.settings,
                     &mut segs,
                 );
@@ -1081,17 +1673,70 @@ impl eframe::App for DiskScanApp {
                     let r0 = hub_radius + ring_thickness * seg.ring as f32;
                     let r1 = r0 + ring_thickness;
                     let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
-                    let color = segment_color(seg, top_hue, &self.settings);
+                    let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
                     draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
                 }
 
-                ui.put(
-                    egui::Rect::from_min_size(response.rect.left_top() + Vec2::new(8.0, 8.0), Vec2::new(260.0, 40.0)),
-                    egui::Label::new(format!(
-                        "Scanning… {} items",
-                        format_count(self.scanned_count)
-                    )),
+                // Bytes-scanned-so-far vs. known total capacity is a cheap,
+                // filesystem-agnostic progress proxy (unlike file count,
+                // which has no reliable upfront total — see is_real_mount_point
+                // discussion; NTFS in particular fakes its inode totals).
+                // It's imperfect (many tiny files vs. one huge file skews
+                // it) but it's honest about what it measures and free to
+                // compute from data we already track.
+                let used_target = self.free_space.map(|(total, free)| total.saturating_sub(free));
+                let progress = used_target
+                    .filter(|&u| u > 0)
+                    .map(|u| (self.partial_root.size as f64 / u as f64).clamp(0.0, 1.0) as f32);
+
+                // Rendered directly into the reserved strip below the
+                // chart (ui's cursor sits there now, since the painter
+                // above only consumed content_height, not the full avail)
+                // — full width, and structurally unable to overlap the
+                // chart regardless of how full the drive is.
+                ui.add_space(4.0);
+                let fraction = progress.unwrap_or(0.0);
+                // Match the chart's own bounding width (`side`), not the
+                // full panel — the panel is usually wider than the circle
+                // (height is normally the limiting dimension), so a
+                // full-width bar visually mismatched the chart above it.
+                // Centered under the chart via a left inset.
+                let left_inset = ((avail.x - side) / 2.0).max(0.0);
+                let bar_resp = ui
+                    .horizontal(|ui| {
+                        ui.add_space(left_inset);
+                        ui.add(
+                            egui::ProgressBar::new(fraction)
+                                .desired_width(side)
+                                .animate(progress.is_none()), // no known capacity: pulse instead of claiming 0%
+                        )
+                    })
+                    .inner;
+
+                // Centered within the *filled* portion specifically (not
+                // the whole bar), so it visibly moves along as the fill
+                // grows — egui's built-in ProgressBar text is fixed at the
+                // left edge, which doesn't do that. Only clamped against
+                // the outer panel's clip bounds (not the bar's own,
+                // narrower bounds) — that keeps it truly centered on the
+                // fill boundary in the normal case, and only nudges it in
+                // the rare case of a window so narrow there's no margin
+                // left to spill into.
+                let text_color = ui.visuals().selection.stroke.color;
+                let galley = ui.painter().layout_no_wrap(
+                    format!("{} items scanned", format_count(self.scanned_count)),
+                    egui::FontId::default(),
+                    text_color,
                 );
+                let half_w = galley.size().x / 2.0 + 4.0;
+                let ideal_x = bar_resp.rect.left() + bar_resp.rect.width() * fraction;
+                let clip = ui.clip_rect();
+                let lo = clip.left() + half_w;
+                let hi = (clip.right() - half_w).max(lo);
+                let center_x = ideal_x.clamp(lo, hi);
+                let filled_center = Pos2::new(center_x, bar_resp.rect.center().y);
+                ui.painter()
+                    .galley(filled_center - galley.size() / 2.0, galley, text_color);
                 return;
             }
 
@@ -1101,9 +1746,23 @@ impl eframe::App for DiskScanApp {
             };
 
             let avail = ui.available_size();
-            let side = avail.x.min(avail.y);
+
+            // Reserve a fixed-height strip below the chart for hover
+            // details, full width (so long paths never wrap) — fixed
+            // regardless of whether anything is currently hovered, so the
+            // chart's own size never jumps when hovering starts/stops.
+            // Not reserved in Summary view, which has no chart to give
+            // margin to and no hover state of its own.
+            let hover_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
+            let content_height = if self.summary_view {
+                avail.y
+            } else {
+                (avail.y - hover_strip_height).max(50.0)
+            };
+
             let (response, painter) =
-                ui.allocate_painter(Vec2::new(avail.x, avail.y), egui::Sense::click());
+                ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::click());
+            let side = response.rect.width().min(response.rect.height());
             let center = response.rect.center();
             let max_radius = side / 2.0 - 10.0;
             let hub_radius = max_radius * self.settings.hub_radius_frac;
@@ -1112,25 +1771,86 @@ impl eframe::App for DiskScanApp {
             let view_node = get_node(&root, self.view_stack.last().unwrap());
 
             if self.summary_view {
+                if self.ext_breakdown_for.as_deref() != Some(view_node.path.as_path()) {
+                    self.ext_breakdown = extension_breakdown(view_node);
+                    self.ext_breakdown_for = Some(view_node.path.clone());
+                }
+
+                // Sort a (index, node) view of the children rather than the
+                // children themselves, so clicking a row can still push the
+                // correct original index onto view_stack for navigation.
+                let mut contents_rows: Vec<(usize, &Node)> = view_node
+                    .children
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| !self.hidden.contains(&c.path))
+                    .collect();
+                let cs = self.contents_sort;
+                contents_rows.sort_by(|(_, a), (_, b)| {
+                    let ord = match cs.column {
+                        SortColumn::Size => a.size.cmp(&b.size),
+                        SortColumn::Files => a.file_count.max(1).cmp(&b.file_count.max(1)),
+                        SortColumn::Name => a.name.cmp(&b.name),
+                    };
+                    if cs.ascending { ord } else { ord.reverse() }
+                });
+
+                let mut ext_rows = self.ext_breakdown.clone();
+                let es = self.ext_sort;
+                ext_rows.sort_by(|a, b| {
+                    let ord = match es.column {
+                        SortColumn::Size => a.1.cmp(&b.1),
+                        SortColumn::Files => a.2.cmp(&b.2),
+                        SortColumn::Name => a.0.cmp(&b.0),
+                    };
+                    if es.ascending { ord } else { ord.reverse() }
+                });
+
                 egui::Area::new("summary_overlay".into())
                     .fixed_pos(response.rect.left_top())
                     .show(&ctx, |ui| {
                         ui.set_min_size(response.rect.size());
                         egui::Frame::default().fill(ui.visuals().panel_fill).show(ui, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
-                                for (i, c) in view_node.children.iter().enumerate() {
-                                    if self.hidden.contains(&c.path) {
-                                        continue;
-                                    }
-                                    ui.horizontal(|ui| {
-                                        ui.label(format!("{:>10}", human_size(c.size)));
-                                        if ui.link(&c.name).clicked() && c.is_dir {
-                                            let mut vp = self.view_stack.last().unwrap().clone();
-                                            vp.push(i);
-                                            self.view_stack.push(vp);
+                                ui.heading("Contents");
+                                egui::Grid::new("summary_contents_grid")
+                                    .num_columns(3)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        sortable_header(ui, "Size", SortColumn::Size, &mut self.contents_sort);
+                                        sortable_header(ui, "Files", SortColumn::Files, &mut self.contents_sort);
+                                        sortable_header(ui, "Name", SortColumn::Name, &mut self.contents_sort);
+                                        ui.end_row();
+                                        for (i, c) in &contents_rows {
+                                            ui.label(human_size(c.size));
+                                            ui.label(format_count(c.file_count.max(1)));
+                                            if ui.link(&c.name).clicked() && c.is_dir {
+                                                let mut vp = self.view_stack.last().unwrap().clone();
+                                                vp.push(*i);
+                                                self.view_stack.push(vp);
+                                            }
+                                            ui.end_row();
                                         }
                                     });
-                                }
+
+                                ui.add_space(12.0);
+                                ui.separator();
+                                ui.heading("By file extension");
+                                egui::Grid::new("summary_ext_grid")
+                                    .num_columns(3)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        sortable_header(ui, "Size", SortColumn::Size, &mut self.ext_sort);
+                                        sortable_header(ui, "Files", SortColumn::Files, &mut self.ext_sort);
+                                        sortable_header(ui, "Extension", SortColumn::Name, &mut self.ext_sort);
+                                        ui.end_row();
+                                        for (ext, size, count) in &ext_rows {
+                                            ui.label(human_size(*size));
+                                            ui.label(format_count(*count));
+                                            ui.label(ext);
+                                            ui.end_row();
+                                        }
+                                    });
                             });
                         });
                     });
@@ -1142,18 +1862,15 @@ impl eframe::App for DiskScanApp {
 
             // hub (center circle) - click navigates up
             painter.circle_filled(center, hub_radius, bg);
-            painter.text(
-                center,
-                egui::Align2::CENTER_CENTER,
-                human_size(view_node.size),
-                egui::FontId::proportional(18.0),
-                Color32::WHITE,
-            );
+            draw_hub_text(&painter, center, hub_radius, &view_node.name, view_node.size);
 
-            let root_free_bytes = if self.view_stack.len() == 1 {
-                self.free_space.map(|(_, free)| free).unwrap_or(0)
+            let (root_free_bytes, root_total_capacity) = if self.view_stack.len() == 1 {
+                (
+                    self.free_space.map(|(_, free)| free).unwrap_or(0),
+                    self.free_space.map(|(total, _)| total).unwrap_or(0),
+                )
             } else {
-                0
+                (0, 0)
             };
             let mut segs = Vec::new();
             layout_sunburst(
@@ -1164,6 +1881,7 @@ impl eframe::App for DiskScanApp {
                 0,
                 &self.hidden,
                 root_free_bytes,
+                root_total_capacity,
                 &self.settings,
                 &mut segs,
             );
@@ -1188,16 +1906,33 @@ impl eframe::App for DiskScanApp {
                             ang += std::f32::consts::TAU;
                         }
                         if ang >= seg.start_angle && ang <= seg.end_angle {
+                            // Only "real" segments (not the synthetic
+                            // "other"/"free space" buckets) correspond to
+                            // an actual Node — that's where mtime/ctime/
+                            // uid/gid/mime can come from.
+                            let real_node = if seg.is_other || seg.is_free {
+                                None
+                            } else {
+                                Some(get_node(&root, &seg.idx_path))
+                            };
                             new_hover = Some(HoverInfo {
-                                path: if seg.is_other || seg.is_free {
+                                path: if seg.is_free {
+                                    PathBuf::from(&seg.name) // "Free space" — not a real path under view_node
+                                } else if seg.is_other {
                                     view_node.path.join(&seg.name)
                                 } else {
-                                    get_node(&root, &seg.idx_path).path.clone()
+                                    real_node.unwrap().path.clone()
                                 },
                                 size: seg.size,
                                 file_count: seg.file_count,
                                 is_dir: seg.is_dir || seg.is_other,
+                                is_free: seg.is_free,
+                                is_other: seg.is_other,
                                 mode: seg.mode,
+                                mtime: real_node.map(|n| n.mtime),
+                                ctime: real_node.map(|n| n.ctime),
+                                uid: real_node.map(|n| n.uid),
+                                gid: real_node.map(|n| n.gid),
                             });
                             // Free space isn't a real tree node: don't let it
                             // be zoomed into or targeted by the context menu.
@@ -1298,6 +2033,129 @@ impl eframe::App for DiskScanApp {
                     self.context_menu = None;
                 }
             }
+
+            // Floating tooltip-style panel near the pointer, rather than a
+            // fixed strip of the layout: the reserved margin below the
+            // chart (hover_strip_height) stays purely as blank breathing
+            // room now, so the chart's size still doesn't jump between
+            // scanning and completed states, but hover details no longer
+            // permanently occupy that space — they only appear, floating,
+            // while actually hovering.
+            // Snapshot: ensure_mime_lookup below needs &mut self, which
+            // can't coexist with an active &self.hovered borrow.
+            let hover_snapshot = self.hovered.clone();
+            if let (Some(h), Some(p)) = (&hover_snapshot, pointer) {
+                if !h.is_dir {
+                    self.ensure_mime_lookup(&h.path);
+                }
+                let mime = if h.is_dir { None } else { self.mime_cache.get(&h.path).cloned().flatten() };
+
+                // Flip which corner of the tooltip anchors to the pointer
+                // based on which quadrant of the chart it's in, so the
+                // popup opens away from the nearest edge instead of
+                // routinely spilling off-window.
+                let gap = 14.0;
+                let (align, offset) = match (p.x > center.x, p.y > center.y) {
+                    (false, false) => (egui::Align2::LEFT_TOP, Vec2::new(gap, gap)),
+                    (true, false) => (egui::Align2::RIGHT_TOP, Vec2::new(-gap, gap)),
+                    (false, true) => (egui::Align2::LEFT_BOTTOM, Vec2::new(gap, -gap)),
+                    (true, true) => (egui::Align2::RIGHT_BOTTOM, Vec2::new(-gap, -gap)),
+                };
+                let is_real_folder = h.is_dir && !h.is_other;
+                let is_real_file = !h.is_dir && !h.is_free;
+                // None for the aggregate "other" bucket / free space:
+                // neither is really a file or a folder.
+                let icon: Option<fn(&egui::Painter, egui::Rect, Color32)> = if is_real_file {
+                    Some(draw_file_icon)
+                } else if is_real_folder {
+                    Some(draw_folder_icon)
+                } else {
+                    None
+                };
+                let path_str = h.path.display().to_string();
+
+                // Keyed by path: egui's Area/Grid persist and only ever
+                // grow their sizing per Id across frames (to avoid jitter),
+                // so reusing one fixed Id for every hover target would let
+                // a wide value on one file (a huge file count, a long
+                // date) stick around and bloat the box for the next,
+                // shorter-named one too.
+                egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path))
+                    .pivot(align)
+                    .fixed_pos(p + offset)
+                    .show(&ctx, |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if let Some(draw_icon) = icon {
+                                    let (icon_rect, _resp) =
+                                        ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+                                    draw_icon(ui.painter(), icon_rect, ui.visuals().text_color());
+                                }
+                                // No wrap by default, so the tooltip sizes
+                                // to fit the path on one line — only wraps
+                                // (at a generous width) once it's long
+                                // enough that "way big" is the honest
+                                // description.
+                                let galley = ui.painter().layout_no_wrap(
+                                    path_str.clone(),
+                                    egui::FontId::monospace(12.0),
+                                    ui.visuals().text_color(),
+                                );
+                                let label = egui::Label::new(egui::RichText::new(&path_str).monospace());
+                                if galley.size().x > 900.0 {
+                                    ui.add(label.wrap());
+                                } else {
+                                    ui.add(label.extend());
+                                }
+                            });
+                            ui.separator();
+                            egui::Grid::new(egui::Id::new("hover_tooltip_grid").with(&h.path))
+                                .num_columns(2)
+                                .spacing([12.0, 4.0])
+                                .show(ui, |ui| {
+                                    ui.label(if h.is_free { "Available:" } else { "Size:" });
+                                    ui.label(human_size(h.size));
+                                    ui.end_row();
+
+                                    // Always 1 for a real file, always 0 for
+                                    // free space — neither is informative,
+                                    // so only show it for folders and the
+                                    // aggregate "other" bucket.
+                                    if h.is_dir {
+                                        ui.label("Files:");
+                                        ui.label(format_count(h.file_count));
+                                        ui.end_row();
+                                    }
+
+                                    if let Some(m) = h.mode {
+                                        ui.label("Permissions:");
+                                        ui.label(format_perms(m));
+                                        ui.end_row();
+                                    }
+                                    if let Some(mt) = h.mtime {
+                                        ui.label("Modified:");
+                                        ui.label(format_epoch(mt));
+                                        ui.end_row();
+                                    }
+                                    if let Some(ct) = h.ctime {
+                                        ui.label("Changed:");
+                                        ui.label(format_epoch(ct));
+                                        ui.end_row();
+                                    }
+                                    if let (Some(uid), Some(gid)) = (h.uid, h.gid) {
+                                        ui.label("Owner:");
+                                        ui.label(format_owner(uid, gid, &mut self.user_cache, &mut self.group_cache));
+                                        ui.end_row();
+                                    }
+                                    if let Some(mime) = &mime {
+                                        ui.label("Type:");
+                                        ui.label(mime);
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                    });
+            }
         });
     }
 }
@@ -1323,14 +2181,124 @@ fn empty_trash() -> std::io::Result<()> {
     Ok(())
 }
 
+// ---------------- Theming ----------------
+//
+// Colors are never hardcoded: they're read from the user's actual desktop
+// color scheme (KDE Plasma's kdeglobals) so the app matches whatever theme
+// and accent color the user picked in System Settings, light or dark,
+// rather than imposing a fixed palette. Only *structural* polish (corner
+// rounding, spacing) is applied on top — that's theme-agnostic by nature.
+
+struct KdeColors {
+    window_bg: Color32,
+    view_bg: Color32,
+    text: Color32,
+    accent: Color32,
+    button_bg: Color32,
+}
+
+fn parse_rgb(s: &str) -> Option<Color32> {
+    let mut parts = s.trim().split(',');
+    let r: u8 = parts.next()?.trim().parse().ok()?;
+    let g: u8 = parts.next()?.trim().parse().ok()?;
+    let b: u8 = parts.next()?.trim().parse().ok()?;
+    Some(Color32::from_rgb(r, g, b))
+}
+
+fn read_kde_colors() -> Option<KdeColors> {
+    let home = std::env::var_os("HOME")?;
+    let path = PathBuf::from(home).join(".config/kdeglobals");
+    let content = std::fs::read_to_string(path).ok()?;
+
+    let mut section = String::new();
+    let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) =
+        (None, None, None, None, None);
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line.to_string();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match (section.as_str(), key) {
+            ("[Colors:Window]", "BackgroundNormal") => window_bg = parse_rgb(value),
+            ("[Colors:Window]", "ForegroundNormal") => text = parse_rgb(value),
+            ("[Colors:View]", "BackgroundNormal") => view_bg = parse_rgb(value),
+            ("[Colors:Selection]", "BackgroundNormal") => accent = parse_rgb(value),
+            ("[Colors:Button]", "BackgroundNormal") => button_bg = parse_rgb(value),
+            _ => {}
+        }
+    }
+
+    let window_bg = window_bg?;
+    Some(KdeColors {
+        view_bg: view_bg.unwrap_or(window_bg),
+        text: text.unwrap_or(Color32::WHITE),
+        accent: accent?,
+        button_bg: button_bg.unwrap_or(window_bg),
+        window_bg,
+    })
+}
+
+/// Structural-only style refinements — corner rounding and spacing — that
+/// read as "designed" regardless of which color scheme is active.
+fn apply_structural_style(ctx: &egui::Context) {
+    let radius = egui::CornerRadius::from(6u8);
+    ctx.all_styles_mut(|style| {
+        style.visuals.window_corner_radius = radius;
+        style.visuals.menu_corner_radius = radius;
+        style.visuals.widgets.inactive.corner_radius = radius;
+        style.visuals.widgets.hovered.corner_radius = radius;
+        style.visuals.widgets.active.corner_radius = radius;
+        style.visuals.widgets.noninteractive.corner_radius = radius;
+        style.visuals.widgets.open.corner_radius = radius;
+        style.spacing.item_spacing = egui::Vec2::new(8.0, 8.0);
+        style.spacing.button_padding = egui::Vec2::new(10.0, 5.0);
+        style.spacing.window_margin = egui::Margin::same(10);
+    });
+}
+
+fn apply_theme(ctx: &egui::Context) {
+    apply_structural_style(ctx);
+    let Some(kde) = read_kde_colors() else {
+        return; // not on KDE (or couldn't read it): keep egui's own default
+    };
+    let mut visuals = egui::Visuals::dark();
+    visuals.override_text_color = Some(kde.text);
+    visuals.panel_fill = kde.view_bg;
+    visuals.window_fill = kde.window_bg;
+    // Used as the empty "trough" for progress bars, sliders, text-edit
+    // backgrounds, etc. Needs to read as visibly *lighter* than the panel
+    // behind it on a dark theme — darker (as `gamma_multiply(0.85)` gave)
+    // was nearly invisible, leaving no visible container/boundary for
+    // things like the scan progress bar to fill up against.
+    visuals.extreme_bg_color = gamma_lighten(kde.view_bg, 0.55);
+    visuals.faint_bg_color = kde.window_bg.gamma_multiply(1.1);
+    visuals.hyperlink_color = kde.accent;
+    visuals.selection.bg_fill = kde.accent;
+    visuals.selection.stroke.color = kde.text;
+    visuals.widgets.inactive.bg_fill = kde.button_bg;
+    visuals.widgets.inactive.weak_bg_fill = kde.button_bg;
+    visuals.widgets.hovered.bg_fill = kde.button_bg.gamma_multiply(1.25);
+    visuals.widgets.active.bg_fill = kde.accent;
+    visuals.widgets.noninteractive.bg_fill = kde.window_bg;
+    ctx.set_visuals(visuals);
+}
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
         ..Default::default()
     };
     eframe::run_native(
-        "diskscan",
+        "spacemap",
         options,
-        Box::new(|_cc| Ok(Box::new(DiskScanApp::default()))),
+        Box::new(|cc| {
+            apply_theme(&cc.egui_ctx);
+            Ok(Box::new(DiskScanApp::default()))
+        }),
     )
 }

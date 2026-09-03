@@ -1,11 +1,14 @@
 [package]
-name = "diskscan"
+name = "spacemap"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = "0.4.45"
 eframe = "0.36.1"
 egui = "0.36.1"
+infer = "0.22.0"
 libc = "0.2.189"
 rayon = "1.12.0"
 trash = "5.2.6"
+uzers = "0.12.2"
