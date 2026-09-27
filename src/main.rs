@@ -2224,7 +2224,13 @@ impl eframe::App for DiskScanApp {
                                     }
                                 });
                             });
-                        if ui.small_button("✏").on_hover_text(tr("TOOLBAR_PATH_EDIT_TOOLTIP")).clicked() {
+                        // A plain clickable label, not a Button: even with
+                        // .frame(false) a Button still reserves its normal
+                        // left/right button_padding around the glyph for
+                        // its click target, which is exactly the padding
+                        // asked to go away — a Label has none.
+                        let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
+                        if pencil.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tr("TOOLBAR_PATH_EDIT_TOOLTIP")).clicked() {
                             start_path_edit = true;
                         }
                     }
