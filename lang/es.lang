@@ -1,0 +1,157 @@
+# name: Español
+#
+# Traducción de ejemplo, para probar el mecanismo de idiomas de spacemap.
+# Ver lang/en.lang para instrucciones sobre cómo crear/editar traducciones.
+
+# ---- Barra de herramientas ----
+TOOLBAR_SUMMARY_VIEW=Vista de resumen
+TOOLBAR_SORT_BY_SIZE=Ordenado por tamaño (mayor primero) — clic para A–Z
+TOOLBAR_SORT_BY_NAME=Ordenado por nombre (A–Z) — clic para mayor primero
+TOOLBAR_FILTERS_ACTIVE=Filtros (activos)
+TOOLBAR_EMPTY_TRASH=Vaciar papelera
+TOOLBAR_PICK_FOLDER=Elegir cualquier unidad, punto de montaje o carpeta para escanear
+TOOLBAR_SCAN_ROOT=Escanear desde la raíz del sistema (/)
+TOOLBAR_SCAN_HOME=Escanear tu carpeta personal (%s)
+TOOLBAR_RESCAN=Volver a escanear esta carpeta
+TOOLBAR_PATH_HINT=Escribe una ruta y presiona Intro — p. ej. una unidad USB o red
+TOOLBAR_PATH_EDIT_TOOLTIP=Escribir una ruta
+TOOLBAR_SETTINGS_TOOLTIP=Ajustes del gráfico
+DIALOG_PICK_FOLDER_TITLE=Elige una unidad o carpeta para escanear
+
+# ---- Panel de filtros ----
+FILTER_TITLE=Filtros
+FILTER_CLOSE=Cerrar filtros
+FILTER_NAME_LABEL=Nombre
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=Patrones separados por espacios o comas; un archivo coincide si alguno lo hace.\n* = cualquier secuencia de caracteres, ? = un carácter, [a,b,c] o {a,b,c} = alternativas.\nSin * ni ? coincide en cualquier parte del nombre. No distingue mayúsculas salvo que actives Aa.
+FILTER_CASE_SENSITIVE=Distingue mayúsculas — clic para ignorarlas
+FILTER_CASE_INSENSITIVE=No distingue mayúsculas — clic para distinguirlas
+FILTER_COL_FROM_MIN=desde / mín
+FILTER_COL_TO_MAX=hasta / máx
+FILTER_ROW_SIZE=Tamaño
+FILTER_ROW_CREATED=Creado
+FILTER_ROW_MODIFIED=Modificado
+FILTER_HINT_SIZE_MIN=p. ej. 100M
+FILTER_HINT_SIZE_MAX=p. ej. 4.7G
+FILTER_HINT_DATE=AAAA-MM-DD
+FILTER_APPLY=Aplicar
+FILTER_CLEAR=Limpiar
+FILTER_SHOWING=Mostrando %s de %s archivos (%s de %s)
+FILTER_APPLIES_ON_FINISH=Se aplica cuando termina un escaneo.
+FILTER_LIVE_UNFILTERED=La vista en vivo durante un escaneo no está filtrada.
+FILTER_HELP=Los tamaños usan K/M/G/T (×1024). Las fechas son locales; añade HH:MM para incluir la hora.
+FILTER_ERR_MIN_SIZE=Tamaño mínimo
+FILTER_ERR_MAX_SIZE=Tamaño máximo
+FILTER_ERR_CREATED_FROM=Creado desde
+FILTER_ERR_CREATED_TO=Creado hasta
+FILTER_ERR_MODIFIED_FROM=Modificado desde
+FILTER_ERR_MODIFIED_TO=Modificado hasta
+
+# ---- Mensajes de validación ----
+ERR_SIZE_FORMAT='%s' no es un tamaño válido (p. ej. 500M, 1.5G)
+ERR_SIZE_UNIT=unidad desconocida '%s' (usa K, M, G o T)
+ERR_DATE_FORMAT='%s' no es una fecha válida (usa AAAA-MM-DD)
+ERR_DATE_TZ='%s' no existe en la zona horaria local
+ERR_FIELD_PREFIX=%s: %s
+
+# ---- Panel de ajustes ----
+SETTINGS_TITLE=Ajustes del gráfico
+SETTINGS_CLOSE=Cerrar ajustes
+SETTINGS_DEPTH_GROUPING=Profundidad y agrupación
+SETTINGS_DEPTH_LEVELS=Niveles de profundidad mostrados
+SETTINGS_MIN_SLICE_ANGLE=Ángulo mínimo de segmento (°)
+SETTINGS_MAX_SLICES=Máx. segmentos por anillo
+SETTINGS_UNLIMITED_SLICES=Segmentos ilimitados (sin grupo "otros")
+SETTINGS_UNLIMITED_SLICES_HOVER=Muestra cada elemento como su propio segmento, sin importar cuántos haya, en vez de agrupar los pequeños en "(N otros elementos)". Una carpeta con miles de elementos producirá miles de segmentos finísimos — usa Ctrl+rueda para acercarte y poder hacer clic en ellos.
+SETTINGS_HUB_SIZE=Tamaño del centro
+SETTINGS_COLORS=Colores
+SETTINGS_RING_SAT=Saturación del anillo
+SETTINGS_RING_BRIGHT_OUTER=Brillo del anillo (exterior)
+SETTINGS_BRIGHT_FALLOFF=Caída de brillo por anillo
+SETTINGS_BRIGHT_FLOOR=Brillo mínimo
+SETTINGS_OTHER_SAT=Saturación del grupo "otros"
+SETTINGS_OTHER_BRIGHT=Brillo del grupo "otros"
+SETTINGS_FREE_GAMMA=Gamma de espacio libre (<1 aclara)
+SETTINGS_LINE_RENDERING=Renderizado de líneas
+SETTINGS_BORDER_THICKNESS=Grosor del borde
+SETTINGS_BORDER_DARKNESS=Oscuridad del borde
+SETTINGS_CURVE_SMOOTH=Suavidad de curvas (px/paso, menor = más suave)
+SETTINGS_LOG=Registro
+SETTINGS_MAX_LOG_LINES=Máx. líneas de incidencias guardadas
+SETTINGS_SCANNING=Escaneo
+SETTINGS_PROGRESS_INTERVAL=Intervalo de progreso (elementos, siempre potencia de 2)
+SETTINGS_DEFAULTS=Restablecer
+SETTINGS_LANGUAGE=Idioma
+
+# ---- Panel de registro ----
+LOG_ISSUES_NONE=Incidencias: ninguna
+LOG_ISSUES_COUNT=Incidencias: %s
+LOG_CLEAR=Limpiar
+LOG_MORE_NOT_SHOWN=...y %s incidencia(s) más sin mostrar
+
+# ---- Panel central / estado vacío ----
+CENTRAL_EMPTY_STATE=Elige un punto de partida con 🔍 (cualquier unidad, punto de montaje o carpeta), / (raíz del sistema) o 🏠 (personal) — o escribe una ruta arriba y presiona Intro.
+
+# ---- Estado y errores del escaneo ----
+STATUS_SCAN_ABORTED=Escaneo cancelado
+STATUS_SCAN_COMPLETED=Escaneo completado en %ss
+ERR_PATH_NOT_FOUND=Ruta no encontrada: %s
+ERR_CANNOT_STAT=No se puede obtener información de %s: %s
+ERR_NETWORK_URL='%s://' es una URL de red, no una ruta montada — móntala primero (p. ej. desde el navegador de red de tu gestor de archivos), luego escribe la ruta local real donde queda montada (a menudo bajo /run/user/<uid>/gvfs/...).
+ERR_NOT_A_DIRECTORY=No es un directorio: %s
+ERR_FOLDER_DIALOG_FAILED=No se pudo abrir el diálogo de carpetas (¿está xdg-desktop-portal en ejecución?)
+SCAN_PROGRESS_ITEMS_SCANNED=%s elementos escaneados
+SCAN_PROGRESS_OF_TOTAL=%s de %s elementos
+SCAN_PROGRESS_ITEMS=%s elementos
+
+# ---- Errores de E/S del sistema de archivos ----
+ERR_IO_NOT_FOUND=no se puede encontrar ese directorio
+ERR_IO_PERMISSION=no tienes permiso para leer o entrar en esa carpeta
+ERR_IO_OTHER=no se pudo leer (%s)
+ERR_IO_LINE=%s — %s
+
+# ---- Extensiones / grupos agregados del gráfico ----
+EXT_OTHER_COUNT=(%s otras extensiones)
+EXT_NO_EXTENSION=(sin extensión)
+SEG_OTHER_ITEMS=(%s otros elementos)
+SEG_FREE_SPACE=Espacio libre
+SEG_OTHER_FS=%s [otro sistema de archivos]
+
+# ---- Vista de resumen ----
+SUMMARY_CONTENTS=Contenido
+SUMMARY_BY_EXTENSION=Por extensión de archivo
+COL_SIZE=Tamaño
+COL_FILES=Archivos
+COL_MODIFIED=Modificado
+COL_NAME=Nombre
+COL_EXTENSION=Extensión
+
+# ---- Panel de estadísticas (esquina superior izquierda) ----
+STATS_SIZE=Tamaño: %s
+STATS_FILES=Archivos: %s
+STATS_PERMS=Permisos: %s
+
+# ---- Tooltip al pasar el cursor ----
+HOVER_AVAILABLE=Disponible:
+HOVER_SIZE=Tamaño:
+HOVER_FILES=Archivos:
+HOVER_PERMS=Permisos:
+HOVER_MODIFIED=Modificado:
+HOVER_CHANGED=Cambiado:
+HOVER_OWNER=Propietario:
+HOVER_TYPE=Tipo:
+
+# ---- Menú contextual ----
+MENU_ZOOM=Ampliar
+MENU_RESCAN=Volver a escanear
+MENU_OPEN=Abrir
+MENU_HIDE=Ocultar
+MENU_TRASH=Mover a la papelera
+MENU_DELETE=Eliminar permanentemente
+MENU_CANCEL=Cancelar
+
+# ---- Cruz de navegación ----
+NAV_UP=Segmento/carpeta superior (↑)
+NAV_PREV=Segmento anterior (←)
+NAV_NEXT=Segmento siguiente (→)
+NAV_DOWN=Siguiente anillo hacia fuera (↓) — Intro abre el segmento resaltado

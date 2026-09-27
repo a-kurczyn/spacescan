@@ -1,0 +1,169 @@
+# name: English
+#
+# spacemap language file. Lines are KEY=value; blank lines and lines
+# starting with # are ignored. Where a value needs to include a runtime
+# value (a count, a path, a size...) the template contains a literal %s —
+# one per value, filled in left-to-right order. You can move a %s to a
+# different place in the sentence, but don't remove or duplicate it, and
+# don't translate it into something else.
+#
+# To add a new language: copy this file to <language-code>.lang (e.g.
+# es.lang, fr.lang) in ~/.config/spacemap/lang/, translate the right-hand
+# side of each line, and set the first line to "# name: <language name as
+# it should read in the dropdown>". It'll show up in Settings > Language
+# next time spacemap starts (or immediately, if the lang folder already
+# existed). Any key you leave untranslated or delete falls back to English
+# automatically, so a partial translation is fine.
+
+# ---- Toolbar ----
+TOOLBAR_SUMMARY_VIEW=Summary view
+TOOLBAR_SORT_BY_SIZE=Chart sorted by size (largest first) — click for A–Z
+TOOLBAR_SORT_BY_NAME=Chart sorted by name (A–Z) — click for largest first
+TOOLBAR_FILTERS_ACTIVE=Filters (active)
+TOOLBAR_EMPTY_TRASH=Empty Recycle Bin
+TOOLBAR_PICK_FOLDER=Choose any drive, mount point or folder to scan
+TOOLBAR_SCAN_ROOT=Scan from the system root (/)
+TOOLBAR_SCAN_HOME=Scan your home folder (%s)
+TOOLBAR_RESCAN=Rescan this folder
+TOOLBAR_PATH_HINT=Type a path and press Enter — e.g. a USB drive or network mount
+TOOLBAR_PATH_EDIT_TOOLTIP=Type a path
+TOOLBAR_SETTINGS_TOOLTIP=Chart settings
+DIALOG_PICK_FOLDER_TITLE=Choose a drive or folder to scan
+
+# ---- Filter panel ----
+FILTER_TITLE=Filters
+FILTER_CLOSE=Close filters
+FILTER_NAME_LABEL=Name
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=Patterns separated by spaces or commas; a file matches if any one does.\n* = any characters, ? = one character, [a,b,c] or {a,b,c} = alternatives.\nWithout * or ? it matches anywhere in the name. Case-insensitive unless the Aa toggle is on.
+FILTER_CASE_SENSITIVE=Case-sensitive — click to ignore case
+FILTER_CASE_INSENSITIVE=Case-insensitive — click to match case exactly
+FILTER_COL_FROM_MIN=from / min
+FILTER_COL_TO_MAX=to / max
+FILTER_ROW_SIZE=Size
+FILTER_ROW_CREATED=Created
+FILTER_ROW_MODIFIED=Modified
+FILTER_HINT_SIZE_MIN=e.g. 100M
+FILTER_HINT_SIZE_MAX=e.g. 4.7G
+FILTER_HINT_DATE=YYYY-MM-DD
+FILTER_APPLY=Apply
+FILTER_CLEAR=Clear
+FILTER_SHOWING=Showing %s of %s files (%s of %s)
+FILTER_APPLIES_ON_FINISH=Applies when a scan finishes.
+FILTER_LIVE_UNFILTERED=The live view during a scan is unfiltered.
+FILTER_HELP=Sizes use K/M/G/T (×1024). Dates are local; add HH:MM for a time.
+FILTER_ERR_MIN_SIZE=Min size
+FILTER_ERR_MAX_SIZE=Max size
+FILTER_ERR_CREATED_FROM=Created from
+FILTER_ERR_CREATED_TO=Created to
+FILTER_ERR_MODIFIED_FROM=Modified from
+FILTER_ERR_MODIFIED_TO=Modified to
+
+# ---- Validation error messages ----
+ERR_SIZE_FORMAT='%s' is not a size (e.g. 500M, 1.5G)
+ERR_SIZE_UNIT=unknown unit '%s' (use K, M, G or T)
+ERR_DATE_FORMAT='%s' is not a date (use YYYY-MM-DD)
+ERR_DATE_TZ='%s' doesn't exist in the local time zone
+ERR_FIELD_PREFIX=%s: %s
+
+# ---- Settings panel ----
+SETTINGS_TITLE=Chart settings
+SETTINGS_CLOSE=Close settings
+SETTINGS_DEPTH_GROUPING=Depth & grouping
+SETTINGS_DEPTH_LEVELS=Depth levels shown
+SETTINGS_MIN_SLICE_ANGLE=Min slice angle (°)
+SETTINGS_MAX_SLICES=Max slices per ring
+SETTINGS_UNLIMITED_SLICES=Unlimited slices (no "other" bucket)
+SETTINGS_UNLIMITED_SLICES_HOVER=Shows every item as its own slice, however many there are, instead of grouping small ones into "(N other items)". A folder with thousands of entries will produce thousands of sliver-thin slices — use Ctrl+scroll to zoom in and make them clickable.
+SETTINGS_HUB_SIZE=Center hub size
+SETTINGS_COLORS=Colors
+SETTINGS_RING_SAT=Ring saturation
+SETTINGS_RING_BRIGHT_OUTER=Ring brightness (outer)
+SETTINGS_BRIGHT_FALLOFF=Brightness falloff per ring
+SETTINGS_BRIGHT_FLOOR=Brightness floor
+SETTINGS_OTHER_SAT="Other" bucket saturation
+SETTINGS_OTHER_BRIGHT="Other" bucket brightness
+SETTINGS_FREE_GAMMA=Free-space gamma (<1 lightens)
+SETTINGS_LINE_RENDERING=Line rendering
+SETTINGS_BORDER_THICKNESS=Border thickness
+SETTINGS_BORDER_DARKNESS=Border darkness
+SETTINGS_CURVE_SMOOTH=Curve smoothness (px/step, lower = smoother)
+SETTINGS_LOG=Log
+SETTINGS_MAX_LOG_LINES=Max stored issue lines
+SETTINGS_SCANNING=Scanning
+SETTINGS_PROGRESS_INTERVAL=Progress report interval (items, always a power of 2)
+SETTINGS_DEFAULTS=Defaults
+SETTINGS_LANGUAGE=Language
+
+# ---- Log panel ----
+LOG_ISSUES_NONE=Issues: none
+LOG_ISSUES_COUNT=Issues: %s
+LOG_CLEAR=Clear
+LOG_MORE_NOT_SHOWN=...and %s more issue(s) not shown
+
+# ---- Central panel / empty state ----
+CENTRAL_EMPTY_STATE=Choose a starting point with 🔍 (any drive, mount or folder), / (system root) or 🏠 (home) — or type a path above and press Enter.
+
+# ---- Scan status / errors ----
+STATUS_SCAN_ABORTED=Scan aborted
+STATUS_SCAN_COMPLETED=Scan completed in %ss
+ERR_PATH_NOT_FOUND=Path not found: %s
+ERR_CANNOT_STAT=Cannot stat %s: %s
+ERR_NETWORK_URL='%s://' is a network URL, not a mounted path — mount it first (e.g. via your file manager's Network browser), then type the real local path it mounts to (often under /run/user/<uid>/gvfs/...).
+ERR_NOT_A_DIRECTORY=Not a directory: %s
+ERR_FOLDER_DIALOG_FAILED=Folder dialog failed to open (is xdg-desktop-portal running?)
+SCAN_PROGRESS_ITEMS_SCANNED=%s items scanned
+SCAN_PROGRESS_OF_TOTAL=%s of %s items
+SCAN_PROGRESS_ITEMS=%s items
+
+# ---- Filesystem I/O errors ----
+ERR_IO_NOT_FOUND=can't find that directory
+ERR_IO_PERMISSION=don't have permission to read or enter that folder
+ERR_IO_OTHER=couldn't be read (%s)
+ERR_IO_LINE=%s — %s
+
+# ---- Extension / sunburst aggregate buckets ----
+EXT_OTHER_COUNT=(%s other extensions)
+EXT_NO_EXTENSION=(no extension)
+SEG_OTHER_ITEMS=(%s other items)
+SEG_FREE_SPACE=Free space
+SEG_OTHER_FS=%s [other filesystem]
+
+# ---- Summary view ----
+SUMMARY_CONTENTS=Contents
+SUMMARY_BY_EXTENSION=By file extension
+COL_SIZE=Size
+COL_FILES=Files
+COL_MODIFIED=Modified
+COL_NAME=Name
+COL_EXTENSION=Extension
+
+# ---- Top-left folder stats overlay ----
+STATS_SIZE=Size: %s
+STATS_FILES=Files: %s
+STATS_PERMS=Perms: %s
+
+# ---- Hover tooltip ----
+HOVER_AVAILABLE=Available:
+HOVER_SIZE=Size:
+HOVER_FILES=Files:
+HOVER_PERMS=Permissions:
+HOVER_MODIFIED=Modified:
+HOVER_CHANGED=Changed:
+HOVER_OWNER=Owner:
+HOVER_TYPE=Type:
+
+# ---- Context menu ----
+MENU_ZOOM=Zoom
+MENU_RESCAN=Rescan
+MENU_OPEN=Open
+MENU_HIDE=Hide
+MENU_TRASH=Move to Trash
+MENU_DELETE=Delete permanently
+MENU_CANCEL=Cancel
+
+# ---- Navigation cross ----
+NAV_UP=Parent slice / folder (↑)
+NAV_PREV=Previous slice (←)
+NAV_NEXT=Next slice (→)
+NAV_DOWN=Next ring out (↓) — Enter opens the highlighted slice
