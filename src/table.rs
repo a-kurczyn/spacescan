@@ -621,13 +621,18 @@ impl DiskScanApp {
         // on huge folders.
         let group = |c: &Node| u8::from(key.dirs_first && !c.is_dir);
         if cs.column == SortColumn::Name {
-            let mut keyed: Vec<(u8, &str, u32)> = idx.iter().map(|&i| (group(&children[i]), children[i].name.as_str(), i as u32)).collect();
-            if cs.ascending {
-                keyed.sort_unstable();
-            } else {
-                keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(a.1)).then(a.2.cmp(&b.2)));
-            }
-            idx = keyed.into_iter().map(|(_, _, i)| i as usize).collect();
+            // Natural, case-insensitive order, as in file managers: keys
+            // built once per name, then compared as bytes.
+            let mut keyed: Vec<(u8, Vec<u8>, &str, u32)> = idx
+                .par_iter()
+                .map(|&i| (group(&children[i]), natural_key(&children[i].name), children[i].name.as_str(), i as u32))
+                .collect();
+            keyed.par_sort_unstable_by(|a, b| {
+                let by_name = a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2));
+                let by_name = if cs.ascending { by_name } else { by_name.reverse() };
+                a.0.cmp(&b.0).then(by_name).then(a.3.cmp(&b.3))
+            });
+            idx = keyed.into_iter().map(|(_, _, _, i)| i as usize).collect();
         } else {
             // One u128 per row: group (bit 108) | value (76 bits, enough for
             // mode+uid+gid) | index (32 bits). Descending flips the value.
@@ -650,7 +655,7 @@ impl DiskScanApp {
                     (group(c) as u128) << (VALUE_BITS + 32) | v << 32 | i as u128
                 })
                 .collect();
-            keyed.sort_unstable();
+            keyed.par_sort_unstable();
             idx = keyed.into_iter().map(|k| (k & 0xFFFF_FFFF) as usize).collect();
         }
         RowOrder {

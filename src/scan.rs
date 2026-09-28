@@ -284,6 +284,53 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     out
 }
 
+/// Sort key for name order as file managers use it: case-insensitive, with
+/// runs of digits compared by value ("file2" before "file10", "007" = "7").
+/// Comparing these keys as bytes gives that order; building them once per
+/// name keeps sorting a huge folder fast.
+///
+/// A digit run becomes '0', its length without leading zeros (two bytes),
+/// then those digits: like a digit it sorts after '/' and before ':' and
+/// letters, and shorter numbers sort first.
+pub(crate) fn natural_key(name: &str) -> Vec<u8> {
+    let bytes = name.as_bytes();
+    let mut key = Vec::with_capacity(bytes.len() + 4);
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let run = &bytes[start..i];
+            let digits = &run[run.iter().take_while(|&&c| c == b'0').count()..];
+            let len = digits.len().min(u16::MAX as usize) as u16;
+            key.push(b'0');
+            key.extend_from_slice(&len.to_be_bytes());
+            key.extend_from_slice(&digits[..len as usize]);
+            continue;
+        }
+        let c = name[i..].chars().next().unwrap();
+        if c.is_ascii() {
+            key.push(c.to_ascii_lowercase() as u8);
+        } else {
+            let mut buf = [0u8; 4];
+            for l in c.to_lowercase() {
+                key.extend_from_slice(l.encode_utf8(&mut buf).as_bytes());
+            }
+        }
+        i += c.len_utf8();
+    }
+    key
+}
+
+/// Natural, case-insensitive name order (see `natural_key`); names equal
+/// under those rules fall back to plain byte order, so it's always the
+/// same.
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    natural_key(a).cmp(&natural_key(b)).then_with(|| a.cmp(b))
+}
+
 /// A whole path for display, escaped like `show_os`.
 pub(crate) fn show_path(p: &Path) -> String {
     show_os(p.as_os_str())
@@ -686,6 +733,15 @@ mod tests {
         assert_eq!(show_os(lookalike), "x\u{FFFD}y");
         assert_eq!(show_os(std::ffi::OsStr::new("a\nb\tc\\d")), "a\\nb\\tc\\\\d");
         assert_eq!(show_os(std::ffi::OsStr::new("ünïcödé 日本語")), "ünïcödé 日本語");
+    }
+
+    #[test]
+    fn natural_name_order() {
+        let mut names = vec!["file10", "File2", "file1", ".dotfile", "Beta", "alpha", "b", "Ärger", "a007", "a7", "a07x", "Zed"];
+        names.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(names, vec![".dotfile", "a007", "a7", "a07x", "alpha", "b", "Beta", "file1", "File2", "file10", "Zed", "Ärger"]);
+        assert_eq!(natural_cmp("abc", "abc"), std::cmp::Ordering::Equal);
+        assert_eq!(natural_cmp("x9", "x10"), std::cmp::Ordering::Less);
     }
 }
 

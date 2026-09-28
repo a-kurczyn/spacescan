@@ -81,7 +81,7 @@ pub(crate) enum ChartOrder {
 }
 
 pub(crate) fn cmp_names(a: &Node, b: &Node) -> std::cmp::Ordering {
-    a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.name.cmp(&b.name))
+    natural_cmp(&a.name, &b.name)
 }
 
 pub(crate) fn layout_sunburst(
