@@ -48,7 +48,7 @@ struct HoverInfo {
     gid: Option<u32>,
 }
 
-#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum SortColumn {
     Size,
@@ -796,9 +796,6 @@ impl eframe::App for DiskScanApp {
         // slice (like clicking it), Esc clears it, D / T delete it or move
         // it to the trash, r rescans the folder being viewed. Summary view:
         // the table's keys, see table.rs.
-        if !self.summary_view {
-            self.table.rows.clear();
-        }
         self.save_config_if_changed();
         if self.root.is_some() && !self.scanning && self.summary_view {
             self.table_keys(&ctx);

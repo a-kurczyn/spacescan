@@ -97,10 +97,18 @@ struct RowOrder {
     dotfile_size: u64,
 }
 
-/// One row of the table as last drawn.
-pub(crate) struct ListedRow {
-    pub path: PathBuf,
-    pub is_dir: bool,
+/// Where `cursor` is in the rows `idx` (indices into `view`'s children):
+/// `pos` remembers the last answer, so it's only searched for by path when
+/// the rows changed under it — searching every frame made a 300k-row folder
+/// sluggish whenever the cursor sat far down the list.
+fn find_cursor(cursor: &Path, pos: &std::cell::Cell<Option<usize>>, view: &Node, idx: &[usize]) -> Option<usize> {
+    let at = |i: usize| idx.get(i).is_some_and(|&k| view.children[k].path == cursor);
+    if let Some(i) = pos.get().filter(|&i| at(i)) {
+        return Some(i);
+    }
+    let found = (0..idx.len()).find(|&i| at(i));
+    pos.set(found);
+    found
 }
 
 /// A rescan of one folder ("r"), to be spliced back into the full tree
@@ -116,9 +124,8 @@ pub(crate) struct Graft {
 pub(crate) struct TableState {
     /// Row under the cursor, highlighted and moved like ncdu's.
     pub cursor: Option<PathBuf>,
-    /// Rows in display order as drawn this frame; empty when the table
-    /// isn't on screen.
-    pub rows: Vec<ListedRow>,
+    /// Where `cursor` was last found in the rows (see `find_cursor`).
+    cursor_pos: std::cell::Cell<Option<usize>>,
     /// Row order as last computed (see `OrderKey`).
     order: Option<RowOrder>,
     /// Scroll the table to the cursor row on the next draw.
@@ -151,8 +158,8 @@ impl Default for TableState {
     fn default() -> Self {
         TableState {
             cursor: None,
-            rows: Vec::new(),
             order: None,
+            cursor_pos: Default::default(),
             scroll_pending: false,
             page_rows: 10,
             dirs_first: false,
@@ -311,10 +318,16 @@ impl DiskScanApp {
         let shown_size = order.shown_size;
         // Keep a cursor on screen: the first row whenever the current one
         // isn't in this folder (just opened, deleted, filtered out...).
-        if !self.table.rows.iter().any(|r| Some(&r.path) == self.table.cursor.as_ref()) {
-            self.table.cursor = self.table.rows.first().map(|r| r.path.clone());
-        }
-        let cursor_row = self.table.cursor.as_ref().and_then(|c| self.table.rows.iter().position(|r| r.path == *c));
+        let found = self.table.cursor.as_ref().and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
+        let cursor_row = match found {
+            Some(i) => Some(i),
+            None => {
+                self.table.cursor = (n_rows > 0).then(|| row(0).path.clone());
+                let first = self.table.cursor.is_some().then_some(0);
+                self.table.cursor_pos.set(first);
+                first
+            }
+        };
         let scroll_to_cursor = std::mem::take(&mut self.table.scroll_pending);
 
         // Heading line: title, what's switched on, and where the keys are.
@@ -587,29 +600,54 @@ impl DiskScanApp {
     /// Filters and sorts `view_node`'s children for the table (see
     /// `OrderKey`), refreshing the row list the keys work on.
     fn row_order(&mut self, view_node: &Node, key: OrderKey) -> RowOrder {
-        let mut idx: Vec<usize> = (0..view_node.children.len())
+        let children = &view_node.children;
+        let hidden = &self.hidden;
+        let mut idx: Vec<usize> = (0..children.len())
             .filter(|&i| {
-                let c = &view_node.children[i];
-                !self.hidden.contains(&c.path) && (key.show_dotfiles || !c.name.starts_with('.'))
+                let c = &children[i];
+                (key.show_dotfiles || !c.name.starts_with('.')) && (hidden.is_empty() || !hidden.contains(&c.path))
             })
             .collect();
         let cs = key.sort;
-        let dirs_first = key.dirs_first;
-        idx.sort_by(|&a, &b| {
-            let (a, b) = (&view_node.children[a], &view_node.children[b]);
-            let ord = match cs.column {
-                SortColumn::Size => a.size.cmp(&b.size),
-                SortColumn::Files => a.file_count.cmp(&b.file_count),
-                SortColumn::Modified => a.mtime.cmp(&b.mtime),
-                SortColumn::Changed => a.ctime.cmp(&b.ctime),
-                SortColumn::Perms => (a.mode & 0o7777, a.uid, a.gid).cmp(&(b.mode & 0o7777, b.uid, b.gid)),
-                SortColumn::Name => a.name.cmp(&b.name),
-            };
-            let ord = if cs.ascending { ord } else { ord.reverse() };
-            if dirs_first { b.is_dir.cmp(&a.is_dir).then(ord) } else { ord }
-        });
-        let children = &view_node.children;
-        self.table.rows = idx.iter().map(|&i| ListedRow { path: children[i].path.clone(), is_dir: children[i].is_dir }).collect();
+        // Folders-first sorts group 0 (folders) before 1; the index breaks
+        // ties, so equal values keep a stable, repeatable order however
+        // they're sorted. Keys are precomputed into compact arrays and sorted
+        // there, rather than comparing nodes in place — several times faster
+        // on huge folders.
+        let group = |c: &Node| u8::from(key.dirs_first && !c.is_dir);
+        if cs.column == SortColumn::Name {
+            let mut keyed: Vec<(u8, &str, u32)> = idx.iter().map(|&i| (group(&children[i]), children[i].name.as_str(), i as u32)).collect();
+            if cs.ascending {
+                keyed.sort_unstable();
+            } else {
+                keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(a.1)).then(a.2.cmp(&b.2)));
+            }
+            idx = keyed.into_iter().map(|(_, _, i)| i as usize).collect();
+        } else {
+            // One u128 per row: group (bit 108) | value (76 bits, enough for
+            // mode+uid+gid) | index (32 bits). Descending flips the value.
+            const VALUE_BITS: u32 = 76;
+            const VALUE_MAX: u128 = (1 << VALUE_BITS) - 1;
+            let signed = |v: i64| (v as u64 ^ (1 << 63)) as u128;
+            let mut keyed: Vec<u128> = idx
+                .iter()
+                .map(|&i| {
+                    let c = &children[i];
+                    let v = match cs.column {
+                        SortColumn::Size => c.size as u128,
+                        SortColumn::Files => c.file_count as u128,
+                        SortColumn::Modified => signed(c.mtime),
+                        SortColumn::Changed => signed(c.ctime),
+                        SortColumn::Perms => ((c.mode & 0o7777) as u128) << 64 | (c.uid as u128) << 32 | c.gid as u128,
+                        SortColumn::Name => 0,
+                    };
+                    let v = if cs.ascending { v } else { VALUE_MAX - v };
+                    (group(c) as u128) << (VALUE_BITS + 32) | v << 32 | i as u128
+                })
+                .collect();
+            keyed.sort_unstable();
+            idx = keyed.into_iter().map(|k| (k & 0xFFFF_FFFF) as usize).collect();
+        }
         RowOrder {
             shown_size: idx.iter().map(|&i| children[i].size).sum(),
             dotfile_size: children.iter().filter(|c| c.name.starts_with('.')).map(|c| c.size).sum(),
@@ -818,9 +856,28 @@ impl DiskScanApp {
 
     // ---------------- Actions ----------------
 
-    fn cursor_row(&self) -> Option<&ListedRow> {
-        let c = self.table.cursor.as_ref()?;
-        self.table.rows.iter().find(|r| r.path == *c)
+    /// The table's rows: the folder shown and its children's indices in
+    /// display order — None when the last computed order doesn't belong to
+    /// what's shown now (the tree changed since it was drawn).
+    fn listed(&self) -> Option<(&Node, &[usize])> {
+        let order = self.table.order.as_ref()?;
+        if order.key.tree_gen != self.tree_gen || Some(&order.key.view) != self.view_stack.last() {
+            return None;
+        }
+        Some((get_node(self.root.as_ref()?, &order.key.view), &order.idx))
+    }
+
+    fn cursor_index(&self) -> Option<usize> {
+        let (view, idx) = self.listed()?;
+        find_cursor(self.table.cursor.as_ref()?, &self.table.cursor_pos, view, idx)
+    }
+
+    /// Path of the cursor row, and whether it's a folder.
+    fn cursor_row(&self) -> Option<(PathBuf, bool)> {
+        let i = self.cursor_index()?;
+        let (view, idx) = self.listed()?;
+        let n = &view.children[idx[i]];
+        Some((n.path.clone(), n.is_dir))
     }
 
     /// Arrow keys: ⬆⬇ previous/next row, ⬅ parent folder, ➡ open the
@@ -831,7 +888,7 @@ impl DiskScanApp {
             NavDir::Next => self.move_cursor(1),
             NavDir::Out => self.go_parent(),
             NavDir::In => {
-                if let Some(path) = self.cursor_row().filter(|r| r.is_dir).map(|r| r.path.clone()) {
+                if let Some((path, true)) = self.cursor_row() {
                     self.open_dir(&path);
                 }
             }
@@ -840,16 +897,18 @@ impl DiskScanApp {
 
     /// Moves the cursor `delta` rows, stopping at the first/last row.
     fn move_cursor(&mut self, delta: isize) {
-        let n = self.table.rows.len();
+        let from = self.cursor_index();
+        let Some((view, idx)) = self.listed() else { return };
+        let n = idx.len();
         if n == 0 {
             return;
         }
-        let pos = self.table.cursor.as_ref().and_then(|c| self.table.rows.iter().position(|r| r.path == *c));
-        let i = match pos {
+        let i = match from {
             None => 0,
             Some(i) => (i as isize).saturating_add(delta).clamp(0, n as isize - 1) as usize,
         };
-        self.table.cursor = Some(self.table.rows[i].path.clone());
+        self.table.cursor = Some(view.children[idx[i]].path.clone());
+        self.table.cursor_pos.set(Some(i));
         self.table.scroll_pending = true;
     }
 
@@ -877,7 +936,7 @@ impl DiskScanApp {
     /// Enter / double-click: opens the folder under the cursor, or hands a
     /// file to the desktop's default application for it.
     fn open_cursor(&mut self) {
-        let Some((path, is_dir)) = self.cursor_row().map(|r| (r.path.clone(), r.is_dir)) else { return };
+        let Some((path, is_dir)) = self.cursor_row() else { return };
         if is_dir {
             self.open_dir(&path);
             return;
@@ -970,7 +1029,15 @@ impl DiskScanApp {
         if self.table.marked.is_empty() {
             self.table.cursor.iter().cloned().collect()
         } else {
-            self.table.rows.iter().filter(|r| self.table.marked.contains(&r.path)).map(|r| r.path.clone()).collect()
+            match self.listed() {
+                Some((view, idx)) => idx
+                    .iter()
+                    .map(|&k| &view.children[k].path)
+                    .filter(|p| self.table.marked.contains(*p))
+                    .cloned()
+                    .collect(),
+                None => self.table.marked.iter().cloned().collect(),
+            }
         }
     }
 
@@ -983,13 +1050,13 @@ impl DiskScanApp {
     /// the next row that stays, and their marks go.
     pub(crate) fn table_forget(&mut self, gone: &[PathBuf]) {
         let gone: HashSet<&PathBuf> = gone.iter().collect();
-        let rows = &self.table.rows;
-        if let Some(pos) = self.table.cursor.as_ref().and_then(|c| rows.iter().position(|r| r.path == *c)) {
-            let next = rows[pos..]
+        if let (Some(pos), Some((view, idx))) = (self.cursor_index(), self.listed()) {
+            let path = |k: &usize| &view.children[*k].path;
+            let next = idx[pos..]
                 .iter()
-                .find(|r| !gone.contains(&r.path))
-                .or_else(|| rows[..pos].iter().rev().find(|r| !gone.contains(&r.path)));
-            self.table.cursor = next.map(|r| r.path.clone());
+                .find(|k| !gone.contains(path(k)))
+                .or_else(|| idx[..pos].iter().rev().find(|k| !gone.contains(path(k))));
+            self.table.cursor = next.map(|k| path(k).clone());
         }
         self.table.marked.retain(|p| !gone.contains(p));
         self.table.scroll_pending = true;
@@ -1039,5 +1106,122 @@ impl DiskScanApp {
             self.table.cursor = g.cursor;
             self.table.scroll_pending = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    /// Timing of the row order on a 300k-entry folder (run with
+    /// `cargo test --release -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn row_order_300k() {
+        let mut app = DiskScanApp::default();
+        let children: Vec<Node> = (0..300_000u64)
+            .map(|i| Node {
+                name: format!("file_{:06}.dat", (i * 7919) % 300_000),
+                path: PathBuf::from(format!("/t/many/file_{:06}.dat", (i * 7919) % 300_000)),
+                size: [0, 0, 4096, 8192, 20480, 69632][(i % 6) as usize],
+                file_count: 1,
+                ..empty_node()
+            })
+            .collect();
+        let folder = Node { children, is_dir: true, ..empty_node() };
+        for (column, ascending) in [
+            (SortColumn::Size, false),
+            (SortColumn::Size, true),
+            (SortColumn::Name, true),
+            (SortColumn::Modified, false),
+            (SortColumn::Perms, true),
+        ] {
+            let key = OrderKey {
+                tree_gen: 0,
+                view: vec![],
+                sort: SortState { column, ascending },
+                dirs_first: false,
+                show_dotfiles: true,
+                hidden: 0,
+            };
+            let t = Instant::now();
+            let order = app.row_order(&folder, key);
+            eprintln!("{column:?} asc={ascending}: {:?} ({} rows)", t.elapsed(), order.idx.len());
+        }
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    /// A table showing a folder of `names` (sizes descending), sorted by
+    /// size, largest first.
+    fn app_with(names: &[&str]) -> DiskScanApp {
+        let mut app = DiskScanApp::default();
+        let children: Vec<Node> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| Node {
+                name: n.to_string(),
+                path: PathBuf::from(format!("/t/{n}")),
+                size: 1000 - i as u64,
+                file_count: 1,
+                is_dir: false,
+                ..empty_node()
+            })
+            .collect();
+        let root = Arc::new(Node { path: PathBuf::from("/t"), children, is_dir: true, ..empty_node() });
+        app.root = Some(root.clone());
+        app.summary_view = true;
+        let key = OrderKey {
+            tree_gen: app.tree_gen,
+            view: vec![],
+            sort: SortState { column: SortColumn::Size, ascending: false },
+            dirs_first: false,
+            show_dotfiles: true,
+            hidden: 0,
+        };
+        let order = app.row_order(&root, key);
+        app.table.order = Some(order);
+        app.table.cursor = Some(PathBuf::from("/t/a"));
+        app
+    }
+
+    fn cursor(app: &DiskScanApp) -> String {
+        file_name_of(app.table.cursor.as_ref().unwrap())
+    }
+
+    #[test]
+    fn cursor_moves_and_clamps() {
+        let mut app = app_with(&["a", "b", "c", "d"]);
+        app.move_cursor(1);
+        assert_eq!(cursor(&app), "b");
+        app.move_cursor(isize::MAX / 2);
+        assert_eq!(cursor(&app), "d");
+        app.move_cursor(-10);
+        assert_eq!(cursor(&app), "a");
+        assert_eq!(app.cursor_row(), Some((PathBuf::from("/t/a"), false)));
+    }
+
+    #[test]
+    fn marks_come_back_in_table_order_and_forget_moves_cursor() {
+        let mut app = app_with(&["a", "b", "c", "d"]);
+        app.table.marked.insert(PathBuf::from("/t/c"));
+        app.table.marked.insert(PathBuf::from("/t/a"));
+        assert_eq!(app.selected_targets(), vec![PathBuf::from("/t/a"), PathBuf::from("/t/c")]);
+        app.table.cursor = Some(PathBuf::from("/t/b"));
+        app.table_forget(&[PathBuf::from("/t/b"), PathBuf::from("/t/c")]);
+        assert_eq!(cursor(&app), "d");
+        assert!(!app.table.marked.contains(&PathBuf::from("/t/c")));
+    }
+
+    #[test]
+    fn stale_order_is_not_used() {
+        let mut app = app_with(&["a", "b"]);
+        app.tree_gen += 1; // the tree changed since the order was computed
+        assert_eq!(app.cursor_row(), None);
+        app.move_cursor(1);
+        assert_eq!(cursor(&app), "a");
     }
 }

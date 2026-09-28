@@ -22,11 +22,16 @@ use std::sync::mpsc::channel;
 /// Mount points at or below `path`, from /proc/self/mountinfo.
 fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
     let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else { return Vec::new() };
-    info.lines()
+    let mut mounts: Vec<PathBuf> = info
+        .lines()
         .filter_map(|line| line.split(' ').nth(4))
         .map(|field| PathBuf::from(unescape_mountinfo(field)))
         .filter(|m| m.starts_with(path))
-        .collect()
+        .collect();
+    // Stacked mounts (e.g. autofs under a network share) repeat a path.
+    mounts.sort();
+    mounts.dedup();
+    mounts
 }
 
 /// mountinfo writes space, tab, newline and backslash as octal escapes
