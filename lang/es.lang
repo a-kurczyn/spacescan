@@ -5,8 +5,9 @@
 
 # ---- Barra de herramientas ----
 TOOLBAR_SUMMARY_VIEW=Vista de resumen
-TOOLBAR_SORT_BY_SIZE=Ordenado por tamaño (mayor primero) — clic para A–Z
-TOOLBAR_SORT_BY_NAME=Ordenado por nombre (A–Z) — clic para mayor primero
+TOOLBAR_CHART_VIEW=Vista de gráfico
+CHART_ORDER_SIZE=Mayor primero
+CHART_ORDER_NAME=Por nombre (A–Z)
 TOOLBAR_FILTERS_ACTIVE=Filtros (activos)
 TOOLBAR_EMPTY_TRASH=Vaciar papelera
 TOOLBAR_PICK_FOLDER=Elegir cualquier unidad, punto de montaje o carpeta para escanear
@@ -120,9 +121,14 @@ SEG_OTHER_FS=%s [otro sistema de archivos]
 # ---- Vista de resumen ----
 SUMMARY_CONTENTS=Contenido
 SUMMARY_BY_EXTENSION=Por extensión de archivo
+EXT_SHOW_BESIDE=Mostrar junto a la tabla de contenido
+EXT_SHOW_BELOW=Mostrar debajo de la tabla de contenido
 COL_SIZE=Tamaño
 COL_FILES=Archivos
 COL_MODIFIED=Modificado
+COL_MODIFIED_TIP=Último cambio del contenido (mtime)
+COL_CHANGED=Cambiado
+COL_CHANGED_TIP=Último cambio del contenido o de los metadatos — permisos, propietario, renombrado (ctime)
 COL_NAME=Nombre
 COL_EXTENSION=Extensión
 
@@ -151,7 +157,76 @@ MENU_DELETE=Eliminar permanentemente
 MENU_CANCEL=Cancelar
 
 # ---- Cruz de navegación ----
-NAV_UP=Segmento/carpeta superior (↑)
-NAV_PREV=Segmento anterior (←)
-NAV_NEXT=Segmento siguiente (→)
-NAV_DOWN=Siguiente anillo hacia fuera (↓) — Intro abre el segmento resaltado
+
+# ---- Teclas de la tabla / diálogo de borrado ----
+DELETE_CONFIRM_TITLE=¿Borrar permanentemente?
+DELETE_CONFIRM_FILE=Archivo, %s. No se puede deshacer.
+DELETE_CONFIRM_DIR=La carpeta y todo su contenido (%s, número de archivos: %s). No se puede deshacer.
+DELETE_CONFIRM_YES=Borrar
+ERR_DELETE_FAILED=No se pudo borrar %s: %s
+ERR_OPEN_FAILED=No se pudo abrir %s: %s
+
+TABLE_HELP_HINT=pulsa ? para ver los atajos de teclado
+TABLE_TAG_DIRS_FIRST=carpetas primero
+TABLE_TAG_DOTFILES_HIDDEN=archivos ocultos sin mostrar (%s)
+TABLE_TAG_MARKED=%s marcados (%s)
+TABLE_JUMP=Ir a:
+COL_PERCENT=%
+COL_PERMS=Permisos
+DELETE_CONFIRM_MANY=%s elementos (%s, número de archivos: %s). No se puede deshacer.
+DELETE_CONFIRM_MORE=…y %s más
+ERR_TRASH_FAILED=No se pudo mover %s a la papelera: %s
+TRASH_CONFIRM_TITLE=¿Vaciar la papelera?
+TRASH_CONFIRM_BODY=Se borrarán permanentemente %s elementos de la papelera (de todas las unidades). No se puede deshacer.
+TRASH_CONFIRM_YES=Vaciar papelera
+STATUS_TRASH_EMPTY=La papelera ya está vacía
+STATUS_EMPTYING_TRASH=Vaciando la papelera…
+STATUS_TRASH_EMPTIED=Papelera vaciada
+ERR_EMPTY_TRASH=No se pudo vaciar la papelera: %s
+ERR_SETTINGS_FILE=No se pudo leer el archivo de ajustes (se apartó como %s; se usan los valores predeterminados): %s
+ERR_SETTINGS_SAVE=No se pudieron guardar los ajustes: %s
+
+# ---- Atajos de teclado (?) ----
+HELP_TITLE=Atajos de teclado
+HELP_CLOSE=Cerrar
+HELP_SECTION_MOVE=Desplazarse
+HELP_SECTION_SORT=Orden y columnas
+HELP_SECTION_ACT=Acciones
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=Fila anterior / siguiente
+HELP_KEYS_PAGE=RePág AvPág
+HELP_PAGE=Una pantalla arriba / abajo
+HELP_KEYS_HOMEEND=Inicio Fin
+HELP_HOMEEND=Primera / última fila
+HELP_KEYS_OPEN=➡
+HELP_OPEN=Abrir la carpeta bajo el cursor
+HELP_KEYS_ENTER=Intro, doble clic
+HELP_ENTER=Abrir una carpeta, o un archivo con su aplicación predeterminada
+HELP_KEYS_PARENT=⬅ Retroceso
+HELP_PARENT=Carpeta superior
+HELP_KEYS_JUMP=/
+HELP_JUMP=Ir a un nombre (escribe y pulsa Intro)
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=Ordenar por tamaño / nombre / archivos / modificado / cambiado / permisos (otra vez: invertir)
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=Mostrar / ocultar tamaño / archivos / modificado / cambiado / permisos / porcentaje / barra
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=Mover a la izquierda / derecha la última columna ordenada, mostrada u ocultada
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=Carpetas antes que archivos
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=Mostrar / ocultar archivos ocultos (que empiezan por punto)
+HELP_KEYS_MARK=Espacio, Ctrl+clic
+HELP_MARK=Marcar / desmarcar la fila (Espacio además baja)
+HELP_KEYS_DELETE=D
+HELP_DELETE=Borrar permanentemente (filas marcadas, o la del cursor) — pide confirmación
+HELP_KEYS_TRASH=T
+HELP_TRASH=Mover a la papelera (filas marcadas, o la del cursor)
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=Volver a escanear esta carpeta
+HELP_KEYS_INFO=i
+HELP_INFO=Mostrar / ocultar los detalles de la fila del cursor
+HELP_KEYS_ESC=Esc
+HELP_ESC=Quitar las marcas, o cerrar los detalles
+HELP_KEYS_HELP=?
+HELP_HELP=Esta ayuda

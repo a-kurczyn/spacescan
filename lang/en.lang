@@ -17,10 +17,11 @@
 
 # ---- Toolbar ----
 TOOLBAR_SUMMARY_VIEW=Summary view
-TOOLBAR_SORT_BY_SIZE=Chart sorted by size (largest first) — click for A–Z
-TOOLBAR_SORT_BY_NAME=Chart sorted by name (A–Z) — click for largest first
+TOOLBAR_CHART_VIEW=Chart view
+CHART_ORDER_SIZE=Largest first
+CHART_ORDER_NAME=By name (A–Z)
 TOOLBAR_FILTERS_ACTIVE=Filters (active)
-TOOLBAR_EMPTY_TRASH=Empty Recycle Bin
+TOOLBAR_EMPTY_TRASH=Empty trash
 TOOLBAR_PICK_FOLDER=Choose any drive, mount point or folder to scan
 TOOLBAR_SCAN_ROOT=Scan from the system root (/)
 TOOLBAR_SCAN_HOME=Scan your home folder (%s)
@@ -132,9 +133,14 @@ SEG_OTHER_FS=%s [other filesystem]
 # ---- Summary view ----
 SUMMARY_CONTENTS=Contents
 SUMMARY_BY_EXTENSION=By file extension
+EXT_SHOW_BESIDE=Show beside the contents table
+EXT_SHOW_BELOW=Show below the contents table
 COL_SIZE=Size
 COL_FILES=Files
 COL_MODIFIED=Modified
+COL_MODIFIED_TIP=Last change to the contents (mtime)
+COL_CHANGED=Changed
+COL_CHANGED_TIP=Last change to the contents or metadata — permissions, owner, rename (ctime)
 COL_NAME=Name
 COL_EXTENSION=Extension
 
@@ -162,8 +168,76 @@ MENU_TRASH=Move to Trash
 MENU_DELETE=Delete permanently
 MENU_CANCEL=Cancel
 
-# ---- Navigation cross ----
-NAV_UP=Parent slice / folder (↑)
-NAV_PREV=Previous slice (←)
-NAV_NEXT=Next slice (→)
-NAV_DOWN=Next ring out (↓) — Enter opens the highlighted slice
+
+# ---- Summary table keys / delete dialog ----
+DELETE_CONFIRM_TITLE=Delete permanently?
+DELETE_CONFIRM_FILE=File, %s. This can't be undone.
+DELETE_CONFIRM_DIR=The folder and everything in it (%s, file count: %s). This can't be undone.
+DELETE_CONFIRM_YES=Delete
+ERR_DELETE_FAILED=Couldn't delete %s: %s
+ERR_OPEN_FAILED=Couldn't open %s: %s
+
+TABLE_HELP_HINT=press ? for keyboard shortcuts
+TABLE_TAG_DIRS_FIRST=folders first
+TABLE_TAG_DOTFILES_HIDDEN=dotfiles hidden (%s)
+TABLE_TAG_MARKED=%s marked (%s)
+TABLE_JUMP=Jump to:
+COL_PERCENT=%
+COL_PERMS=Permissions
+DELETE_CONFIRM_MANY=%s items (%s, file count: %s). This can't be undone.
+DELETE_CONFIRM_MORE=…and %s more
+ERR_TRASH_FAILED=Couldn't move %s to the trash: %s
+TRASH_CONFIRM_TITLE=Empty the trash?
+TRASH_CONFIRM_BODY=%s items in the trash (on every drive) will be deleted permanently. This can't be undone.
+TRASH_CONFIRM_YES=Empty trash
+STATUS_TRASH_EMPTY=The trash is already empty
+STATUS_EMPTYING_TRASH=Emptying the trash…
+STATUS_TRASH_EMPTIED=Trash emptied
+ERR_EMPTY_TRASH=Couldn't empty the trash: %s
+ERR_SETTINGS_FILE=Couldn't read the settings file (moved it aside to %s, using defaults): %s
+ERR_SETTINGS_SAVE=Couldn't save settings: %s
+
+# ---- Keyboard shortcuts overlay (?) ----
+HELP_TITLE=Keyboard shortcuts
+HELP_CLOSE=Close
+HELP_SECTION_MOVE=Moving around
+HELP_SECTION_SORT=Sorting and columns
+HELP_SECTION_ACT=Actions
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=Previous / next row
+HELP_KEYS_PAGE=PgUp PgDn
+HELP_PAGE=One screen up / down
+HELP_KEYS_HOMEEND=Home End
+HELP_HOMEEND=First / last row
+HELP_KEYS_OPEN=➡
+HELP_OPEN=Open the folder under the cursor
+HELP_KEYS_ENTER=Enter, double-click
+HELP_ENTER=Open a folder, or a file with its default application
+HELP_KEYS_PARENT=⬅ Backspace
+HELP_PARENT=Parent folder
+HELP_KEYS_JUMP=/
+HELP_JUMP=Jump to a name (type, then Enter)
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=Sort by size / name / files / modified / changed / permissions (again: reverse)
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=Show / hide size / files / modified / changed / permissions / percent / bar
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=Move the column last sorted, shown or hidden left / right
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=Folders before files
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=Show / hide dotfiles
+HELP_KEYS_MARK=Space, Ctrl+click
+HELP_MARK=Mark / unmark the row (Space also moves down)
+HELP_KEYS_DELETE=D
+HELP_DELETE=Delete permanently (marked rows, or the cursor row) — asks first
+HELP_KEYS_TRASH=T
+HELP_TRASH=Move to the trash (marked rows, or the cursor row)
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=Rescan this folder
+HELP_KEYS_INFO=i
+HELP_INFO=Show / hide details of the cursor row
+HELP_KEYS_ESC=Esc
+HELP_ESC=Clear marks, or close the details
+HELP_KEYS_HELP=?
+HELP_HELP=This help
