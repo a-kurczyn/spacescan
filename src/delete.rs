@@ -5,7 +5,85 @@
 //! dialog first; moving to the trash doesn't, since it can be undone.
 
 use super::*;
+use std::os::unix::fs::MetadataExt;
 use std::sync::mpsc::channel;
+
+// ---------------- Mount safety ----------------
+//
+// Deleting or trashing must never reach into another mounted filesystem (a
+// NAS share, a USB drive, a bind mount): `remove_dir_all` would happily
+// empty it, and trashing a folder renames it — mounts inside included —
+// into the Trash. So every delete/trash is refused up front if the target
+// is, or contains, a mount point (checked against the kernel's mount table,
+// which also catches bind mounts of the same filesystem), and the recursive
+// delete itself stops at any folder on a different device, in case
+// something gets mounted between the check and the delete.
+
+/// Mount points at or below `path`, from /proc/self/mountinfo.
+fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
+    let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else { return Vec::new() };
+    info.lines()
+        .filter_map(|line| line.split(' ').nth(4))
+        .map(|field| PathBuf::from(unescape_mountinfo(field)))
+        .filter(|m| m.starts_with(path))
+        .collect()
+}
+
+/// mountinfo writes space, tab, newline and backslash as octal escapes
+/// (`\040` for a space).
+fn unescape_mountinfo(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+            out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
+            i += 4;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Err (for the Issues log) if deleting or trashing `path` would touch a
+/// mounted filesystem: it is a mount point, or has one somewhere inside.
+/// A symlink is only ever removed itself, so it's always fine.
+fn mount_guard(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => return Ok(()),
+        Ok(m) if !m.is_dir() => return Ok(()),
+        Ok(_) => {}
+        Err(_) => return Ok(()), // gone or unreadable: the delete itself reports it
+    }
+    // Compare against the mount table in its own (canonical) form.
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mounts = mounts_at_or_under(&canonical);
+    if mounts.is_empty() {
+        return Ok(());
+    }
+    let list: Vec<String> = mounts.iter().map(|m| m.display().to_string()).collect();
+    Err(trf("ERR_CONTAINS_MOUNT", &[&path.display().to_string(), &list.join(", ")]))
+}
+
+/// Like `remove_dir_all`, but never crosses into another filesystem: a
+/// folder on a different device than `dir` stops the delete with an error.
+fn remove_dir_one_fs(dir: &Path, dev: u64) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let p = entry?.path();
+        let m = std::fs::symlink_metadata(&p)?;
+        if m.is_dir() {
+            if m.dev() != dev {
+                return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&p.display().to_string()])));
+            }
+            remove_dir_one_fs(&p, dev)?;
+        } else {
+            std::fs::remove_file(&p)?;
+        }
+    }
+    std::fs::remove_dir(dir)
+}
 
 /// What the confirmation dialog is asking about.
 #[derive(Clone)]
@@ -87,6 +165,9 @@ impl DiskScanApp {
     /// Opens the delete confirmation for `paths`; the delete itself
     /// happens once confirmed.
     pub(crate) fn ask_delete(&mut self, paths: Vec<PathBuf>) {
+        if !self.mount_check(&paths) {
+            return;
+        }
         let Some(root) = self.root.clone() else { return };
         let nodes: Vec<&Node> = paths.iter().filter_map(|p| find_node(&root, p)).collect();
         if nodes.is_empty() {
@@ -102,16 +183,35 @@ impl DiskScanApp {
 
     /// Moves `paths` to the trash at the start of the next frame.
     pub(crate) fn queue_trash(&mut self, paths: Vec<PathBuf>) {
-        if !paths.is_empty() {
+        if !paths.is_empty() && self.mount_check(&paths) {
             self.removal.pending = Some((paths, false));
         }
     }
 
+    /// Logs why each of `paths` can't be deleted/trashed (see
+    /// `mount_guard`); true if none is blocked.
+    fn mount_check(&mut self, paths: &[PathBuf]) -> bool {
+        let mut ok = true;
+        for p in paths {
+            if let Err(e) = mount_guard(p) {
+                self.log_issue(e);
+                ok = false;
+            }
+        }
+        ok
+    }
+
     /// The toolbar's 🗑: asks to empty every trash folder (home and other
-    /// drives alike).
+    /// drives alike) — unless something is mounted inside one.
     pub(crate) fn ask_empty_trash(&mut self) {
         if self.removal.purge_rx.is_some() {
             return; // already emptying
+        }
+        if let Ok(folders) = trash::os_limited::trash_folders() {
+            let blocked: Vec<PathBuf> = folders.iter().map(|f| f.join("files")).collect();
+            if !self.mount_check(&blocked) {
+                return;
+            }
         }
         match trash::os_limited::list() {
             Ok(items) if items.is_empty() => self.status = tr("STATUS_TRASH_EMPTY"),
@@ -189,6 +289,14 @@ impl DiskScanApp {
                 match confirm {
                     Confirm::Delete { paths, .. } => self.removal.pending = Some((paths, true)),
                     Confirm::EmptyTrash(items) => {
+                        // Checked again: something may have been mounted
+                        // while the dialog was open.
+                        if let Ok(folders) = trash::os_limited::trash_folders() {
+                            let files: Vec<PathBuf> = folders.iter().map(|f| f.join("files")).collect();
+                            if !self.mount_check(&files) {
+                                return;
+                            }
+                        }
                         let (tx, rx) = channel();
                         std::thread::spawn(move || {
                             let _ = tx.send(trash::os_limited::purge_all(&items).map_err(|e| e.to_string()));
@@ -209,9 +317,18 @@ impl DiskScanApp {
     fn remove_paths(&mut self, paths: Vec<PathBuf>, permanent: bool) {
         let mut done: Vec<PathBuf> = Vec::new();
         for p in paths {
+            // Checked again right before acting: the dialog may have been
+            // open while something got mounted.
+            if let Err(e) = mount_guard(&p) {
+                self.log_issue(e);
+                continue;
+            }
             let result = if permanent {
-                let is_dir = std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir());
-                if is_dir { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) }.map_err(|e| e.to_string())
+                match std::fs::symlink_metadata(&p) {
+                    Ok(m) if m.is_dir() => remove_dir_one_fs(&p, m.dev()),
+                    _ => std::fs::remove_file(&p),
+                }
+                .map_err(|e| e.to_string())
             } else {
                 trash::delete(&p).map_err(|e| e.to_string())
             };
@@ -277,5 +394,26 @@ impl DiskScanApp {
         if self.view_stack.is_empty() {
             self.view_stack.push(vec![]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mountinfo_escapes() {
+        assert_eq!(unescape_mountinfo("/mnt/Windows\\04010"), "/mnt/Windows 10");
+        assert_eq!(unescape_mountinfo("/a\\011b\\134c"), "/a\tb\\c");
+        assert_eq!(unescape_mountinfo("/plain"), "/plain");
+        assert_eq!(unescape_mountinfo("/trailing\\04"), "/trailing\\04");
+    }
+
+    #[test]
+    fn mount_table_is_prefix_matched_by_component() {
+        // "/" is always a mount point and contains everything.
+        assert!(!mounts_at_or_under(Path::new("/")).is_empty());
+        // A component-wise prefix: /pro doesn't contain /proc.
+        assert!(mounts_at_or_under(Path::new("/pro")).is_empty());
     }
 }
