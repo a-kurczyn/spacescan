@@ -439,6 +439,11 @@ impl DiskScanApp {
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .min_scrolled_height(0.0)
                 .max_scroll_height(table_h)
+                // Jump straight to the cursor row (after a key, a sort, a
+                // jump): the default animation redrew the whole table for up
+                // to 0.3 s on every long jump — noticeable CPU with software
+                // rendering, and a keyboard-driven list should just jump.
+                .animate_scrolling(false)
                 .auto_shrink([false, true]);
             for cell in &cells {
                 tb = tb.column(match cell {
