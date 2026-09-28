@@ -24,7 +24,7 @@ FILTER_TITLE=Filtros
 FILTER_CLOSE=Cerrar filtros
 FILTER_NAME_LABEL=Nombre
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
-FILTER_NAME_HOVER=Patrones separados por espacios o comas; un archivo coincide si alguno lo hace.\n* = cualquier secuencia de caracteres, ? = un carácter, [a,b,c] o {a,b,c} = alternativas.\nSin * ni ? coincide en cualquier parte del nombre. No distingue mayúsculas salvo que actives Aa.
+FILTER_NAME_HOVER=Patrones separados por espacios o comas; un archivo coincide si alguno lo hace. Pon un patrón entre "comillas dobles" (o escribe \\ antes de un carácter) para incluir espacios o comas.\n* = cualquier secuencia de caracteres, ? = un carácter, [a,b,c] o {a,b,c} = alternativas.\nSin * ni ? coincide en cualquier parte del nombre. No distingue mayúsculas salvo que actives Aa.
 FILTER_CASE_SENSITIVE=Distingue mayúsculas — clic para ignorarlas
 FILTER_CASE_INSENSITIVE=No distingue mayúsculas — clic para distinguirlas
 FILTER_COL_FROM_MIN=desde / mín
@@ -147,6 +147,9 @@ HOVER_AVAILABLE=Disponible:
 HOVER_SIZE=Tamaño:
 HOVER_FILES=Archivos:
 HOVER_PERMS=Permisos:
+HOVER_LINK=Enlace simbólico:
+HOVER_LINK_TARGET=→ %s (no se cuenta en los tamaños)
+HOVER_LINK_UNREADABLE=no se puede leer el destino
 HOVER_MODIFIED=Modificado:
 HOVER_CHANGED=Cambiado:
 HOVER_OWNER=Propietario:
@@ -166,9 +169,12 @@ MENU_CANCEL=Cancelar
 # ---- Teclas de la tabla / diálogo de borrado ----
 DELETE_CONFIRM_TITLE=¿Borrar permanentemente?
 DELETE_CONFIRM_FILE=Archivo, %s. No se puede deshacer.
+DELETE_CONFIRM_UNREADABLE=Contiene %s carpeta(s) que no se pudieron leer: su tamaño es desconocido y el borrado puede detenerse a medias.
+DELETE_CONFIRM_LINK=Enlace simbólico a %s. Solo se borra el enlace; su destino se conserva.
 DELETE_CONFIRM_DIR=La carpeta y todo su contenido (%s, número de archivos: %s). No se puede deshacer.
 DELETE_CONFIRM_YES=Borrar
 ERR_DELETE_FAILED=No se pudo borrar %s: %s
+ERR_DELETE_PARTIAL=%s puede haberse borrado en parte; vuelve a escanearlo (r) para ver lo que queda.
 ERR_OPEN_FAILED=No se pudo abrir %s: %s
 
 TABLE_HELP_HINT=pulsa ? para ver los atajos de teclado

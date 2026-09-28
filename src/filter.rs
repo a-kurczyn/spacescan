@@ -93,22 +93,40 @@ impl CompiledFilter {
 }
 
 /// Splits "*.iso, *.[mkv,mp4] backup" into patterns: whitespace, `,` and
-/// `;` separate patterns, except inside `[...]`/`{...}` lists.
+/// `;` separate patterns, except inside `[...]`/`{...}` lists. Text in
+/// double quotes is kept as one piece, spaces and commas included
+/// (`"my file*"`), and `\` makes the next character literal (`my\ file`).
 pub(crate) fn split_name_patterns(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut depth = 0i32;
-    for ch in s.chars() {
+    let mut quoted = false;
+    // A pattern that's only "" still counts (it matches every name).
+    let mut started = false;
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
         match ch {
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    cur.push(next);
+                }
+                started = true;
+            }
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if quoted => cur.push(c),
             '[' | '{' => { depth += 1; cur.push(ch); }
             ']' | '}' => { depth -= 1; cur.push(ch); }
             c if depth <= 0 && (c.is_whitespace() || c == ',' || c == ';') => {
-                if !cur.is_empty() { out.push(std::mem::take(&mut cur)); }
+                if started || !cur.is_empty() { out.push(std::mem::take(&mut cur)); }
+                started = false;
             }
             c => cur.push(c),
         }
     }
-    if !cur.is_empty() { out.push(cur); }
+    if started || !cur.is_empty() { out.push(cur); }
     out
 }
 
@@ -209,4 +227,17 @@ pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter) -> Option<Node> {
         gid: n.gid,
         btime: n.btime,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_patterns_split_and_quote() {
+        assert_eq!(split_name_patterns("*.iso, *.[mkv,mp4] backup"), vec!["*.iso", "*.[mkv,mp4]", "backup"]);
+        assert_eq!(split_name_patterns(r#""sp ace*" x"#), vec!["sp ace*", "x"]);
+        assert_eq!(split_name_patterns(r#"" leading space""#), vec![" leading space"]);
+        assert_eq!(split_name_patterns(r"my\ file a\,b"), vec!["my file", "a,b"]);
+    }
 }

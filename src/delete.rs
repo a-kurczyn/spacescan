@@ -136,6 +136,9 @@ enum Confirm {
         paths: Vec<PathBuf>,
         size: u64,
         file_count: u64,
+        /// Folders inside that the scan couldn't read: their size is
+        /// unknown and deleting them may fail partway.
+        unreadable: usize,
         /// Whether the single item is a folder; None for several.
         single_is_dir: Option<bool>,
     },
@@ -221,6 +224,7 @@ impl DiskScanApp {
             paths: nodes.iter().map(|n| n.path.clone()).collect(),
             size: nodes.iter().map(|n| n.size).sum(),
             file_count: nodes.iter().map(|n| n.file_count).sum(),
+            unreadable: self.unreadable.iter().filter(|u| nodes.iter().any(|n| u.starts_with(&n.path))).count(),
             single_is_dir: (nodes.len() == 1).then(|| nodes[0].is_dir),
         });
     }
@@ -277,16 +281,18 @@ impl DiskScanApp {
         let modal = egui::Modal::new("confirm_removal".into()).show(ctx, |ui| {
             ui.set_max_width(480.0);
             let yes_label = match &confirm {
-                Confirm::Delete { paths, size, file_count, single_is_dir } => {
+                Confirm::Delete { paths, size, file_count, unreadable, single_is_dir } => {
                     ui.heading(tr("DELETE_CONFIRM_TITLE"));
                     ui.add_space(6.0);
                     match single_is_dir {
                         Some(is_dir) => {
                             ui.label(egui::RichText::new(show_path(&paths[0])).monospace());
-                            ui.label(if *is_dir {
-                                trf("DELETE_CONFIRM_DIR", &[&human_size(*size), &format_count(*file_count)])
-                            } else {
-                                trf("DELETE_CONFIRM_FILE", &[&human_size(*size)])
+                            let link = std::fs::read_link(&paths[0]).ok();
+                            ui.label(match (&link, *is_dir) {
+                                // Removing a link never touches its target.
+                                (Some(target), _) => trf("DELETE_CONFIRM_LINK", &[&show_path(target)]),
+                                (None, true) => trf("DELETE_CONFIRM_DIR", &[&human_size(*size), &format_count(*file_count)]),
+                                (None, false) => trf("DELETE_CONFIRM_FILE", &[&human_size(*size)]),
                             });
                         }
                         None => {
@@ -302,6 +308,13 @@ impl DiskScanApp {
                                 ui.weak(trf("DELETE_CONFIRM_MORE", &[&format_count((paths.len() - SHOWN) as u64)]));
                             }
                         }
+                    }
+                    if *unreadable > 0 {
+                        ui.add_space(4.0);
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            trf("DELETE_CONFIRM_UNREADABLE", &[&format_count(*unreadable as u64)]),
+                        );
                     }
                     tr("DELETE_CONFIRM_YES")
                 }
@@ -394,6 +407,11 @@ impl DiskScanApp {
                 Err(e) => {
                     let key = if permanent { "ERR_DELETE_FAILED" } else { "ERR_TRASH_FAILED" };
                     self.log_issue(trf(key, &[&show_path(&p), &e]));
+                    // A folder may be half gone now: say so, since the
+                    // chart/table still show it as scanned.
+                    if permanent && std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir()) {
+                        self.log_issue(trf("ERR_DELETE_PARTIAL", &[&show_path(&p)]));
+                    }
                 }
             }
         }
@@ -501,6 +519,20 @@ mod tests {
         assert!(!top.exists());
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep me");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn delete_dialog_counts_unreadable_folders_inside() {
+        let mut app = DiskScanApp::default();
+        let locked = Node { name: "locked".into(), path: PathBuf::from("/nonexistent-qa/locked"), is_dir: true, ..empty_node() };
+        let other = Node { name: "other".into(), path: PathBuf::from("/nonexistent-qa/other"), is_dir: true, ..empty_node() };
+        app.root = Some(Arc::new(Node { path: PathBuf::from("/nonexistent-qa"), children: vec![locked, other], is_dir: true, ..empty_node() }));
+        app.unreadable = vec![PathBuf::from("/nonexistent-qa/locked/secret"), PathBuf::from("/nonexistent-qa/elsewhere")];
+        app.ask_delete(vec![PathBuf::from("/nonexistent-qa/locked")]);
+        assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 1, .. })));
+        app.removal.confirm = None;
+        app.ask_delete(vec![PathBuf::from("/nonexistent-qa/other")]);
+        assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 0, .. })));
     }
 
     #[test]

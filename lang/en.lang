@@ -36,7 +36,7 @@ FILTER_TITLE=Filters
 FILTER_CLOSE=Close filters
 FILTER_NAME_LABEL=Name
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
-FILTER_NAME_HOVER=Patterns separated by spaces or commas; a file matches if any one does.\n* = any characters, ? = one character, [a,b,c] or {a,b,c} = alternatives.\nWithout * or ? it matches anywhere in the name. Case-insensitive unless the Aa toggle is on.
+FILTER_NAME_HOVER=Patterns separated by spaces or commas; a file matches if any one does. Put a pattern in "double quotes" (or write \\ before a character) to include spaces or commas.\n* = any characters, ? = one character, [a,b,c] or {a,b,c} = alternatives.\nWithout * or ? it matches anywhere in the name. Case-insensitive unless the Aa toggle is on.
 FILTER_CASE_SENSITIVE=Case-sensitive — click to ignore case
 FILTER_CASE_INSENSITIVE=Case-insensitive — click to match case exactly
 FILTER_COL_FROM_MIN=from / min
@@ -159,6 +159,9 @@ HOVER_AVAILABLE=Available:
 HOVER_SIZE=Size:
 HOVER_FILES=Files:
 HOVER_PERMS=Permissions:
+HOVER_LINK=Symbolic link:
+HOVER_LINK_TARGET=→ %s (not counted in sizes)
+HOVER_LINK_UNREADABLE=target can't be read
 HOVER_MODIFIED=Modified:
 HOVER_CHANGED=Changed:
 HOVER_OWNER=Owner:
@@ -177,9 +180,12 @@ MENU_CANCEL=Cancel
 # ---- Summary table keys / delete dialog ----
 DELETE_CONFIRM_TITLE=Delete permanently?
 DELETE_CONFIRM_FILE=File, %s. This can't be undone.
+DELETE_CONFIRM_UNREADABLE=Contains %s folder(s) that couldn't be read: their size is unknown and deleting may stop partway.
+DELETE_CONFIRM_LINK=Symbolic link to %s. Only the link is removed; its target stays.
 DELETE_CONFIRM_DIR=The folder and everything in it (%s, file count: %s). This can't be undone.
 DELETE_CONFIRM_YES=Delete
 ERR_DELETE_FAILED=Couldn't delete %s: %s
+ERR_DELETE_PARTIAL=%s may have been partly deleted; rescan it (r) to see what's left.
 ERR_OPEN_FAILED=Couldn't open %s: %s
 
 TABLE_HELP_HINT=press ? for keyboard shortcuts

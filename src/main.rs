@@ -215,6 +215,9 @@ struct DiskScanApp {
     tree_gen: u64,
     /// Window width added for open side panels (see panels.rs).
     window_grown: panels::WindowGrown,
+    /// Folders the last scan couldn't list (size unknown), for the delete
+    /// dialog's warning.
+    unreadable: Vec<PathBuf>,
     /// Pending deletes and their confirmation (see delete.rs).
     removal: delete::Removal,
     /// Item the chart's right-click menu acts on, fixed when it opens.
@@ -301,6 +304,7 @@ impl Default for DiskScanApp {
             hovered: None,
             context_target: None,
             removal: Default::default(),
+            unreadable: Vec::new(),
             window_grown: Default::default(),
             tree_gen: 0,
             summary_view: false,
@@ -357,6 +361,8 @@ impl DiskScanApp {
         self.scanning = true;
         // Not the previous scan's "completed in …" while this one runs.
         self.status = tr("STATUS_SCANNING");
+        // This scan re-reports whatever it can't read under `path`.
+        self.unreadable.retain(|u| !u.starts_with(&path));
         self.scan_start = Instant::now();
         self.scanned_count = 0;
         self.selection = None;
@@ -709,6 +715,9 @@ impl DiskScanApp {
                 match rx.try_recv() {
                     Ok(ScanMsg::Progress(n)) => {
                         self.scanned_count = n;
+                    }
+                    Ok(ScanMsg::Unreadable(p)) => {
+                        self.unreadable.push(p);
                     }
                     Ok(ScanMsg::LogError(msg)) => {
                         if self.log.len() < self.settings.max_log_lines {

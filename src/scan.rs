@@ -530,6 +530,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
         Err(e) => {
             let _ = progress.send(ScanMsg::LogError(friendly_io_error(path, &e)));
+            let _ = progress.send(ScanMsg::Unreadable(path.to_path_buf()));
             Vec::new()
         }
     };
@@ -594,6 +595,9 @@ pub(crate) enum ScanMsg {
     Done(Node, f64),
     Error(String),
     LogError(String),
+    /// A folder whose contents couldn't be listed (so its size is unknown),
+    /// besides the LogError line for the Issues log.
+    Unreadable(PathBuf),
 }
 
 /// Live result of the counting pass. Shared directly rather than sent as

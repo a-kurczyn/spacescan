@@ -269,6 +269,16 @@ pub(crate) fn details_grid(
                 ui.label(tr("HOVER_PERMS"));
                 ui.label(format_perms(m));
                 ui.end_row();
+                // A symbolic link: say so, and where it points (its target
+                // isn't part of any total).
+                if m & 0o170000 == 0o120000 {
+                    ui.label(tr("HOVER_LINK"));
+                    ui.label(match std::fs::read_link(&h.path) {
+                        Ok(target) => trf("HOVER_LINK_TARGET", &[&show_path(&target)]),
+                        Err(_) => tr("HOVER_LINK_UNREADABLE"),
+                    });
+                    ui.end_row();
+                }
             }
             if let Some(mt) = h.mtime {
                 ui.label(tr("HOVER_MODIFIED"));
