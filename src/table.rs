@@ -522,7 +522,7 @@ impl DiskScanApp {
                                 ui.label(human_size(c.size));
                             }
                             Cell::Opt(TableCol::Files) => {
-                                ui.label(format_count(c.file_count.max(1)));
+                                ui.label(format_count(c.file_count));
                             }
                             Cell::Opt(TableCol::Modified) => {
                                 ui.label(if c.mtime == 0 { "-".to_string() } else { format_epoch(c.mtime) });
@@ -599,7 +599,7 @@ impl DiskScanApp {
             let (a, b) = (&view_node.children[a], &view_node.children[b]);
             let ord = match cs.column {
                 SortColumn::Size => a.size.cmp(&b.size),
-                SortColumn::Files => a.file_count.max(1).cmp(&b.file_count.max(1)),
+                SortColumn::Files => a.file_count.cmp(&b.file_count),
                 SortColumn::Modified => a.mtime.cmp(&b.mtime),
                 SortColumn::Changed => a.ctime.cmp(&b.ctime),
                 SortColumn::Perms => (a.mode & 0o7777, a.uid, a.gid).cmp(&(b.mode & 0o7777, b.uid, b.gid)),

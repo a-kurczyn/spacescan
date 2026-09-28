@@ -188,7 +188,7 @@ pub(crate) fn layout_sunburst(
             ring,
             name: child.name.clone(),
             size: child.size,
-            file_count: child.file_count.max(1),
+            file_count: child.file_count,
             is_dir: child.is_dir,
             is_other: false,
             is_free: false,

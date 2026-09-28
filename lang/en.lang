@@ -92,6 +92,8 @@ SETTINGS_CURVE_SMOOTH=Curve smoothness (px/step, lower = smoother)
 SETTINGS_LOG=Log
 SETTINGS_MAX_LOG_LINES=Max stored issue lines
 SETTINGS_SCANNING=Scanning
+SETTINGS_APPARENT_SIZE=Count apparent size
+SETTINGS_APPARENT_SIZE_HOVER=Count each file's length instead of the disk space it uses. Off: sparse files count what they really use, hard-linked files count once, like du. Turn on for network or FUSE drives that report no disk usage. Takes effect on the next scan.
 SETTINGS_PROGRESS_INTERVAL=Progress report interval (items, always a power of 2)
 SETTINGS_DEFAULTS=Defaults
 SETTINGS_LANGUAGE=Language

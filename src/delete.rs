@@ -176,7 +176,7 @@ impl DiskScanApp {
         self.removal.confirm = Some(Confirm::Delete {
             paths: nodes.iter().map(|n| n.path.clone()).collect(),
             size: nodes.iter().map(|n| n.size).sum(),
-            file_count: nodes.iter().map(|n| n.file_count.max(1)).sum(),
+            file_count: nodes.iter().map(|n| n.file_count).sum(),
             single_is_dir: (nodes.len() == 1).then(|| nodes[0].is_dir),
         });
     }

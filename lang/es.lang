@@ -80,6 +80,8 @@ SETTINGS_CURVE_SMOOTH=Suavidad de curvas (px/paso, menor = más suave)
 SETTINGS_LOG=Registro
 SETTINGS_MAX_LOG_LINES=Máx. líneas de incidencias guardadas
 SETTINGS_SCANNING=Escaneo
+SETTINGS_APPARENT_SIZE=Contar tamaño aparente
+SETTINGS_APPARENT_SIZE_HOVER=Contar la longitud de cada archivo en lugar del espacio en disco que ocupa. Desactivado: los archivos dispersos cuentan lo que realmente ocupan y los enlazados con enlaces duros cuentan una vez, como du. Actívalo en unidades de red o FUSE que no informan del uso de disco. Se aplica en el próximo escaneo.
 SETTINGS_PROGRESS_INTERVAL=Intervalo de progreso (elementos, siempre potencia de 2)
 SETTINGS_DEFAULTS=Restablecer
 SETTINGS_LANGUAGE=Idioma

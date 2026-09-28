@@ -600,6 +600,8 @@ impl DiskScanApp {
 
                         ui.separator();
                         ui.label(tr("SETTINGS_SCANNING"));
+                        ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
+                            .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.progress_interval_pow2, Settings::PROGRESS_POW2)
                                 .custom_formatter(|v, _| format!("{}", 1u64 << (v as u32)))

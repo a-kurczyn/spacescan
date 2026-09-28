@@ -111,6 +111,10 @@ struct Settings {
     /// can only ever select a power of two — never an arbitrary interval
     /// that could over- or under-report.
     progress_interval_pow2: u32,
+    /// Count file lengths instead of disk space used (takes effect on the
+    /// next scan). Off by default: sparse files and hard links would
+    /// overstate usage.
+    apparent_size: bool,
 }
 
 /// Allowed ranges, shared by the settings sliders and `sanitized` (for
@@ -172,6 +176,7 @@ impl Default for Settings {
             tess_px_per_step: 3.0,
             max_log_lines: 500,
             progress_interval_pow2: 9, // 1 << 9 == 512, the original hardcoded value
+            apparent_size: false,
         }
     }
 }
@@ -369,6 +374,7 @@ impl DiskScanApp {
         self.cancel_flag = Some(cancel.clone());
 
         let progress_interval: u64 = 1u64 << self.settings.progress_interval_pow2;
+        let apparent_size = self.settings.apparent_size;
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
@@ -408,7 +414,16 @@ impl DiskScanApp {
             // scan_dir streams a SliceDone for every directory as it
             // finishes (any depth), so the sunburst blossoms slice by slice
             // throughout the scan — see SliceDone's doc comment.
-            let root = scan_dir(&path, root_dev, &tx, &counter, &cancel, progress_interval);
+            let ctx = ScanCtx {
+                root_dev,
+                progress: &tx,
+                counter: &counter,
+                cancel: &cancel,
+                progress_interval,
+                apparent_size,
+                hard_links: Default::default(),
+            };
+            let root = scan_dir(&path, &ctx);
             scan_finished.store(true, std::sync::atomic::Ordering::Relaxed);
             if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = tx.send(ScanMsg::Done(root, start.elapsed().as_secs_f64()));

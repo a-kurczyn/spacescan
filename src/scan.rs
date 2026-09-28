@@ -285,16 +285,66 @@ pub(crate) fn birth_secs(m: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn scan_entry(
-    entry: &std::fs::DirEntry,
-    root_dev: u64,
-    progress: &Sender<ScanMsg>,
-    counter: &std::sync::atomic::AtomicU64,
-    cancel: &Arc<std::sync::atomic::AtomicBool>,
-    progress_interval: u64,
-) -> Node {
+/// Everything a scan's worker threads share.
+pub(crate) struct ScanCtx<'a> {
+    /// Device of the scanned folder: other filesystems aren't entered.
+    pub(crate) root_dev: u64,
+    pub(crate) progress: &'a Sender<ScanMsg>,
+    pub(crate) counter: &'a std::sync::atomic::AtomicU64,
+    pub(crate) cancel: &'a Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) progress_interval: u64,
+    /// Count file lengths instead of the disk space actually used.
+    pub(crate) apparent_size: bool,
+    /// (device, inode) of files with several hard links already counted,
+    /// so each is counted once, like `du`.
+    pub(crate) hard_links: std::sync::Mutex<HashSet<(u64, u64)>>,
+}
+
+impl ScanCtx<'_> {
+    /// Size to count for an entry: disk space actually allocated (so a
+    /// sparse file counts what it really uses), or its length when
+    /// `apparent_size` is set. A file with several hard links counts only
+    /// at the first name found.
+    fn size_of(&self, m: &std::fs::Metadata) -> u64 {
+        use std::os::unix::fs::MetadataExt;
+        if !m.is_dir() && m.nlink() > 1 && !self.hard_links.lock().unwrap().insert((m.dev(), m.ino())) {
+            return 0;
+        }
+        if self.apparent_size { m.len() } else { m.blocks() * 512 }
+    }
+}
+
+/// Paths longer than this are opened relative to their parent folder
+/// (see `DirHandle`), safely under the kernel's 4096-byte PATH_MAX.
+const LONG_PATH: usize = 3800;
+
+/// An open folder, kept while scanning a deep subtree so that folders
+/// whose full path is too long for the kernel can still be opened, relative
+/// to it, via the short `/proc/self/fd/<fd>/<name>`.
+type DirHandle = Option<std::fs::File>;
+
+/// A path the kernel will accept for `path`: itself, or — when it's too
+/// long — `/proc/self/fd/<parent fd>/<name>` relative to its open parent.
+fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
+    use std::os::fd::AsRawFd;
+    match parent {
+        Some(f) if path.as_os_str().len() > LONG_PATH => {
+            let mut p = PathBuf::from(format!("/proc/self/fd/{}", f.as_raw_fd()));
+            if let Some(name) = path.file_name() {
+                p.push(name);
+            }
+            p
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// `path` is the entry's real full path (DirEntry::path would be relative
+/// to however its folder was opened); `dir` is its folder's handle.
+pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHandle, ctx: &ScanCtx) -> Node {
+    let ScanCtx { root_dev, progress, counter, progress_interval, .. } = *ctx;
     use std::os::unix::fs::MetadataExt;
-    let p = entry.path();
+    let p = path;
     let ft = entry.file_type();
     let node = match ft {
         Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
@@ -319,12 +369,12 @@ pub(crate) fn scan_entry(
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
                 }
             } else {
-                scan_dir(&p, root_dev, progress, counter, cancel, progress_interval)
+                scan_dir_in(&p, dir, ctx)
             }
         }
         _ => {
             let (sz, mode, mtime, ctime, uid, gid, btime) = match entry.metadata() {
-                Ok(m) => (m.len(), m.mode(), m.mtime(), m.ctime(), m.uid(), m.gid(), birth_secs(&m)),
+                Ok(m) => (ctx.size_of(&m), m.mode(), m.mtime(), m.ctime(), m.uid(), m.gid(), birth_secs(&m)),
                 Err(e) => {
                     let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
                     (0, 0, 0, 0, 0, 0, 0)
@@ -353,14 +403,14 @@ pub(crate) fn scan_entry(
     node
 }
 
-pub(crate) fn scan_dir(
-    path: &Path,
-    root_dev: u64,
-    progress: &Sender<ScanMsg>,
-    counter: &std::sync::atomic::AtomicU64,
-    cancel: &Arc<std::sync::atomic::AtomicBool>,
-    progress_interval: u64,
-) -> Node {
+pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
+    scan_dir_in(path, &None, ctx)
+}
+
+/// Scans `path`, whose parent folder is open as `parent` when the path is
+/// long (see `DirHandle`).
+fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
+    let ScanCtx { progress, cancel, .. } = *ctx;
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
     let name = file_name_of(path);
@@ -382,13 +432,25 @@ pub(crate) fn scan_dir(
             btime: 0,
         };
     }
-    let self_meta = std::fs::metadata(path).ok();
+    // Keep this folder open when its children's paths may get too long
+    // to open directly.
+    let open_at = openable(path, parent);
+    let handle: DirHandle =
+        if path.as_os_str().len() + 256 > LONG_PATH { std::fs::File::open(&open_at).ok() } else { None };
+    let listing = match &handle {
+        Some(f) => {
+            use std::os::fd::AsRawFd;
+            PathBuf::from(format!("/proc/self/fd/{}", f.as_raw_fd()))
+        }
+        None => open_at.clone(),
+    };
+    let self_meta = std::fs::metadata(&listing).ok();
     let self_mode = self_meta.as_ref().map(|m| m.mode()).unwrap_or(0);
     let self_mtime = self_meta.as_ref().map(|m| m.mtime()).unwrap_or(0);
     let self_ctime = self_meta.as_ref().map(|m| m.ctime()).unwrap_or(0);
     let self_uid = self_meta.as_ref().map(|m| m.uid()).unwrap_or(0);
     let self_gid = self_meta.as_ref().map(|m| m.gid()).unwrap_or(0);
-    let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(path) {
+    let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(&listing) {
         Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
         Err(e) => {
             let _ = progress.send(ScanMsg::LogError(friendly_io_error(path, &e)));
@@ -398,12 +460,15 @@ pub(crate) fn scan_dir(
 
     let children: Vec<Node> = entries
         .par_iter()
-        .map(|entry| scan_entry(entry, root_dev, progress, counter, cancel, progress_interval))
+        .map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx))
         .collect();
 
     let mut children = children;
     children.sort_by(|a, b| b.size.cmp(&a.size));
-    let size = children.iter().map(|c| c.size).sum();
+    // The folder's own entry takes space too (large on folders with many
+    // entries).
+    let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
+    let size = children.iter().map(|c| c.size).sum::<u64>() + own_size;
     let file_count = children.iter().map(|c| c.file_count).sum::<u64>() + if children.is_empty() { 0 } else { 0 };
     let file_count = if children.is_empty() { 0 } else { file_count };
 
@@ -489,7 +554,8 @@ pub(crate) fn count_entries(path: &Path, root_dev: u64, found: &std::sync::atomi
 }
 
 pub(crate) fn human_size(bytes: u64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB", "PB"];
+    // Powers of 1024, so binary (IEC) unit names.
+    let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
     let mut v = bytes as f64;
     let mut u = 0;
     while v >= 1024.0 && u < units.len() - 1 {
