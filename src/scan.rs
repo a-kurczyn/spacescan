@@ -688,3 +688,65 @@ mod tests {
         assert_eq!(show_os(std::ffi::OsStr::new("ünïcödé 日本語")), "ünïcödé 日本語");
     }
 }
+
+#[cfg(test)]
+mod memory {
+    use super::*;
+
+    fn rss_mb() -> u64 {
+        let statm = std::fs::read_to_string("/proc/self/statm").unwrap();
+        let pages: u64 = statm.split_whitespace().nth(1).unwrap().parse().unwrap();
+        pages * 4096 / (1 << 20)
+    }
+
+    /// Resident memory across rescans of a big tree, as the app does them:
+    /// the new scan is built while the old tree is still held, then
+    /// replaces it. Run with
+    /// `SPACEMAP_MEM_TREE=/ cargo test --release rescan_memory -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn rescan_memory() {
+        let root = PathBuf::from(std::env::var("SPACEMAP_MEM_TREE").unwrap_or_else(|_| "/".into()));
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(&root).unwrap().dev();
+        let scan = || {
+            let ctx = ScanCtx {
+                root_dev: dev,
+                progress: &tx,
+                counter: &counter,
+                cancel: &cancel,
+                progress_interval: 512,
+                apparent_size: false,
+                hard_links: Default::default(),
+            };
+            scan_dir(&root, &ctx)
+        };
+        eprintln!("start: {} MB", rss_mb());
+        let mut tree = Arc::new(scan());
+        eprintln!("scan 1: {} MB ({} files)", rss_mb(), tree.file_count);
+        for i in 2..=6 {
+            let new = Arc::new(scan());
+            tree = new; // the old tree is dropped here
+            after_tree_dropped();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            eprintln!("scan {i}: {} MB", rss_mb());
+        }
+        drop(tree);
+    }
+}
+
+/// Called after a whole scanned tree has been freed. glibc keeps freed
+/// memory for reuse (spread over the scan threads' arenas), so without this
+/// every rescan left the process about one tree bigger; this hands it back
+/// to the system. On a background thread: it can take a moment on a big
+/// heap.
+pub(crate) fn after_tree_dropped() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    std::thread::spawn(|| unsafe {
+        libc::malloc_trim(0);
+    });
+}

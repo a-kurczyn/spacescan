@@ -527,7 +527,16 @@ impl DiskScanApp {
         self.scanning = false;
         self.scan_rx = None;
         self.cancel_graft();
+        self.scan_ended();
         self.status = tr("STATUS_SCAN_ABORTED");
+    }
+
+    /// A scan finished, failed or was cancelled: the live-preview tree (a
+    /// copy of every folder scanned) isn't needed any more, and the tree the
+    /// new result replaced has been freed — hand that memory back.
+    fn scan_ended(&mut self) {
+        self.partial_root = empty_node();
+        after_tree_dropped();
     }
 
     /// Drains completed on-demand MIME lookups into the cache.
@@ -721,10 +730,12 @@ impl DiskScanApp {
                         self.scanning = false;
                         self.status = trf("STATUS_SCAN_COMPLETED", &[&format!("{:.1}", secs)]);
                         self.scan_rx = None;
+                        self.scan_ended();
                         break;
                     }
                     Ok(ScanMsg::Error(e)) => {
                         self.cancel_graft();
+                        self.scan_ended();
                         self.status = e;
                         self.scanning = false;
                         self.scan_rx = None;
@@ -733,6 +744,7 @@ impl DiskScanApp {
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         self.cancel_graft();
+                        self.scan_ended();
                         self.scanning = false;
                         self.scan_rx = None;
                         break;
