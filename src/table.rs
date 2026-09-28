@@ -665,7 +665,7 @@ impl DiskScanApp {
                         } else {
                             draw_file_icon(ui.painter(), r, color);
                         }
-                        ui.add(egui::Label::new(egui::RichText::new(h.path.display().to_string()).monospace()).wrap());
+                        ui.add(egui::Label::new(egui::RichText::new(show_path(&h.path)).monospace()).wrap());
                     });
                     ui.separator();
                     details_grid(
@@ -889,7 +889,7 @@ impl DiskScanApp {
                     let _ = child.wait();
                 });
             }
-            Err(e) => self.log_issue(trf("ERR_OPEN_FAILED", &[&path.display().to_string(), &e.to_string()])),
+            Err(e) => self.log_issue(trf("ERR_OPEN_FAILED", &[&show_path(&path), &e.to_string()])),
         }
     }
 
@@ -997,7 +997,7 @@ impl DiskScanApp {
 
     /// r: rescans just the folder being viewed; the result is spliced into
     /// the full tree when done (see finish_graft).
-    fn rescan_current(&mut self) {
+    pub(crate) fn rescan_current(&mut self) {
         let Some(root) = self.root.clone() else { return };
         let target = self.current_view_node(&root).path.clone();
         let graft = Graft {

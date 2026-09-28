@@ -63,8 +63,27 @@ fn mount_guard(path: &Path) -> Result<(), String> {
     if mounts.is_empty() {
         return Ok(());
     }
-    let list: Vec<String> = mounts.iter().map(|m| m.display().to_string()).collect();
-    Err(trf("ERR_CONTAINS_MOUNT", &[&path.display().to_string(), &list.join(", ")]))
+    let list: Vec<String> = mounts.iter().map(|m| show_path(&m)).collect();
+    Err(trf("ERR_CONTAINS_MOUNT", &[&show_path(&path), &list.join(", ")]))
+}
+
+/// Err (for the Issues log) if `path` shouldn't be moved to the trash: it's
+/// already inside a trash folder (trashing it again would bury its restore
+/// information, see the freedesktop.org trash spec), or it contains one.
+fn trash_guard(path: &Path) -> Result<(), String> {
+    let Ok(folders) = trash::os_limited::trash_folders() else { return Ok(()) };
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical_parent = path.parent().and_then(|p| std::fs::canonicalize(p).ok());
+    for f in folders {
+        let f = std::fs::canonicalize(&f).unwrap_or(f);
+        // A symlink inside the trash canonicalizes to its target, so its
+        // parent is checked too.
+        let inside = canonical.starts_with(&f) || canonical_parent.as_ref().is_some_and(|p| p.starts_with(&f));
+        if inside || f.starts_with(&canonical) {
+            return Err(trf("ERR_TRASH_IN_TRASH", &[&show_path(&path)]));
+        }
+    }
+    Ok(())
 }
 
 /// Like `remove_dir_all`, but never crosses into another filesystem: a
@@ -75,7 +94,7 @@ fn remove_dir_one_fs(dir: &Path, dev: u64) -> std::io::Result<()> {
         let m = std::fs::symlink_metadata(&p)?;
         if m.is_dir() {
             if m.dev() != dev {
-                return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&p.display().to_string()])));
+                return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&show_path(&p)])));
             }
             remove_dir_one_fs(&p, dev)?;
         } else {
@@ -183,7 +202,14 @@ impl DiskScanApp {
 
     /// Moves `paths` to the trash at the start of the next frame.
     pub(crate) fn queue_trash(&mut self, paths: Vec<PathBuf>) {
-        if !paths.is_empty() && self.mount_check(&paths) {
+        let mut ok = self.mount_check(&paths);
+        for p in &paths {
+            if let Err(e) = trash_guard(p) {
+                self.log_issue(e);
+                ok = false;
+            }
+        }
+        if !paths.is_empty() && ok {
             self.removal.pending = Some((paths, false));
         }
     }
@@ -231,7 +257,7 @@ impl DiskScanApp {
                     ui.add_space(6.0);
                     match single_is_dir {
                         Some(is_dir) => {
-                            ui.label(egui::RichText::new(paths[0].display().to_string()).monospace());
+                            ui.label(egui::RichText::new(show_path(&paths[0])).monospace());
                             ui.label(if *is_dir {
                                 trf("DELETE_CONFIRM_DIR", &[&human_size(*size), &format_count(*file_count)])
                             } else {
@@ -319,8 +345,14 @@ impl DiskScanApp {
         for p in paths {
             // Checked again right before acting: the dialog may have been
             // open while something got mounted.
-            if let Err(e) = mount_guard(&p) {
+            if let Err(e) = mount_guard(&p).and_then(|()| if permanent { Ok(()) } else { trash_guard(&p) }) {
                 self.log_issue(e);
+                continue;
+            }
+            // Already gone (deleted outside the app since the scan): that's
+            // the goal reached, so it just leaves the tree.
+            if std::fs::symlink_metadata(&p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+                done.push(p);
                 continue;
             }
             let result = if permanent {
@@ -336,7 +368,7 @@ impl DiskScanApp {
                 Ok(()) => done.push(p),
                 Err(e) => {
                     let key = if permanent { "ERR_DELETE_FAILED" } else { "ERR_TRASH_FAILED" };
-                    self.log_issue(trf(key, &[&p.display().to_string(), &e]));
+                    self.log_issue(trf(key, &[&show_path(&p), &e]));
                 }
             }
         }

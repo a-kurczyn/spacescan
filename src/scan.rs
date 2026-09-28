@@ -255,9 +255,38 @@ pub(crate) fn extension_breakdown(node: &Node) -> Vec<(String, u64, u64)> {
 }
 
 pub(crate) fn file_name_of(p: &Path) -> String {
-    p.file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| p.to_string_lossy().to_string())
+    p.file_name().map(show_os).unwrap_or_else(|| show_path(p))
+}
+
+/// A name for display that can't be mistaken for a different one: bytes
+/// that aren't valid UTF-8 are written as `\xFF` and control characters
+/// (newlines, tabs…) as `\n`, `\t` or `\x1B`, like `ls -b`. Otherwise a
+/// non-UTF-8 name and a look-alike with a real U+FFFD would both show as
+/// `x�y`. A literal backslash is doubled so an escape can't be faked.
+pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut out = String::new();
+    for chunk in s.as_bytes().utf8_chunks() {
+        for c in chunk.valid().chars() {
+            match c {
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\r' => out.push_str("\\r"),
+                c if c.is_control() => out.push_str(&format!("\\x{:02X}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        for b in chunk.invalid() {
+            out.push_str(&format!("\\x{b:02X}"));
+        }
+    }
+    out
+}
+
+/// A whole path for display, escaped like `show_os`.
+pub(crate) fn show_path(p: &Path) -> String {
+    show_os(p.as_os_str())
 }
 
 /// Turns an io::Error into the kind of plain-language line a non-technical
@@ -270,7 +299,7 @@ pub(crate) fn friendly_io_error(path: &Path, e: &std::io::Error) -> String {
         PermissionDenied => tr("ERR_IO_PERMISSION"),
         _ => trf("ERR_IO_OTHER", &[&e.to_string()]),
     };
-    trf("ERR_IO_LINE", &[&path.display().to_string(), &what])
+    trf("ERR_IO_LINE", &[&show_path(&path), &what])
 }
 
 /// Scans a single directory entry: recurses if it's a (same-filesystem)
@@ -642,4 +671,20 @@ pub(crate) fn index_path_to(root: &Node, target: &Path) -> Option<Vec<usize>> {
         n = &n.children[j];
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn names_are_unambiguous() {
+        let bad = std::ffi::OsStr::from_bytes(b"x\xffy");
+        let lookalike = std::ffi::OsStr::new("x\u{FFFD}y");
+        assert_eq!(show_os(bad), "x\\xFFy");
+        assert_eq!(show_os(lookalike), "x\u{FFFD}y");
+        assert_eq!(show_os(std::ffi::OsStr::new("a\nb\tc\\d")), "a\\nb\\tc\\\\d");
+        assert_eq!(show_os(std::ffi::OsStr::new("ünïcödé 日本語")), "ünïcödé 日本語");
+    }
 }

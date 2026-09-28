@@ -48,6 +48,8 @@ FILTER_HINT_SIZE_MIN=e.g. 100M
 FILTER_HINT_SIZE_MAX=e.g. 4.7G
 FILTER_HINT_DATE=YYYY-MM-DD
 FILTER_APPLY=Apply
+FILTER_INVALID=Fix the field outlined in red (hover it for the reason) to apply.
+FILTER_INVALID_KEEPS_PREVIOUS=Fix the field outlined in red (hover it for the reason). Until then the table still shows the previously applied filter.
 FILTER_CLEAR=Clear
 FILTER_SHOWING=Showing %s of %s files (%s of %s)
 FILTER_APPLIES_ON_FINISH=Applies when a scan finishes.
@@ -109,18 +111,19 @@ CENTRAL_EMPTY_STATE=Choose a starting point with 🔍 (any drive, mount or folde
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=Scan aborted
+STATUS_SCANNING=Scanning… (Esc to cancel)
 STATUS_SCAN_COMPLETED=Scan completed in %ss
 ERR_PATH_NOT_FOUND=Path not found: %s
 ERR_CANNOT_STAT=Cannot stat %s: %s
 ERR_NETWORK_URL='%s://' is a network URL, not a mounted path — mount it first (e.g. via your file manager's Network browser), then type the real local path it mounts to (often under /run/user/<uid>/gvfs/...).
-ERR_NOT_A_DIRECTORY=Not a directory: %s
+ERR_NOT_A_DIRECTORY=Not a folder (it's a file): %s
 ERR_FOLDER_DIALOG_FAILED=Folder dialog failed to open (is xdg-desktop-portal running?)
 SCAN_PROGRESS_ITEMS_SCANNED=%s items scanned
 SCAN_PROGRESS_OF_TOTAL=%s of %s items
 SCAN_PROGRESS_ITEMS=%s items
 
 # ---- Filesystem I/O errors ----
-ERR_IO_NOT_FOUND=can't find that directory
+ERR_IO_NOT_FOUND=not found (no such file or folder)
 ERR_IO_PERMISSION=don't have permission to read or enter that folder
 ERR_IO_OTHER=couldn't be read (%s)
 ERR_IO_LINE=%s — %s
@@ -189,6 +192,7 @@ COL_PERMS=Permissions
 DELETE_CONFIRM_MANY=%s items (%s, file count: %s). This can't be undone.
 DELETE_CONFIRM_MORE=…and %s more
 ERR_TRASH_FAILED=Couldn't move %s to the trash: %s
+ERR_TRASH_IN_TRASH=Not moving %s to the trash: it is inside a trash folder (or contains one). Use Delete permanently instead.
 ERR_CONTAINS_MOUNT=Refusing to delete or trash %s: it is or contains a mounted filesystem (%s). Unmount it first.
 ERR_OTHER_FS_INSIDE=stopped at %s, which is on another filesystem
 TRASH_CONFIRM_TITLE=Empty the trash?
@@ -200,6 +204,10 @@ STATUS_TRASH_EMPTIED=Trash emptied
 ERR_EMPTY_TRASH=Couldn't empty the trash: %s
 ERR_SETTINGS_FILE=Couldn't read the settings file (moved it aside to %s, using defaults): %s
 ERR_SETTINGS_SAVE=Couldn't save settings: %s
+ERR_SETTINGS_UNREADABLE=Settings not loaded from %s (%s); using defaults, and not saving over it.
+ERR_SETTINGS_NOT_FILE=not a regular file
+ERR_SETTINGS_TOO_BIG=larger than 1 MiB
+ERR_SETTINGS_FIELDS=Ignored invalid settings (defaults used for them): %s. The original file was copied to %s.
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Keyboard shortcuts

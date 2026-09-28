@@ -36,6 +36,8 @@ FILTER_HINT_SIZE_MIN=p. ej. 100M
 FILTER_HINT_SIZE_MAX=p. ej. 4.7G
 FILTER_HINT_DATE=AAAA-MM-DD
 FILTER_APPLY=Aplicar
+FILTER_INVALID=Corrige el campo marcado en rojo (pasa el ratón para ver el motivo) para aplicar.
+FILTER_INVALID_KEEPS_PREVIOUS=Corrige el campo marcado en rojo (pasa el ratón para ver el motivo). Hasta entonces la tabla sigue mostrando el filtro aplicado anteriormente.
 FILTER_CLEAR=Limpiar
 FILTER_SHOWING=Mostrando %s de %s archivos (%s de %s)
 FILTER_APPLIES_ON_FINISH=Se aplica cuando termina un escaneo.
@@ -97,18 +99,19 @@ CENTRAL_EMPTY_STATE=Elige un punto de partida con 🔍 (cualquier unidad, punto 
 
 # ---- Estado y errores del escaneo ----
 STATUS_SCAN_ABORTED=Escaneo cancelado
+STATUS_SCANNING=Escaneando… (Esc para cancelar)
 STATUS_SCAN_COMPLETED=Escaneo completado en %ss
 ERR_PATH_NOT_FOUND=Ruta no encontrada: %s
 ERR_CANNOT_STAT=No se puede obtener información de %s: %s
 ERR_NETWORK_URL='%s://' es una URL de red, no una ruta montada — móntala primero (p. ej. desde el navegador de red de tu gestor de archivos), luego escribe la ruta local real donde queda montada (a menudo bajo /run/user/<uid>/gvfs/...).
-ERR_NOT_A_DIRECTORY=No es un directorio: %s
+ERR_NOT_A_DIRECTORY=No es una carpeta (es un archivo): %s
 ERR_FOLDER_DIALOG_FAILED=No se pudo abrir el diálogo de carpetas (¿está xdg-desktop-portal en ejecución?)
 SCAN_PROGRESS_ITEMS_SCANNED=%s elementos escaneados
 SCAN_PROGRESS_OF_TOTAL=%s de %s elementos
 SCAN_PROGRESS_ITEMS=%s elementos
 
 # ---- Errores de E/S del sistema de archivos ----
-ERR_IO_NOT_FOUND=no se puede encontrar ese directorio
+ERR_IO_NOT_FOUND=no encontrado (no existe ese archivo o carpeta)
 ERR_IO_PERMISSION=no tienes permiso para leer o entrar en esa carpeta
 ERR_IO_OTHER=no se pudo leer (%s)
 ERR_IO_LINE=%s — %s
@@ -178,6 +181,7 @@ COL_PERMS=Permisos
 DELETE_CONFIRM_MANY=%s elementos (%s, número de archivos: %s). No se puede deshacer.
 DELETE_CONFIRM_MORE=…y %s más
 ERR_TRASH_FAILED=No se pudo mover %s a la papelera: %s
+ERR_TRASH_IN_TRASH=No se mueve %s a la papelera: está dentro de una carpeta de papelera (o contiene una). Usa Borrar permanentemente.
 ERR_CONTAINS_MOUNT=No se borra ni se mueve a la papelera %s: es o contiene un sistema de archivos montado (%s). Desmóntalo primero.
 ERR_OTHER_FS_INSIDE=detenido en %s, que está en otro sistema de archivos
 TRASH_CONFIRM_TITLE=¿Vaciar la papelera?
@@ -189,6 +193,10 @@ STATUS_TRASH_EMPTIED=Papelera vaciada
 ERR_EMPTY_TRASH=No se pudo vaciar la papelera: %s
 ERR_SETTINGS_FILE=No se pudo leer el archivo de ajustes (se apartó como %s; se usan los valores predeterminados): %s
 ERR_SETTINGS_SAVE=No se pudieron guardar los ajustes: %s
+ERR_SETTINGS_UNREADABLE=No se cargaron los ajustes de %s (%s); se usan los valores predeterminados y no se sobrescribe.
+ERR_SETTINGS_NOT_FILE=no es un archivo normal
+ERR_SETTINGS_TOO_BIG=mayor de 1 MiB
+ERR_SETTINGS_FIELDS=Se ignoraron ajustes no válidos (se usan sus valores predeterminados): %s. El archivo original se copió a %s.
 
 # ---- Atajos de teclado (?) ----
 HELP_TITLE=Atajos de teclado

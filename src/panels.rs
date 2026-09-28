@@ -98,7 +98,7 @@ impl DiskScanApp {
                 let mut v: Vec<(String, PathBuf)> = p
                     .ancestors()
                     .map(|a| {
-                        let label = a.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| a.display().to_string());
+                        let label = a.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| show_path(&a));
                         (label, a.to_path_buf())
                     })
                     .collect();
@@ -132,7 +132,7 @@ impl DiskScanApp {
                     }
                     if ui
                         .add(egui::Button::new("🏠").selected(current_path.as_deref() == Some(home.as_path())))
-                        .on_hover_text(trf("TOOLBAR_SCAN_HOME", &[&home.display().to_string()]))
+                        .on_hover_text(trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]))
                         .clicked()
                     {
                         start_at = Some(home.clone());
@@ -152,7 +152,7 @@ impl DiskScanApp {
                     if !path_input_was_focused {
                         let current = current_path
                             .as_ref()
-                            .map(|p| p.display().to_string())
+                            .map(|p| show_path(&p))
                             .unwrap_or_default();
                         if path_input != current {
                             path_input = current;
@@ -198,7 +198,7 @@ impl DiskScanApp {
                                         }
                                         let btn = egui::Button::new(if i == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) })
                                             .frame(false);
-                                        if ui.add(btn).on_hover_text(path.display().to_string()).clicked() && i != last {
+                                        if ui.add(btn).on_hover_text(show_path(&path)).clicked() && i != last {
                                             crumb_click = Some(path.clone());
                                         }
                                     }
@@ -338,11 +338,19 @@ impl DiskScanApp {
                 let scheme = &trimmed[..scheme_end];
                 self.log_issue(trf("ERR_NETWORK_URL", &[scheme]));
             } else {
-                let p = PathBuf::from(trimmed);
-                if p.is_dir() {
-                    self.start_scan(p);
-                } else {
-                    self.log_issue(trf("ERR_NOT_A_DIRECTORY", &[&p.display().to_string()]));
+                // "~" and "~/…" mean the home folder, as in a shell.
+                let p = match trimmed.strip_prefix('~') {
+                    Some("") => home_dir(),
+                    Some(rest) if rest.starts_with('/') => home_dir().join(&rest[1..]),
+                    _ => PathBuf::from(trimmed),
+                };
+                match std::fs::metadata(&p) {
+                    Ok(m) if m.is_dir() => self.start_scan(p),
+                    Ok(_) => self.log_issue(trf("ERR_NOT_A_DIRECTORY", &[&show_path(&p)])),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        self.log_issue(trf("ERR_PATH_NOT_FOUND", &[&show_path(&p)]))
+                    }
+                    Err(e) => self.log_issue(friendly_io_error(&p, &e)),
                 }
             }
         }
@@ -392,11 +400,25 @@ impl DiskScanApp {
                     // room than the to/max one despite both requesting the
                     // same width, clipping "YYYY-MM-DD" down to "YYYY-...".
                     // An exact size can't be negotiated down that way.
-                    let field = |ui: &mut egui::Ui, value: &mut String, hint: &str| -> bool {
+                    // Each field is checked as it's typed: an invalid value
+                    // gets a red outline (and its reason on hover), and
+                    // Apply stays disabled until it's fixed.
+                    let mut invalid_fields = 0;
+                    let error_color = ui.visuals().error_fg_color;
+                    let mut field = |ui: &mut egui::Ui, value: &mut String, hint: &str, check: &dyn Fn(&str) -> Result<(), String>| -> bool {
                         let size = Vec2::new(130.0, ui.spacing().interact_size.y);
-                        let r = ui.add_sized(size, egui::TextEdit::singleline(value).hint_text(hint));
+                        let mut r = ui.add_sized(size, egui::TextEdit::singleline(value).hint_text(hint));
+                        if value.trim().is_empty() {
+                            // empty: no limit
+                        } else if let Err(e) = check(value) {
+                            invalid_fields += 1;
+                            ui.painter().rect_stroke(r.rect, 2.0, egui::Stroke::new(1.5, error_color), egui::StrokeKind::Outside);
+                            r = r.on_hover_text(e);
+                        }
                         r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
                     };
+                    let size_ok = |s: &str| parse_size(s).map(|_| ());
+                    let date_ok = |s: &str| parse_date(s, false).map(|_| ());
                     let f = &mut self.filter_form;
 
                     ui.label(tr("FILTER_NAME_LABEL"));
@@ -441,16 +463,16 @@ impl DiskScanApp {
                         ui.weak(tr("FILTER_COL_TO_MAX"));
                         ui.end_row();
                         ui.label(tr("FILTER_ROW_SIZE"));
-                        enter |= field(ui, &mut f.min_size, &tr("FILTER_HINT_SIZE_MIN"));
-                        enter |= field(ui, &mut f.max_size, &tr("FILTER_HINT_SIZE_MAX"));
+                        enter |= field(ui, &mut f.min_size, &tr("FILTER_HINT_SIZE_MIN"), &size_ok);
+                        enter |= field(ui, &mut f.max_size, &tr("FILTER_HINT_SIZE_MAX"), &size_ok);
                         ui.end_row();
                         ui.label(tr("FILTER_ROW_CREATED"));
-                        enter |= field(ui, &mut f.min_created, &tr("FILTER_HINT_DATE"));
-                        enter |= field(ui, &mut f.max_created, &tr("FILTER_HINT_DATE"));
+                        enter |= field(ui, &mut f.min_created, &tr("FILTER_HINT_DATE"), &date_ok);
+                        enter |= field(ui, &mut f.max_created, &tr("FILTER_HINT_DATE"), &date_ok);
                         ui.end_row();
                         ui.label(tr("FILTER_ROW_MODIFIED"));
-                        enter |= field(ui, &mut f.min_modified, &tr("FILTER_HINT_DATE"));
-                        enter |= field(ui, &mut f.max_modified, &tr("FILTER_HINT_DATE"));
+                        enter |= field(ui, &mut f.min_modified, &tr("FILTER_HINT_DATE"), &date_ok);
+                        enter |= field(ui, &mut f.max_modified, &tr("FILTER_HINT_DATE"), &date_ok);
                         ui.end_row();
                         enter
                     });
@@ -458,9 +480,10 @@ impl DiskScanApp {
                     ui.add_space(6.0);
 
                     let dirty = self.filter_form != self.filter_applied;
+                    let valid = invalid_fields == 0;
                     let mut clear = false;
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(dirty, egui::Button::new(tr("FILTER_APPLY"))).clicked() {
+                        if ui.add_enabled(dirty && valid, egui::Button::new(tr("FILTER_APPLY"))).clicked() {
                             submitted = true;
                         }
                         if ui.add_enabled(self.filter.is_some() || self.filter_form != FilterForm::default(), egui::Button::new(tr("FILTER_CLEAR"))).clicked() {
@@ -470,12 +493,23 @@ impl DiskScanApp {
                     if clear {
                         self.filter_form = FilterForm::default();
                         submitted = true;
+                    } else if !valid {
+                        // Enter in a field with an invalid value applies
+                        // nothing (the outline says why).
+                        submitted = false;
                     }
                     if submitted {
                         self.apply_filter_form();
                     }
 
-                    if let Some(e) = &self.filter_error {
+                    if !valid {
+                        // Never let an invalid field look applied: say what
+                        // the table is really showing.
+                        ui.colored_label(
+                            ui.visuals().error_fg_color,
+                            tr(if self.filter.is_some() { "FILTER_INVALID_KEEPS_PREVIOUS" } else { "FILTER_INVALID" }),
+                        );
+                    } else if let Some(e) = &self.filter_error {
                         ui.colored_label(ui.visuals().error_fg_color, e);
                     } else if self.filter.is_some() {
                         match (&self.root, &self.full_root) {
@@ -665,19 +699,27 @@ impl DiskScanApp {
                     }
                 });
                 if !self.log.is_empty() {
-                    egui::ScrollArea::vertical()
-                        .stick_to_bottom(false)
-                        .show(ui, |ui| {
-                            for line in self.log.iter().rev() {
-                                ui.small(line);
+                    // One line per issue, newest first. A line too long for
+                    // the bar loses its middle ("…") rather than its end,
+                    // where the reason is; hovering shows it in full. Only
+                    // the visible lines are laid out.
+                    let font = egui::TextStyle::Small.resolve(ui.style());
+                    let row_h = ui.text_style_height(&egui::TextStyle::Small);
+                    let n = self.log.len() + usize::from(self.log_truncated > 0);
+                    egui::ScrollArea::vertical().auto_shrink([false, true]).show_rows(ui, row_h, n, |ui, range| {
+                        let width = ui.available_width();
+                        for i in range {
+                            let Some(line) = self.log.len().checked_sub(i + 1).map(|k| &self.log[k]) else {
+                                ui.small(trf("LOG_MORE_NOT_SHOWN", &[&format_count(self.log_truncated)]));
+                                continue;
+                            };
+                            let shown = elide_middle(ui, line, &font, width);
+                            let r = ui.add(egui::Label::new(egui::RichText::new(&shown).small()).extend());
+                            if shown.len() != line.len() {
+                                r.on_hover_text(line);
                             }
-                            if self.log_truncated > 0 {
-                                ui.small(trf(
-                                    "LOG_MORE_NOT_SHOWN",
-                                    &[&format_count(self.log_truncated)],
-                                ));
-                            }
-                        });
+                        }
+                    });
                 }
             });
     }
@@ -1167,6 +1209,9 @@ impl DiskScanApp {
         // Snapshot: ensure_mime_lookup below needs &mut self, which
         // can't coexist with an active &self.hovered borrow.
         let hover_snapshot = self.hovered.clone();
+        // No hover card while the right-click menu is open (it would cover
+        // the menu and describe a different item).
+        let hover_snapshot = hover_snapshot.filter(|_| !egui::Popup::is_any_open(&ctx));
         if let (Some(h), Some(p)) = (&hover_snapshot, pointer) {
             if !h.is_dir {
                 self.ensure_mime_lookup(&h.path);
@@ -1195,7 +1240,7 @@ impl DiskScanApp {
             } else {
                 None
             };
-            let path_str = h.path.display().to_string();
+            let path_str = show_path(&h.path);
 
             // Keyed by path: egui's Area/Grid persist and only ever
             // grow their sizing per Id across frames (to avoid jitter),

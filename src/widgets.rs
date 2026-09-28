@@ -292,3 +292,29 @@ pub(crate) fn details_grid(
             }
         });
 }
+
+/// `text` cut to fit `width` by replacing its middle with "…", so both the
+/// start and the end (where error messages put the reason) stay visible.
+pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
+    let fits = |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) <= width;
+    if fits(text) {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    // Keep this many characters, split 40/60 between start and end (the
+    // end carries the reason); binary search for the most that fit.
+    let cut = |keep: usize| -> String {
+        let head = keep * 2 / 5;
+        let tail = keep - head;
+        let mut s: String = chars[..head].iter().collect();
+        s.push('…');
+        s.extend(&chars[chars.len() - tail..]);
+        s
+    };
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if fits(&cut(mid)) { lo = mid } else { hi = mid - 1 }
+    }
+    cut(lo)
+}

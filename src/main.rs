@@ -349,9 +349,14 @@ impl Default for DiskScanApp {
 
 impl DiskScanApp {
     fn start_scan(&mut self, path: PathBuf) {
+        // Scan the canonical path: no "./", "..", doubled slashes or
+        // relative roots in breadcrumbs, dialogs or the Issues log.
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
         // Any new scan supersedes a pending folder rescan ("r").
         self.graft = None;
         self.scanning = true;
+        // Not the previous scan's "completed in …" while this one runs.
+        self.status = tr("STATUS_SCANNING");
         self.scan_start = Instant::now();
         self.scanned_count = 0;
         self.selection = None;
@@ -386,7 +391,7 @@ impl DiskScanApp {
             let counter = std::sync::atomic::AtomicU64::new(0);
             let start = Instant::now();
             if !path.exists() {
-                let _ = tx.send(ScanMsg::Error(trf("ERR_PATH_NOT_FOUND", &[&path.display().to_string()])));
+                let _ = tx.send(ScanMsg::Error(trf("ERR_PATH_NOT_FOUND", &[&show_path(&path)])));
                 return;
             }
             let root_dev = match std::fs::metadata(&path) {
@@ -395,7 +400,7 @@ impl DiskScanApp {
                     m.dev()
                 }
                 Err(e) => {
-                    let _ = tx.send(ScanMsg::Error(trf("ERR_CANNOT_STAT", &[&path.display().to_string(), &e.to_string()])));
+                    let _ = tx.send(ScanMsg::Error(trf("ERR_CANNOT_STAT", &[&show_path(&path), &e.to_string()])));
                     return;
                 }
             };
@@ -779,7 +784,7 @@ impl eframe::App for DiskScanApp {
                     .show(&ctx, |ui| {
                         let n = selected.unwrap_or(view_node);
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                        ui.strong(n.path.display().to_string());
+                        ui.strong(show_path(&n.path));
                         folder_stats_ui(ui, n);
                     });
             }
@@ -789,7 +794,8 @@ impl eframe::App for DiskScanApp {
         // the arrow keys move the slice highlight (see move_selection),
         // Backspace goes to the parent folder, Enter opens the highlighted
         // slice (like clicking it), Esc clears it, D / T delete it or move
-        // it to the trash. Summary view: the table's keys, see table.rs.
+        // it to the trash, r rescans the folder being viewed. Summary view:
+        // the table's keys, see table.rs.
         if !self.summary_view {
             self.table.rows.clear();
         }
@@ -798,7 +804,11 @@ impl eframe::App for DiskScanApp {
             self.table_keys(&ctx);
             self.table_overlays(&ctx, area);
         }
-        if self.root.is_some() && !self.scanning && !self.summary_view && !self.typing && !self.delete_dialog_open() {
+        // Not while the chart's right-click menu is open: navigating would
+        // leave the menu acting on an item no longer on screen (Esc still
+        // closes the menu).
+        let menu_open = egui::Popup::is_any_open(&ctx);
+        if self.root.is_some() && !self.scanning && !self.summary_view && !self.typing && !self.delete_dialog_open() && !menu_open {
             if let Some(d) = ctx.input(arrow_nav) {
                 self.move_selection(d);
             }
@@ -821,6 +831,9 @@ impl eframe::App for DiskScanApp {
                     })
                     .collect::<String>()
             });
+            if typed.contains('r') {
+                self.rescan_current();
+            }
             if typed.contains('D') || typed.contains('T') {
                 if let Some(target) = self.selected_slice_path() {
                     if typed.contains('D') {
