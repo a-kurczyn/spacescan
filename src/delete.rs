@@ -93,20 +93,40 @@ fn trash_guard(path: &Path) -> Result<(), String> {
 
 /// Like `remove_dir_all`, but never crosses into another filesystem: a
 /// folder on a different device than `dir` stops the delete with an error.
+/// Also works in trees deeper than the kernel's path length limit, the same
+/// way the scanner reads them (see `DirHandle`).
 fn remove_dir_one_fs(dir: &Path, dev: u64) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let p = entry?.path();
-        let m = std::fs::symlink_metadata(&p)?;
+    remove_dir_in(dir, &None, dev)
+}
+
+/// `dir`'s parent folder is open as `parent` when the path is long.
+fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let open_at = openable(dir, parent);
+    // Keep this folder open while its entries' paths may be too long to
+    // use directly.
+    let handle: DirHandle =
+        if dir.as_os_str().len() + 256 > LONG_PATH { Some(std::fs::File::open(&open_at)?) } else { None };
+    let listing = match &handle {
+        Some(f) => PathBuf::from(format!("/proc/self/fd/{}", f.as_raw_fd())),
+        None => open_at.clone(),
+    };
+    for entry in std::fs::read_dir(&listing)? {
+        let entry = entry?;
+        let child = dir.join(entry.file_name());
+        // Not following symlinks: a link is removed, never its target.
+        let m = entry.metadata()?;
         if m.is_dir() {
             if m.dev() != dev {
-                return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&show_path(&p)])));
+                return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&show_path(&child)])));
             }
-            remove_dir_one_fs(&p, dev)?;
+            remove_dir_in(&child, &handle, dev)?;
         } else {
-            std::fs::remove_file(&p)?;
+            std::fs::remove_file(openable(&child, &handle))?;
         }
     }
-    std::fs::remove_dir(dir)
+    drop(handle);
+    std::fs::remove_dir(open_at)
 }
 
 /// What the confirmation dialog is asking about.
@@ -444,6 +464,43 @@ mod tests {
         assert_eq!(unescape_mountinfo("/a\\011b\\134c"), "/a\tb\\c");
         assert_eq!(unescape_mountinfo("/plain"), "/plain");
         assert_eq!(unescape_mountinfo("/trailing\\04"), "/trailing\\04");
+    }
+
+    #[test]
+    fn deletes_trees_deeper_than_path_max() {
+        use std::os::unix::fs::MetadataExt;
+        let base = std::env::temp_dir().join(format!("spacemap-deep-delete-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let outside = base.join("outside.txt");
+        std::fs::write(&outside, "keep me").unwrap();
+        // Build 300 levels (~7.5 KB path) relative to open folders, like
+        // `mkdir` loops in a shell would have to.
+        let top = base.join("deep");
+        std::fs::create_dir(&top).unwrap();
+        let mut dir = top.clone();
+        let mut handle: DirHandle = None;
+        for i in 0..300 {
+            let next = dir.join(format!("d{i:03}_xxxxxxxxxxxxxxxxxxxx"));
+            std::fs::create_dir(openable(&next, &handle)).unwrap();
+            if i % 50 == 0 {
+                std::fs::write(openable(&next.join("f.bin"), &handle), [0u8; 100]).unwrap();
+            }
+            handle = if next.as_os_str().len() + 256 > LONG_PATH {
+                Some(std::fs::File::open(openable(&next, &handle)).unwrap())
+            } else {
+                None
+            };
+            dir = next;
+        }
+        std::os::unix::fs::symlink(&outside, openable(&dir.join("link"), &handle)).unwrap();
+        drop(handle);
+        assert!(dir.as_os_str().len() > 7000);
+        let dev = std::fs::metadata(&top).unwrap().dev();
+        remove_dir_one_fs(&top, dev).unwrap();
+        assert!(!top.exists());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep me");
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

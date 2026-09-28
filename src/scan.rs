@@ -345,16 +345,16 @@ impl ScanCtx<'_> {
 
 /// Paths longer than this are opened relative to their parent folder
 /// (see `DirHandle`), safely under the kernel's 4096-byte PATH_MAX.
-const LONG_PATH: usize = 3800;
+pub(crate) const LONG_PATH: usize = 3800;
 
 /// An open folder, kept while scanning a deep subtree so that folders
 /// whose full path is too long for the kernel can still be opened, relative
 /// to it, via the short `/proc/self/fd/<fd>/<name>`.
-type DirHandle = Option<std::fs::File>;
+pub(crate) type DirHandle = Option<std::fs::File>;
 
 /// A path the kernel will accept for `path`: itself, or — when it's too
 /// long — `/proc/self/fd/<parent fd>/<name>` relative to its open parent.
-fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
+pub(crate) fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
     use std::os::fd::AsRawFd;
     match parent {
         Some(f) if path.as_os_str().len() > LONG_PATH => {
