@@ -4,7 +4,7 @@
 //! Categories are data, not code: they come from
 //! ~/.config/spacemap/categories.json, which is written from the built-in
 //! defaults (src/categories.json) whenever it's missing. Each category has
-//! a name, file extensions and, optionally, name patterns. The name is a
+//! a name and file extensions. The name is a
 //! token looked up in the language files ("CAT_VIDEO"); one they don't
 //! have is shown as written ("Mail"); a file matching
 //! none of them is "Other", which is always there and never listed in the
@@ -49,9 +49,6 @@ pub(crate) struct CategoryModel {
     /// Name tokens, translated when shown.
     names: Vec<String>,
     by_ext: HashMap<String, usize>,
-    /// Lowercased name patterns (`*`/`?` globs, else exact names), checked
-    /// before extensions.
-    patterns: Vec<(String, usize)>,
 }
 
 impl CategoryModel {
@@ -59,16 +56,9 @@ impl CategoryModel {
         Category(self.names.len())
     }
 
-    /// The category of a file called `name`: a name pattern first, then its
-    /// extension (any case), else Other.
+    /// The category of a file called `name`, by its extension (any case);
+    /// Other if it has none or it isn't listed.
     pub(crate) fn of_name(&self, name: &str) -> Category {
-        if !self.patterns.is_empty() {
-            let lower = name.to_lowercase();
-            let hit = self.patterns.iter().find(|(p, _)| if p.contains(['*', '?']) { glob_match(p, &lower) } else { *p == lower });
-            if let Some((_, i)) = hit {
-                return Category(*i);
-            }
-        }
         Path::new(name)
             .extension()
             .and_then(|e| self.by_ext.get(&e.to_string_lossy().to_lowercase()))
@@ -102,7 +92,7 @@ impl CategoryModel {
     pub(crate) fn parse(text: &str) -> Result<(Self, Vec<String>), String> {
         let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let list = value.get("categories").and_then(Value::as_array).ok_or_else(|| tr("ERR_CATEGORIES_NO_LIST"))?;
-        let mut model = CategoryModel { names: Vec::new(), by_ext: HashMap::new(), patterns: Vec::new() };
+        let mut model = CategoryModel { names: Vec::new(), by_ext: HashMap::new() };
         let mut problems = Vec::new();
         for (n, entry) in list.iter().enumerate() {
             let at = format!("categories[{n}]");
@@ -141,9 +131,6 @@ impl CategoryModel {
                         model.by_ext.insert(ext, idx);
                     }
                 }
-            }
-            for pattern in strings("names", &mut problems) {
-                model.patterns.push((pattern, idx));
             }
         }
         if model.names.len() > PALETTE.len() {
@@ -273,7 +260,7 @@ mod tests {
     #[test]
     fn custom_file_defines_everything() {
         let text = r#"{"categories": [
-            {"name": "Mail", "extensions": ["eml", ".MBOX"], "names": ["Inbox", "sent*"]},
+            {"name": "Mail", "extensions": ["eml", ".MBOX"]},
             {"name": "Video", "extensions": ["mkv", "eml"]},
             {"name": "", "extensions": ["x"]},
             {"name": "Odd", "extensions": [3]}
@@ -281,8 +268,6 @@ mod tests {
         let (m, problems) = CategoryModel::parse(text).unwrap();
         assert_eq!(named(&m, "a.eml"), "Mail");
         assert_eq!(named(&m, "box.mbox"), "Mail");
-        assert_eq!(named(&m, "INBOX"), "Mail");
-        assert_eq!(named(&m, "Sent-2024"), "Mail");
         assert_eq!(named(&m, "a.mkv"), "Video");
         // Not listed any more: falls to Other.
         assert_eq!(m.of_name("a.pdf"), m.other());

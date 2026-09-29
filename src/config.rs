@@ -267,10 +267,10 @@ mod tests {
             assert!(problem.is_none() && path.is_file());
             assert_eq!(m, CategoryModel::defaults());
 
-            std::fs::write(&path, r#"{"categories": [{"name": "Mail", "extensions": ["eml"], "names": ["Inbox"]}]}"#).unwrap();
+            std::fs::write(&path, r#"{"categories": [{"name": "Mail", "extensions": ["eml"]}]}"#).unwrap();
             let (m, problem) = CategoryModel::load();
             assert!(problem.is_none());
-            assert_eq!(m.label(m.of_name("Inbox")), "Mail");
+            assert_eq!(m.label(m.of_name("a.EML")), "Mail");
             assert_eq!(m.of_name("a.mkv"), m.other());
 
             std::fs::write(&path, "{ oops").unwrap();
