@@ -690,7 +690,9 @@ impl DiskScanApp {
         self.selection = None;
     }
 
-    fn poll_scan(&mut self) {
+    /// Returns true when it stopped because of the time budget, with results
+    /// still waiting.
+    fn poll_scan(&mut self) -> bool {
         // Cap how much work one frame can do. A directory tree with a huge
         // number of directories (not just files) can produce a very large
         // burst of SliceDone messages; without a cap, draining "everything
@@ -703,13 +705,13 @@ impl DiskScanApp {
         // The cap is a time budget, not a message count: grafting gets more
         // expensive as the tree grows, so a fixed count that's fine early in
         // a scan could still stall a frame for seconds late in a big one.
-        const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(12);
+        const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(30);
         let drain_start = Instant::now();
         let mut processed = 0u32;
         if let Some(rx) = &self.scan_rx {
             loop {
                 if processed % 64 == 0 && processed > 0 && drain_start.elapsed() >= FRAME_BUDGET {
-                    break;
+                    return true;
                 }
                 processed += 1;
                 match rx.try_recv() {
@@ -761,6 +763,7 @@ impl DiskScanApp {
                 }
             }
         }
+        false
     }
 }
 
@@ -768,15 +771,21 @@ impl eframe::App for DiskScanApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
-        self.poll_scan();
+        let scan_backlog = self.poll_scan();
         self.poll_mime();
         self.removal_frame_start(&ctx);
         self.table_frame_start(&ctx);
         if self.scanning && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.abort_scan();
         }
-        if self.scanning || !self.mime_inflight.is_empty() {
+        // While scanning, redraw ~10×/s for the live preview rather than as
+        // fast as possible: every frame costs the scan threads CPU (much more
+        // with a screen reader, which gets the whole UI tree each frame).
+        // Straight away only while scan results are still waiting.
+        if scan_backlog || !self.mime_inflight.is_empty() {
             ctx.request_repaint();
+        } else if self.scanning {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         self.toolbar_ui(ui);
