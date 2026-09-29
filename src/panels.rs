@@ -977,7 +977,9 @@ impl DiskScanApp {
                 sortable_header(ui, &tr("COL_EXTENSION"), SortColumn::Name, &mut self.ext_sort);
                 ui.end_row();
                 for (ext, size, count) in ext_rows {
-                    ui.label(human_size(*size));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(human_size(*size));
+                    });
                     ui.label(format_count(*count));
                     ui.label(ext);
                     ui.end_row();

@@ -767,6 +767,10 @@ pub(crate) fn count_entries(path: &Path, root_dev: u64, found: &std::sync::atomi
 }
 
 pub(crate) fn human_size(bytes: u64) -> String {
+    // A total that hit the u64 ceiling (sums saturate) is only a lower bound.
+    if bytes == u64::MAX {
+        return "≥ 16 EiB".to_string();
+    }
     // Powers of 1024, so binary (IEC) unit names.
     let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
     let mut v = bytes as f64;
@@ -775,10 +779,18 @@ pub(crate) fn human_size(bytes: u64) -> String {
         v /= 1024.0;
         u += 1;
     }
-    if u == 0 {
-        format!("{} {}", bytes, units[u])
+    // At most one decimal, and none when it would be ".0": "4 KiB",
+    // "1.5 GiB", "95.4 MiB". Rounding can reach 1024 ("1024 KiB"): move up
+    // a unit then.
+    let mut rounded = (v * 10.0).round() / 10.0;
+    if u > 0 && rounded >= 1024.0 && u < units.len() - 1 {
+        rounded = (rounded / 1024.0 * 10.0).round() / 10.0;
+        u += 1;
+    }
+    if u == 0 || rounded.fract() == 0.0 {
+        format!("{} {}", rounded as u64, units[u])
     } else {
-        format!("{:.2} {}", v, units[u])
+        format!("{:.1} {}", rounded, units[u])
     }
 }
 
@@ -998,8 +1010,17 @@ mod format_tests {
     use super::*;
     #[test]
     fn huge_sizes_and_epoch_dates() {
-        assert_eq!(human_size(u64::MAX), "16.00 EiB");
-        assert_eq!(human_size(3 << 60), "3.00 EiB");
+        assert_eq!(human_size(u64::MAX), "≥ 16 EiB");
+        assert_eq!(human_size(3 << 60), "3 EiB");
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(1000), "1000 B");
+        assert_eq!(human_size(4096), "4 KiB");
+        assert_eq!(human_size(10 << 20), "10 MiB");
+        assert_eq!(human_size(1536 << 20), "1.5 GiB");
+        assert_eq!(human_size(100_033_331), "95.4 MiB");
+        assert_eq!(human_size(759_069_900), "723.9 MiB");
+        assert_eq!(human_size((1 << 20) - 1), "1 MiB"); // rounds up across the unit
+        assert_eq!(human_size(12_000), "11.7 KiB");
         assert_eq!(u64::MAX.saturating_add(5), u64::MAX);
         assert_eq!(format_epoch(NO_TIME), "-");
         assert!(format_epoch(0).starts_with("1970-01-01") || format_epoch(0).starts_with("1969-12-31"));

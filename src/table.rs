@@ -554,7 +554,10 @@ impl DiskScanApp {
                                 ui.label(format!("{:.1}%", c.size as f64 * 100.0 / total as f64));
                             }
                             Cell::Opt(TableCol::Size) => {
-                                ui.label(human_size(c.size));
+                                // Right-aligned, so sizes line up by unit.
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(human_size(c.size));
+                                });
                             }
                             Cell::Opt(TableCol::Files) => {
                                 ui.label(format_count(c.file_count));
