@@ -106,7 +106,6 @@ pub(crate) fn layout_sunburst(
         .enumerate()
         .filter(|(_, c)| !hidden.contains(&c.path))
         .collect();
-    let real_total: u64 = visible_children.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
 
     // Free space gets a *fixed* share of the span, from known filesystem
     // capacity — it doesn't grow or shrink as the scan progresses. Whatever
@@ -123,7 +122,6 @@ pub(crate) fn layout_sunburst(
         end_angle
     };
 
-    let total: u64 = real_total.max(1);
     let span_abs = (content_end_angle - start_angle).abs().max(0.0001);
     let min_frac = (settings.min_segment_angle_deg.to_radians() / span_abs).max(0.0);
 
@@ -137,14 +135,24 @@ pub(crate) fn layout_sunburst(
     if settings.unlimited_slices {
         split = visible_children.len();
     } else {
+        // Shown slices are drawn stretched to fill the ring (minus the
+        // "other" sliver), so judge each one at *that* width, not at its
+        // share of the whole folder: otherwise, in a folder of 1200 similar
+        // movies, only the largest clears the threshold and it alone gets
+        // stretched over the entire ring. Adding a smaller item only makes
+        // the smallest drawn slice narrower, so stop at the first misfit.
+        let other_share = min_frac.min(0.5);
+        let mut shown_sum = 0u64;
         for (_, c) in &visible_children {
             if split >= settings.max_children_shown {
                 break;
             }
-            let frac = c.size as f32 / total as f32;
-            if frac < min_frac {
+            let sum = shown_sum.saturating_add(c.size);
+            let room = if split + 1 < visible_children.len() { 1.0 - other_share } else { 1.0 };
+            if c.size == 0 || (c.size as f32 / sum as f32) * room < min_frac {
                 break;
             }
+            shown_sum = sum;
             split += 1;
         }
     }
@@ -158,18 +166,11 @@ pub(crate) fn layout_sunburst(
     let rest: Vec<(usize, &Node)> = visible_children.iter().skip(split).cloned().collect();
     let rest_size: u64 = rest.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
 
-    // "Other" gets its true share of the ring, never less than the
-    // min-slice-angle (so a bucket of many tiny items stays visible and
-    // clickable). The shown slices split whatever that leaves in
-    // proportion to each other. A fixed-width "other" is wrong: in a folder
-    // of 1200 similar-sized movies only the largest clears the threshold,
-    // and it would be stretched over the whole ring while the other 1199
-    // (nearly all the bytes) were squeezed into a sliver.
-    let other_frac = if rest_size > 0 {
-        (rest_size as f32 / total as f32).max(min_frac).min(1.0)
-    } else {
-        0.0
-    };
+    // "Other" is a "there's more, but no room to show it individually"
+    // marker, not a value-proportional bucket: it gets a fixed minimum
+    // width (the min slice angle), and the shown slices split the rest in
+    // proportion to each other.
+    let other_frac = if rest_size > 0 { min_frac.min(0.5) } else { 0.0 };
     let available_frac = (1.0 - other_frac).max(0.0);
     let shown_total = shown.iter().map(|(_, c)| c.size as f32).sum::<f32>().max(1.0);
 
@@ -416,22 +417,35 @@ pub(crate) fn draw_arc_mesh(
 mod tests {
     use super::*;
 
-    /// A folder of many similar items where only the largest clears the
-    /// min-slice threshold: it must keep its true share, not the whole ring.
-    #[test]
-    fn other_bucket_keeps_its_true_share() {
-        let mut kids = vec![test_node("/m/big", 171, false, vec![])];
-        kids.extend((0..1198).map(|i| test_node(&format!("/m/{i}"), 30, false, vec![])));
-        let root = test_node("/m", 171 + 1198 * 30, true, kids);
+    fn layout(root: &Node, span: f32) -> Vec<Segment> {
         let mut segs = Vec::new();
-        let settings = Settings::default();
+        layout_sunburst(root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &Settings::default(), ChartOrder::Size, &mut segs);
+        segs
+    }
+
+    /// Similar-sized items (movies of 171, 158, 156, … GB among 1199) all
+    /// get comparable slices; only the leftover tail goes into "other".
+    #[test]
+    fn similar_items_get_comparable_slices() {
+        let mut kids: Vec<Node> = [171u64, 158, 156, 150]
+            .iter()
+            .enumerate()
+            .map(|(i, &gb)| test_node(&format!("/m/top{i}"), gb, false, vec![]))
+            .collect();
+        kids.extend((0..1195).map(|i| test_node(&format!("/m/{i}"), 30, false, vec![])));
+        let root = test_node("/m", kids.iter().map(|k| k.size).sum(), true, kids);
         let span = 160f32.to_radians();
-        layout_sunburst(&root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
-        let width = |s: &Segment| (s.end_angle - s.start_angle) / span;
-        let big = segs.iter().find(|s| s.name == "big").unwrap();
+        let segs = layout(&root, span);
+        let settings = Settings::default();
+        let min = settings.min_segment_angle_deg.to_radians();
+        let shown: Vec<&Segment> = segs.iter().filter(|s| !s.is_other).collect();
+        assert_eq!(shown.len(), settings.max_children_shown);
+        let w = |s: &Segment| s.end_angle - s.start_angle;
+        assert!(shown.iter().all(|s| w(s) >= min * 0.999));
+        let (a, b) = (w(shown[0]), w(shown[1]));
+        assert!((a / b - 171.0 / 158.0).abs() < 1e-3, "171 GB vs 158 GB drawn {a} vs {b}");
         let other = segs.iter().find(|s| s.is_other).unwrap();
-        assert!(width(big) < 0.01, "biggest item drawn over {:.1}% of the ring", width(big) * 100.0);
-        assert!(width(other) > 0.99);
+        assert!((w(other) - min).abs() < 1e-4);
         assert!((other.end_angle - span).abs() < 1e-4);
     }
 
@@ -442,9 +456,8 @@ mod tests {
             test_node("/m/a", 1_000_000, false, vec![]),
             test_node("/m/b", 1, false, vec![]),
         ]);
-        let mut segs = Vec::new();
+        let segs = layout(&root, std::f32::consts::TAU);
         let settings = Settings::default();
-        layout_sunburst(&root, vec![], 0.0, std::f32::consts::TAU, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
         let other = segs.iter().find(|s| s.is_other).unwrap();
         let min = settings.min_segment_angle_deg.to_radians();
         assert!(other.end_angle - other.start_angle >= min * 0.999);
