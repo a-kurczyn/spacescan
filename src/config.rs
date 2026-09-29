@@ -34,8 +34,6 @@ pub(crate) struct TablePrefs {
     /// Left-to-right order of the optional columns (Name is always last).
     pub column_order: Vec<TableCol>,
     pub dirs_first: bool,
-    /// "By file extension" beside the contents table instead of below.
-    pub ext_beside: bool,
 }
 
 impl Default for TablePrefs {
@@ -46,7 +44,6 @@ impl Default for TablePrefs {
             hidden_columns: Vec::new(),
             column_order: TableCol::ALL.to_vec(),
             dirs_first: false,
-            ext_beside: false,
         }
     }
 }

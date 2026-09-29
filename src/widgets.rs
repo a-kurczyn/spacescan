@@ -211,20 +211,6 @@ pub(crate) fn draw_sort_order_icon(painter: &egui::Painter, rect: egui::Rect, co
     draw_chevron(painter, chevron_center, rect.width() * 0.17, false, color);
 }
 
-/// Two panes, side by side (`beside`) or stacked — the toggle for where the
-/// Summary view's extension table goes.
-pub(crate) fn draw_layout_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32, beside: bool) {
-    let stroke = egui::Stroke::new(1.3, color);
-    painter.rect_stroke(rect, egui::CornerRadius::from(1u8), stroke, egui::StrokeKind::Outside);
-    let c = rect.center();
-    let divider = if beside {
-        [Pos2::new(c.x, rect.top()), Pos2::new(c.x, rect.bottom())]
-    } else {
-        [Pos2::new(rect.left(), c.y), Pos2::new(rect.right(), c.y)]
-    };
-    painter.line_segment(divider, stroke);
-}
-
 /// A toolbar button whose face is a hand-drawn flat icon (via `draw`)
 /// instead of text/emoji — an empty-label `Button` for correct
 /// hit-testing/hover/selected styling, with the icon painted over it

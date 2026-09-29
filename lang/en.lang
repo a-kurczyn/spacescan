@@ -129,8 +129,7 @@ ERR_IO_PERMISSION=don't have permission to read or enter that folder
 ERR_IO_OTHER=couldn't be read (%s)
 ERR_IO_LINE=%s — %s
 
-# ---- Extension / sunburst aggregate buckets ----
-EXT_OTHER_COUNT=(%s other extensions)
+# ---- Sunburst aggregate buckets ----
 EXT_NO_EXTENSION=(no extension)
 SEG_OTHER_ITEMS=(%s other items)
 SEG_FREE_SPACE=Free space
@@ -138,9 +137,6 @@ SEG_OTHER_FS=%s [other filesystem]
 
 # ---- Summary view ----
 SUMMARY_CONTENTS=Contents
-SUMMARY_BY_EXTENSION=By file extension
-EXT_SHOW_BESIDE=Show beside the contents table
-EXT_SHOW_BELOW=Show below the contents table
 COL_SIZE=Size
 A11Y_SORTED_ASC=%s, sorted ascending
 A11Y_SORTED_DESC=%s, sorted descending
@@ -151,7 +147,6 @@ COL_MODIFIED_TIP=Last change to the contents (mtime)
 COL_CHANGED=Changed
 COL_CHANGED_TIP=Last change to the contents or metadata — permissions, owner, rename (ctime)
 COL_NAME=Name
-COL_EXTENSION=Extension
 
 # ---- Top-left folder stats overlay ----
 STATS_SIZE=Size: %s
@@ -265,3 +260,20 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Clear marks, or close the details
 HELP_KEYS_HELP=?
 HELP_HELP=This help
+
+# ---- Categories (bar beside the contents table) ----
+SUMMARY_CATEGORIES=Categories
+CAT_VIDEO=Video
+CAT_AUDIO=Audio
+CAT_IMAGES=Images
+CAT_DOCUMENTS=Documents
+CAT_ARCHIVES=Archives
+CAT_APPLICATIONS=Applications
+CAT_CODE=Code
+CAT_DATA=Data
+CAT_OTHER=Other
+CAT_FILES=files
+CAT_CLEAR=Show all categories
+CAT_NO_FILES=No files here
+CAT_CLICK=Click to show only these files
+CAT_CLICK_AGAIN=Click again to show all files

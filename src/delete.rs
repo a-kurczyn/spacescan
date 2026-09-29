@@ -606,8 +606,8 @@ mod tests {
         graft_slice(&mut partial, &bottom, 10, 1, 0, 0, 0, 0, 0);
         assert!(find_node(&partial, &bottom).is_some());
 
-        // Extensions, filter, clone.
-        assert_eq!(extension_breakdown(&tree).iter().find(|e| e.0 == "bin").map(|e| e.2), Some(files));
+        // Categories, filter, clone.
+        assert_eq!(category_breakdown(&tree).iter().find(|r| r.cat == Category::Data).map(|r| r.files), Some(files));
         let filter = CompiledFilter::compile(&FilterForm { name: "*.bin".into(), ..Default::default() }).unwrap().unwrap();
         assert_eq!(filter_tree(&tree, &filter).map(|t| t.file_count), Some(files));
         let mut copy = tree.clone();

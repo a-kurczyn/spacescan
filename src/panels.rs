@@ -84,7 +84,7 @@ impl DiskScanApp {
         };
         let home = home_dir();
         let mut filters_toggled = false;
-        let filter_active = self.filter.is_some();
+        let filter_active = self.filter.is_some() || self.category.is_some();
         let filters_open = self.show_filters;
         let mut crumb_click: Option<PathBuf> = None;
         let mut start_path_edit = false;
@@ -908,84 +908,169 @@ impl DiskScanApp {
         });
     }
 
-    /// Summary view: the contents table (table.rs) and the by-extension
-    /// breakdown.
+    /// Summary view: the category bar on the left, the contents table
+    /// (table.rs) on the right.
     fn summary_ui(&mut self, ui: &mut egui::Ui, view_node: &Node) {
-        if self.ext_breakdown_for.as_deref() != Some(view_node.path.as_path()) {
-            self.ext_breakdown = extension_breakdown(view_node);
-            self.ext_breakdown_for = Some(view_node.path.clone());
+        // Broken down from the tree without the category filter, so every
+        // category stays visible (and clickable) while one is picked.
+        let key = (view_node.path.clone(), self.tree_gen);
+        if self.cat_breakdown_for.as_ref() != Some(&key) {
+            let base = self.cat_base.as_deref().and_then(|b| find_by_path(b, &view_node.path));
+            self.cat_breakdown = category_breakdown(base.unwrap_or(view_node));
+            self.cat_breakdown_for = Some(key);
         }
-
-        let mut ext_rows = self.ext_breakdown.clone();
-        let es = self.ext_sort;
-        ext_rows.sort_by(|a, b| {
-            let ord = match es.column {
-                SortColumn::Size => a.1.cmp(&b.1),
-                SortColumn::Files => a.2.cmp(&b.2),
-                // Extensions have no dates or permissions; those headers aren't
-                // offered for this table.
-                SortColumn::Modified | SortColumn::Changed | SortColumn::Perms => std::cmp::Ordering::Equal,
-                SortColumn::Name => a.0.cmp(&b.0),
-            };
-            if es.ascending { ord } else { ord.reverse() }
-        });
 
         // Drawn in the main area itself (not floating over it), so a side
-        // panel always clips it instead of being drawn over. Both tables
-        // scroll on their own. Beside: each gets the full height. Below:
-        // the extension breakdown keeps up to about a third of it.
+        // panel always clips it instead of being drawn over.
         let avail = ui.available_height();
         let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
-        if self.table.ext_beside {
-            let ext_w = 300.0;
-            let table_w = (ui.available_width() - ext_w - 16.0).max(320.0);
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(Vec2::new(table_w, avail), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.set_max_width(table_w);
-                    self.table_ui(ui, view_node, avail - heading_h);
-                });
-                ui.separator();
-                ui.vertical(|ui| self.ext_table_ui(ui, &ext_rows, avail - heading_h));
+        let cat_w = 190.0;
+        let table_w = (ui.available_width() - cat_w - 16.0).max(320.0);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(Vec2::new(cat_w, avail), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(cat_w);
+                self.category_bar_ui(ui, avail - heading_h);
             });
-        } else {
-            let ext_h = (avail * 0.3).clamp(110.0, 260.0);
-            self.table_ui(ui, view_node, avail - ext_h - heading_h);
-            ui.add_space(8.0);
             ui.separator();
-            let rest = ui.available_height() - heading_h / 2.0;
-            self.ext_table_ui(ui, &ext_rows, rest);
-        }
+            ui.allocate_ui_with_layout(Vec2::new(table_w, avail), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_max_width(table_w);
+                self.table_ui(ui, view_node, avail - heading_h);
+            });
+        });
     }
 
-    /// "By file extension": heading with the layout toggle (below / beside
-    /// the contents table), then the table, scrolling past `max_height`.
-    fn ext_table_ui(&mut self, ui: &mut egui::Ui, ext_rows: &[(String, u64, u64)], max_height: f32) {
+    /// "Categories": a vertical bar split by the space each category takes
+    /// in the viewed folder, labelled beside it. Clicking a segment (or its
+    /// label) shows only that category's files everywhere; clicking it
+    /// again, or ✕, shows everything.
+    fn category_bar_ui(&mut self, ui: &mut egui::Ui, height: f32) {
+        let mut clicked: Option<Category> = None;
+        let mut clear = false;
         ui.horizontal(|ui| {
-            ui.heading(tr("SUMMARY_BY_EXTENSION"));
-            let beside = self.table.ext_beside;
-            // The icon previews the layout the button switches to.
-            if icon_toolbar_button(ui, false, true, &tr(if beside { "EXT_SHOW_BELOW" } else { "EXT_SHOW_BESIDE" }), |p, r, c| draw_layout_icon(p, r, c, !beside))
-                .clicked()
-            {
-                self.table.ext_beside = !beside;
+            ui.heading(tr("SUMMARY_CATEGORIES"));
+            if self.category.is_some() && ui.small_button("✕").on_hover_text(tr("CAT_CLEAR")).clicked() {
+                clear = true;
             }
         });
-        egui::ScrollArea::vertical().id_salt("ext_scroll").max_height(max_height.max(40.0)).show(ui, |ui| {
-            egui::Grid::new("summary_ext_grid").num_columns(3).striped(true).show(ui, |ui| {
-                sortable_header(ui, &tr("COL_SIZE"), SortColumn::Size, &mut self.ext_sort);
-                sortable_header(ui, &tr("COL_FILES"), SortColumn::Files, &mut self.ext_sort);
-                sortable_header(ui, &tr("COL_EXTENSION"), SortColumn::Name, &mut self.ext_sort);
-                ui.end_row();
-                for (ext, size, count) in ext_rows {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(human_size(*size));
-                    });
-                    ui.label(format_count(*count));
-                    ui.label(ext);
-                    ui.end_row();
+
+        let rows = &self.cat_breakdown;
+        let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height.max(80.0)), egui::Sense::hover());
+        if rows.is_empty() || total == 0 {
+            ui.painter().text(rect.left_top(), egui::Align2::LEFT_TOP, tr("CAT_NO_FILES"), egui::FontId::default(), ui.visuals().weak_text_color());
+        } else {
+            let painter = ui.painter_at(rect);
+            let dark = ui.visuals().dark_mode;
+            let gap = 2.0;
+            let bar_w = 22.0;
+            let min_h = 3.0;
+            // Heights proportional to size; a sliver too thin to see or
+            // click gets `min_h`, taken from the others.
+            let usable = rect.height() - gap * (rows.len() - 1) as f32;
+            let raw: Vec<f32> = rows.iter().map(|r| r.size as f32 / total as f32 * usable).collect();
+            let thin = raw.iter().filter(|h| **h < min_h).count() as f32;
+            let big_sum: f32 = raw.iter().filter(|h| **h >= min_h).sum();
+            let scale = if big_sum > 0.0 { (usable - thin * min_h).max(0.0) / big_sum } else { 1.0 };
+            let heights: Vec<f32> = raw.iter().map(|h| if *h < min_h { min_h } else { h * scale }).collect();
+
+            // Labels at their segment's middle, pushed apart so they never
+            // overlap (then pulled back up if they ran off the bottom).
+            let font = egui::FontId::default();
+            let line_h = ui.text_style_height(&egui::TextStyle::Body);
+            let label_h = line_h * 2.0 + 4.0;
+            let mut y = rect.top();
+            let mut spans = Vec::with_capacity(rows.len());
+            for h in &heights {
+                spans.push((y, y + h));
+                y += h + gap;
+            }
+            let mut label_y: Vec<f32> = spans.iter().map(|(a, b)| (a + b) / 2.0 - label_h / 2.0).collect();
+            for i in 0..label_y.len() {
+                let min = if i == 0 { rect.top() } else { label_y[i - 1] + label_h };
+                label_y[i] = label_y[i].max(min);
+            }
+            for i in (0..label_y.len()).rev() {
+                let max = if i + 1 == label_y.len() { rect.bottom() - label_h } else { label_y[i + 1] - label_h };
+                label_y[i] = label_y[i].min(max).max(rect.top());
+            }
+
+            let label_x = rect.left() + bar_w + 14.0;
+            let n = rows.len();
+            for (i, row) in rows.iter().enumerate() {
+                let (y0, y1) = spans[i];
+                let seg = egui::Rect::from_min_max(Pos2::new(rect.left(), y0), Pos2::new(rect.left() + bar_w, y1));
+                let label_rect = egui::Rect::from_min_size(Pos2::new(label_x - 6.0, label_y[i]), Vec2::new(rect.right() - label_x + 6.0, label_h));
+                let picked = self.category == Some(row.cat);
+                let dimmed = self.category.is_some() && !picked;
+
+                let id = ui.id().with(("cat", i));
+                let hit = ui.interact(seg.expand2(Vec2::new(0.0, gap / 2.0)), id, egui::Sense::click())
+                    | ui.interact(label_rect, id.with("label"), egui::Sense::click());
+                let hovered = hit.hovered();
+
+                if picked {
+                    painter.rect_filled(label_rect, egui::CornerRadius::same(4), ui.visuals().selection.bg_fill.gamma_multiply(0.5));
+                } else if hovered {
+                    painter.rect_filled(label_rect, egui::CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
                 }
-            });
-        });
+                let r = 4u8;
+                let radius = egui::CornerRadius {
+                    nw: if i == 0 { r } else { 0 },
+                    ne: if i == 0 { r } else { 0 },
+                    sw: if i + 1 == n { r } else { 0 },
+                    se: if i + 1 == n { r } else { 0 },
+                };
+                let color = row.cat.color(dark);
+                painter.rect_filled(seg, radius, if dimmed { color.gamma_multiply(0.3) } else { color });
+                if hovered || picked {
+                    painter.rect_stroke(seg, radius, egui::Stroke::new(1.5, ui.visuals().strong_text_color()), egui::StrokeKind::Outside);
+                }
+
+                // A short leader from the segment to a label that had to move.
+                let mid = (y0 + y1) / 2.0;
+                let label_mid = label_y[i] + label_h / 2.0;
+                let ink = if dimmed { ui.visuals().weak_text_color() } else { ui.visuals().strong_text_color() };
+                if (mid - label_mid).abs() > 2.0 {
+                    painter.line_segment(
+                        [Pos2::new(seg.right() + 2.0, mid), Pos2::new(label_x - 8.0, label_mid)],
+                        egui::Stroke::new(1.0, ui.visuals().weak_text_color()),
+                    );
+                }
+                painter.text(Pos2::new(label_x, label_y[i] + 2.0), egui::Align2::LEFT_TOP, row.cat.label(), font.clone(), ink);
+                let pct = row.size as f64 * 100.0 / total as f64;
+                painter.text(
+                    Pos2::new(label_x, label_y[i] + 2.0 + line_h),
+                    egui::Align2::LEFT_TOP,
+                    format!("{} · {}", format!("{pct:.1}%"), human_size(row.size)),
+                    font.clone(),
+                    ui.visuals().weak_text_color(),
+                );
+
+                let hit = hit.on_hover_ui(|ui| {
+                    ui.strong(row.cat.label());
+                    ui.label(format!("{} · {} · {} {}", human_size(row.size), format!("{pct:.1}%"), format_count(row.files), tr("CAT_FILES")));
+                    let exts: Vec<String> = row
+                        .exts
+                        .iter()
+                        .take(6)
+                        .map(|(e, sz, _)| format!("{} {}", if e.is_empty() { tr("EXT_NO_EXTENSION") } else { format!(".{e}") }, human_size(*sz)))
+                        .collect();
+                    ui.weak(exts.join("  ·  "));
+                    ui.weak(tr(if picked { "CAT_CLICK_AGAIN" } else { "CAT_CLICK" }));
+                });
+                if hit.clicked() {
+                    clicked = Some(row.cat);
+                }
+            }
+        }
+
+        if clear || clicked.is_some() {
+            self.category = match clicked {
+                Some(c) if self.category != Some(c) => Some(c),
+                _ => None,
+            };
+            self.rebuild_view_tree();
+        }
     }
 
     /// The sunburst for the folder being viewed, with hover details,

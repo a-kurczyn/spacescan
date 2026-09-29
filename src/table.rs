@@ -136,9 +136,6 @@ pub(crate) struct TableState {
     /// Rows that fit on screen, for PageUp/PageDown.
     page_rows: usize,
     pub dirs_first: bool,
-    /// Summary view: "By file extension" to the right of this table
-    /// instead of below it.
-    pub ext_beside: bool,
     /// Off only until the app is closed ("e"); never saved.
     show_dotfiles: bool,
     hidden_cols: HashSet<TableCol>,
@@ -166,7 +163,6 @@ impl Default for TableState {
             scroll_pending: false,
             page_rows: 10,
             dirs_first: false,
-            ext_beside: false,
             show_dotfiles: true,
             hidden_cols: HashSet::new(),
             col_order: TableCol::ALL.to_vec(),
@@ -262,7 +258,6 @@ impl DiskScanApp {
             hidden_columns: TableCol::ALL.into_iter().filter(|c| self.table.hidden_cols.contains(c)).collect(),
             column_order: self.table.col_order.clone(),
             dirs_first: self.table.dirs_first,
-            ext_beside: self.table.ext_beside,
         }
     }
 
@@ -279,7 +274,6 @@ impl DiskScanApp {
         }
         self.table.col_order = order;
         self.table.dirs_first = p.dirs_first;
-        self.table.ext_beside = p.ext_beside;
     }
 
     // ---------------- Frame hooks ----------------

@@ -279,41 +279,6 @@ pub(crate) fn reposition_by_size(children: &mut [Node], idx: usize) {
     }
 }
 
-pub(crate) const MAX_EXTENSIONS_SHOWN: usize = 40;
-
-pub(crate) fn collect_extensions(node: &Node, map: &mut std::collections::HashMap<String, (u64, u64)>) {
-    if node.is_dir {
-        for c in &node.children {
-            deep(|| collect_extensions(c, map));
-        }
-    } else {
-        let ext = Path::new(&node.name)
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .filter(|e| !e.is_empty())
-            .unwrap_or_else(|| tr("EXT_NO_EXTENSION"));
-        let entry = map.entry(ext).or_insert((0, 0));
-        entry.0 = entry.0.saturating_add(node.size);
-        entry.1 += node.file_count.max(1);
-    }
-}
-
-/// (extension, total size, file count), largest-first, with a long tail of
-/// rare extensions folded into a single "(other)" row.
-pub(crate) fn extension_breakdown(node: &Node) -> Vec<(String, u64, u64)> {
-    let mut map = std::collections::HashMap::new();
-    collect_extensions(node, &mut map);
-    let mut v: Vec<(String, u64, u64)> = map.into_iter().map(|(k, (s, c))| (k, s, c)).collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1));
-    if v.len() > MAX_EXTENSIONS_SHOWN {
-        let rest = v.split_off(MAX_EXTENSIONS_SHOWN);
-        let size: u64 = rest.iter().map(|(_, s, _)| s).sum();
-        let count: u64 = rest.iter().map(|(_, _, c)| c).sum();
-        v.push((trf("EXT_OTHER_COUNT", &[&rest.len().to_string()]), size, count));
-    }
-    v
-}
-
 pub(crate) fn file_name_of(p: &Path) -> String {
     p.file_name().map(show_os).unwrap_or_else(|| show_path(p))
 }

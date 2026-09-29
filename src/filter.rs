@@ -208,10 +208,16 @@ pub(crate) fn parse_date(s: &str, end_of_day: bool) -> Result<i64, String> {
 /// Copy of `n` keeping only files that match `f`, with folder sizes and file
 /// counts recomputed from what's left. Folders with no matches are dropped.
 pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter) -> Option<Node> {
+    filter_tree_by(n, &|file: &Node| f.matches_file(file))
+}
+
+/// Copy of `n` keeping only the files `keep` accepts, and the folders that
+/// still contain one; folder sizes and counts cover what's kept.
+pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) -> Option<Node> {
     if !n.is_dir {
-        return f.matches_file(n).then(|| n.clone());
+        return keep(n).then(|| n.clone());
     }
-    let mut children: Vec<Node> = n.children.par_iter().filter_map(|c| deep(|| filter_tree(c, f))).collect();
+    let mut children: Vec<Node> = n.children.par_iter().filter_map(|c| deep(|| filter_tree_by(c, keep))).collect();
     if children.is_empty() {
         return None;
     }

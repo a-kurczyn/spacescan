@@ -117,8 +117,7 @@ ERR_IO_PERMISSION=no tienes permiso para leer o entrar en esa carpeta
 ERR_IO_OTHER=no se pudo leer (%s)
 ERR_IO_LINE=%s — %s
 
-# ---- Extensiones / grupos agregados del gráfico ----
-EXT_OTHER_COUNT=(%s otras extensiones)
+# ---- Grupos agregados del gráfico ----
 EXT_NO_EXTENSION=(sin extensión)
 SEG_OTHER_ITEMS=(%s otros elementos)
 SEG_FREE_SPACE=Espacio libre
@@ -126,9 +125,6 @@ SEG_OTHER_FS=%s [otro sistema de archivos]
 
 # ---- Vista de resumen ----
 SUMMARY_CONTENTS=Contenido
-SUMMARY_BY_EXTENSION=Por extensión de archivo
-EXT_SHOW_BESIDE=Mostrar junto a la tabla de contenido
-EXT_SHOW_BELOW=Mostrar debajo de la tabla de contenido
 COL_SIZE=Tamaño
 A11Y_SORTED_ASC=%s, orden ascendente
 A11Y_SORTED_DESC=%s, orden descendente
@@ -139,7 +135,6 @@ COL_MODIFIED_TIP=Último cambio del contenido (mtime)
 COL_CHANGED=Cambiado
 COL_CHANGED_TIP=Último cambio del contenido o de los metadatos — permisos, propietario, renombrado (ctime)
 COL_NAME=Nombre
-COL_EXTENSION=Extensión
 
 # ---- Panel de estadísticas (esquina superior izquierda) ----
 STATS_SIZE=Tamaño: %s
@@ -254,3 +249,20 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Quitar las marcas, o cerrar los detalles
 HELP_KEYS_HELP=?
 HELP_HELP=Esta ayuda
+
+# ---- Categorías (barra junto a la tabla de contenido) ----
+SUMMARY_CATEGORIES=Categorías
+CAT_VIDEO=Vídeo
+CAT_AUDIO=Audio
+CAT_IMAGES=Imágenes
+CAT_DOCUMENTS=Documentos
+CAT_ARCHIVES=Archivos comprimidos
+CAT_APPLICATIONS=Aplicaciones
+CAT_CODE=Código
+CAT_DATA=Datos
+CAT_OTHER=Otros
+CAT_FILES=archivos
+CAT_CLEAR=Mostrar todas las categorías
+CAT_NO_FILES=No hay archivos aquí
+CAT_CLICK=Clic para mostrar solo estos archivos
+CAT_CLICK_AGAIN=Clic de nuevo para mostrar todos los archivos

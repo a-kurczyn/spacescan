@@ -11,6 +11,7 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Instant;
 
+mod category;
 mod chart;
 mod config;
 mod delete;
@@ -21,6 +22,7 @@ mod scan;
 mod table;
 mod theme;
 mod widgets;
+use category::*;
 use chart::*;
 use config::Config;
 use filter::*;
@@ -191,6 +193,15 @@ struct DiskScanApp {
     filter_applied: FilterForm,
     filter: Option<Arc<CompiledFilter>>,
     filter_error: Option<String>,
+    /// Category picked in the summary view's category bar (None = all).
+    /// Applied on top of `filter`.
+    category: Option<Category>,
+    /// The tree with `filter` applied but not `category`: what the category
+    /// bar breaks down, so every category stays visible and clickable.
+    cat_base: Option<Arc<Node>>,
+    /// Category breakdown of the viewed folder, cached per (folder, tree_gen).
+    cat_breakdown: Vec<CategoryRow>,
+    cat_breakdown_for: Option<(PathBuf, u64)>,
     /// Path bar shows clickable folder segments unless this is set, in
     /// which case it's a text field for typing a path.
     path_editing: bool,
@@ -275,13 +286,7 @@ struct DiskScanApp {
     show_settings: bool,
     path_input: String,
     path_input_focused: bool,
-    /// Per-extension size/count breakdown for the summary view, cached and
-    /// only recomputed when the viewed folder changes (it's an O(subtree)
-    /// walk, too costly to redo every frame).
-    ext_breakdown: Vec<(String, u64, u64)>,
-    ext_breakdown_for: Option<PathBuf>,
     contents_sort: SortState,
-    ext_sort: SortState,
     /// On-demand MIME sniffing for the single file currently hovered in the
     /// tooltip — never done during the bulk scan (reading file content for
     /// every file would meaningfully slow it down), only for one file at a
@@ -350,12 +355,13 @@ impl Default for DiskScanApp {
             show_settings: false,
             path_input: String::new(),
             path_input_focused: false,
-            ext_breakdown: Vec::new(),
-            ext_breakdown_for: None,
-            // Both tables start sorted by size, descending — matches the
-            // order the sunburst itself already uses (largest slice first).
+            category: None,
+            cat_base: None,
+            cat_breakdown: Vec::new(),
+            cat_breakdown_for: None,
+            // Starts sorted by size, descending — matches the order the
+            // sunburst itself already uses (largest slice first).
             contents_sort: SortState { column: SortColumn::Size, ascending: false },
-            ext_sort: SortState { column: SortColumn::Size, ascending: false },
             mime_cache: std::collections::HashMap::new(),
             mime_inflight: HashSet::new(),
             mime_tx,
@@ -476,23 +482,29 @@ impl DiskScanApp {
     fn rebuild_view_tree(&mut self) {
         self.tree_gen += 1;
         let Some(full) = self.full_root.clone() else { return };
-        let new_root = match &self.filter {
-            Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| Node {
-                name: full.name.clone(),
-                path: full.path.clone(),
-                size: 0,
-                file_count: 0,
-                children: Vec::new(),
-                ..empty_node()
-            })),
-            None => full,
+        let empty = |full: &Node| Node {
+            name: full.name.clone(),
+            path: full.path.clone(),
+            size: 0,
+            file_count: 0,
+            children: Vec::new(),
+            ..empty_node()
         };
+        let base = match &self.filter {
+            Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| empty(&full))),
+            None => full.clone(),
+        };
+        let new_root = match self.category {
+            Some(cat) => Arc::new(filter_tree_by(&base, &|n: &Node| Category::of_name(&n.name) == cat).unwrap_or_else(|| empty(&full))),
+            None => base.clone(),
+        };
+        self.cat_base = Some(base);
         if let Some(old) = &self.root {
             self.view_stack = self.view_stack.iter().map(|vp| remap_index_path(old, &new_root, vp)).collect();
             self.view_stack.dedup();
         }
         self.root = Some(new_root);
-        self.ext_breakdown_for = None;
+        self.cat_breakdown_for = None;
         self.selection = None; // child indices may have changed
     }
 
