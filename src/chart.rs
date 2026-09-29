@@ -125,37 +125,24 @@ pub(crate) fn layout_sunburst(
     let span_abs = (content_end_angle - start_angle).abs().max(0.0001);
     let min_frac = (settings.min_segment_angle_deg.to_radians() / span_abs).max(0.0);
 
-    // Children are pre-sorted largest-first. Keep showing individual segments
-    // only while they'd still be wide enough to render as a real slice; lump
-    // the long tail of tiny ones into a single "other" bucket instead of
-    // producing hundreds of sub-pixel slivers. Unless `unlimited_slices` is
-    // on, in which case every child gets its own slice regardless — zoom
-    // (Ctrl+wheel) is the only way to make sliver-thin ones clickable then.
-    let mut split = 0;
-    if settings.unlimited_slices {
-        split = visible_children.len();
+    // Children are pre-sorted largest-first. The ring has room for
+    // span / min-angle slices: if every child fits, each gets one;
+    // otherwise the largest take all slots but the last, which is "other".
+    // Shown slices are stretched to fill the ring (see below), so in a
+    // folder of 1200 similar movies filling 160° at 1° per slice, 159
+    // movies get comparable slices. `unlimited_slices` gives every child
+    // its own slice regardless — zoom (Ctrl+wheel) is the only way to make
+    // sliver-thin ones clickable then.
+    let split = if settings.unlimited_slices {
+        visible_children.len()
     } else {
-        // Shown slices are drawn stretched to fill the ring (minus the
-        // "other" sliver), so judge each one at *that* width, not at its
-        // share of the whole folder: otherwise, in a folder of 1200 similar
-        // movies, only the largest clears the threshold and it alone gets
-        // stretched over the entire ring. Adding a smaller item only makes
-        // the smallest drawn slice narrower, so stop at the first misfit.
-        let other_share = min_frac.min(0.5);
-        let mut shown_sum = 0u64;
-        for (_, c) in &visible_children {
-            if split >= settings.max_children_shown {
-                break;
-            }
-            let sum = shown_sum.saturating_add(c.size);
-            let room = if split + 1 < visible_children.len() { 1.0 - other_share } else { 1.0 };
-            if c.size == 0 || (c.size as f32 / sum as f32) * room < min_frac {
-                break;
-            }
-            shown_sum = sum;
-            split += 1;
-        }
-    }
+        // At most 360 slices per full ring, whatever the min angle.
+        let slots = ((span_abs / settings.min_segment_angle_deg.to_radians().max(1e-6)) as usize)
+            .min((360.0 * span_abs / std::f32::consts::TAU) as usize);
+        let n = if visible_children.len() <= slots { visible_children.len() } else { slots.saturating_sub(1) };
+        // Empty items would be zero-width: they go to "other" too.
+        visible_children.iter().take(n.min(settings.max_children_shown)).take_while(|(_, c)| c.size > 0).count()
+    };
     let mut shown: Vec<(usize, &Node)> = visible_children.iter().take(split).cloned().collect();
     // Which children get their own slice is always decided by size (above),
     // so A–Z order never pushes a big folder into "other"; only the drawing
@@ -423,10 +410,10 @@ mod tests {
         segs
     }
 
-    /// Similar-sized items (movies of 171, 158, 156, … GB among 1199) all
-    /// get comparable slices; only the leftover tail goes into "other".
+    /// Similar-sized items (movies of 171, 158, 156, … GB among 1199)
+    /// fill every slot of the ring but the last, which is "other".
     #[test]
-    fn similar_items_get_comparable_slices() {
+    fn similar_items_fill_the_ring_slots() {
         let mut kids: Vec<Node> = [171u64, 158, 156, 150]
             .iter()
             .enumerate()
@@ -434,32 +421,54 @@ mod tests {
             .collect();
         kids.extend((0..1195).map(|i| test_node(&format!("/m/{i}"), 30, false, vec![])));
         let root = test_node("/m", kids.iter().map(|k| k.size).sum(), true, kids);
+        let mut settings = Settings::default();
+        settings.min_segment_angle_deg = 1.0;
+        settings.max_children_shown = 360;
         let span = 160f32.to_radians();
-        let segs = layout(&root, span);
-        let settings = Settings::default();
-        let min = settings.min_segment_angle_deg.to_radians();
+        let mut segs = Vec::new();
+        layout_sunburst(&root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
         let shown: Vec<&Segment> = segs.iter().filter(|s| !s.is_other).collect();
-        assert_eq!(shown.len(), settings.max_children_shown);
+        assert_eq!(shown.len(), 159);
         let w = |s: &Segment| s.end_angle - s.start_angle;
-        assert!(shown.iter().all(|s| w(s) >= min * 0.999));
         let (a, b) = (w(shown[0]), w(shown[1]));
         assert!((a / b - 171.0 / 158.0).abs() < 1e-3, "171 GB vs 158 GB drawn {a} vs {b}");
         let other = segs.iter().find(|s| s.is_other).unwrap();
-        assert!((w(other) - min).abs() < 1e-4);
+        assert!((w(other) - 1f32.to_radians()).abs() < 1e-4);
         assert!((other.end_angle - span).abs() < 1e-4);
     }
 
-    /// A handful of tiny leftovers still get a visible, clickable sliver.
+    /// When every child fits, there's no "other" at all.
     #[test]
-    fn tiny_other_bucket_gets_min_width() {
-        let root = test_node("/m", 1_000_001, true, vec![
-            test_node("/m/a", 1_000_000, false, vec![]),
-            test_node("/m/b", 1, false, vec![]),
-        ]);
+    fn no_other_when_everything_fits() {
+        let root = test_node("/m", 6, true, (1..=3).map(|i| test_node(&format!("/m/{i}"), i, false, vec![])).collect());
         let segs = layout(&root, std::f32::consts::TAU);
+        assert_eq!(segs.len(), 3);
+        assert!(segs.iter().all(|s| !s.is_other));
+    }
+
+    /// Too many children for the slots: "other" gets one min-width slot.
+    #[test]
+    fn overflow_goes_to_a_min_width_other() {
         let settings = Settings::default();
+        let n = 1000;
+        let root = test_node("/m", n, true, (0..n).map(|i| test_node(&format!("/m/{i}"), 1, false, vec![])).collect());
+        let segs = layout(&root, std::f32::consts::TAU);
         let other = segs.iter().find(|s| s.is_other).unwrap();
         let min = settings.min_segment_angle_deg.to_radians();
-        assert!(other.end_angle - other.start_angle >= min * 0.999);
+        assert!((other.end_angle - other.start_angle - min).abs() < 1e-4);
+        assert_eq!(segs.len() - 1, settings.max_children_shown);
+    }
+
+    /// Never more than 360 slices around a full ring, even at a tiny min angle.
+    #[test]
+    fn at_most_360_slices_per_ring() {
+        let mut settings = Settings::default();
+        settings.min_segment_angle_deg = 0.1;
+        settings.max_children_shown = usize::MAX;
+        let n = 5000;
+        let root = test_node("/m", n, true, (0..n).map(|i| test_node(&format!("/m/{i}"), 1, false, vec![])).collect());
+        let mut segs = Vec::new();
+        layout_sunburst(&root, vec![], 0.0, std::f32::consts::TAU, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
+        assert_eq!(segs.len(), 360);
     }
 }
