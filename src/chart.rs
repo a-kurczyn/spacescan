@@ -130,7 +130,8 @@ pub(crate) fn layout_sunburst(
     // otherwise the largest take all slots but the last, which is "other".
     // Shown slices are stretched to fill the ring (see below), so in a
     // folder of 1200 similar movies filling 160° at 1° per slice, 159
-    // movies get comparable slices. `unlimited_slices` gives every child
+    // movies get comparable slices — as long as each is drawn at least
+    // the min angle wide (see below). `unlimited_slices` gives every child
     // its own slice regardless — zoom (Ctrl+wheel) is the only way to make
     // sliver-thin ones clickable then.
     let split = if settings.unlimited_slices {
@@ -140,8 +141,23 @@ pub(crate) fn layout_sunburst(
         let slots = ((span_abs / settings.min_segment_angle_deg.to_radians().max(1e-6)) as usize)
             .min((360.0 * span_abs / std::f32::consts::TAU) as usize);
         let n = if visible_children.len() <= slots { visible_children.len() } else { slots.saturating_sub(1) };
-        // Empty items would be zero-width: they go to "other" too.
-        visible_children.iter().take(n.min(settings.max_children_shown)).take_while(|(_, c)| c.size > 0).count()
+        // Uneven sizes can still leave the tail of those slots narrower than
+        // the min angle (a stack of 1-px slivers): stop at the first item
+        // that would be drawn that thin, and let "other" take it and the
+        // rest. Adding a smaller item only makes the smallest drawn slice
+        // narrower, so the first misfit ends the run.
+        let n = n.min(settings.max_children_shown);
+        let mut shown_sum = 0u64;
+        visible_children
+            .iter()
+            .take(n)
+            .enumerate()
+            .take_while(|(k, (_, c))| {
+                shown_sum = shown_sum.saturating_add(c.size);
+                let room = if k + 1 < visible_children.len() { 1.0 - min_frac.min(0.5) } else { 1.0 };
+                c.size > 0 && (c.size as f32 / shown_sum as f32) * room >= min_frac * 0.999
+            })
+            .count()
     };
     let mut shown: Vec<(usize, &Node)> = visible_children.iter().take(split).cloned().collect();
     // Which children get their own slice is always decided by size (above),
@@ -410,8 +426,8 @@ mod tests {
         segs
     }
 
-    /// Similar-sized items (movies of 171, 158, 156, … GB among 1199)
-    /// fill every slot of the ring but the last, which is "other".
+    /// Similar-sized items (movies of 171, 158, 156, … GB among 1199) get
+    /// comparable slices; "other" takes one min-width slot at the end.
     #[test]
     fn similar_items_fill_the_ring_slots() {
         let mut kids: Vec<Node> = [171u64, 158, 156, 150]
@@ -428,13 +444,30 @@ mod tests {
         let mut segs = Vec::new();
         layout_sunburst(&root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
         let shown: Vec<&Segment> = segs.iter().filter(|s| !s.is_other).collect();
-        assert_eq!(shown.len(), 159);
+        // 159 slots, but the 30-GB movies would be drawn under 1° by then.
         let w = |s: &Segment| s.end_angle - s.start_angle;
+        assert!(shown.len() > 100 && shown.len() < 159, "{} shown", shown.len());
+        assert!(shown.iter().all(|s| w(s) >= 1f32.to_radians() * 0.999));
         let (a, b) = (w(shown[0]), w(shown[1]));
         assert!((a / b - 171.0 / 158.0).abs() < 1e-3, "171 GB vs 158 GB drawn {a} vs {b}");
         let other = segs.iter().find(|s| s.is_other).unwrap();
         assert!((w(other) - 1f32.to_radians()).abs() < 1e-4);
         assert!((other.end_angle - span).abs() < 1e-4);
+    }
+
+    /// A few big items and a long tail of small ones: no slice is drawn
+    /// narrower than the min angle; the thin tail goes into "other".
+    #[test]
+    fn uneven_tail_goes_to_other() {
+        let mut kids: Vec<Node> = (0..10).map(|i| test_node(&format!("/m/big{i}"), 100, false, vec![])).collect();
+        kids.extend((0..100).map(|i| test_node(&format!("/m/{i}"), 10, false, vec![])));
+        let root = test_node("/m", 2000, true, kids);
+        let settings = Settings::default();
+        let segs = layout(&root, 120f32.to_radians());
+        let min = settings.min_segment_angle_deg.to_radians();
+        assert!(segs.iter().all(|s| s.end_angle - s.start_angle >= min * 0.999));
+        assert!(segs.iter().any(|s| s.is_other));
+        assert!(segs.iter().filter(|s| !s.is_other).count() > 10);
     }
 
     /// When every child fits, there's no "other" at all.
