@@ -184,14 +184,20 @@ impl Default for TableState {
 /// Replaces the node at `target` with `new`, adjusting the size and file
 /// count of every folder above it. Returns the (old, new) (size, file
 /// count), or None if `target` isn't in the tree.
-fn replace_in_tree(node: &mut Node, target: &Path, new: Node) -> Option<((u64, u64), (u64, u64))> {
-    let i = node.children.iter().position(|c| target.starts_with(&c.path))?;
-    let (old, new) = if node.children[i].path == target {
+pub(crate) fn replace_in_tree(node: &mut Node, target: &Path, new: Node) -> Option<((u64, u64), (u64, u64))> {
+    let parts = rel_parts(&node.path, target)?;
+    replace_at(node, &parts, new)
+}
+
+fn replace_at(node: &mut Node, parts: &[&std::ffi::OsStr], new: Node) -> Option<((u64, u64), (u64, u64))> {
+    let (first, rest) = parts.split_first()?;
+    let i = child_named(node, first)?;
+    let (old, new) = if rest.is_empty() {
         let n = (new.size, new.file_count);
         let o = std::mem::replace(&mut node.children[i], new);
         ((o.size, o.file_count), n)
     } else {
-        replace_in_tree(&mut node.children[i], target, new)?
+        deep(|| replace_at(&mut node.children[i], rest, new))?
     };
     node.size = node.size.saturating_sub(old.0).saturating_add(new.0);
     node.file_count = node.file_count.saturating_sub(old.1).saturating_add(new.1);
@@ -414,6 +420,10 @@ impl DiskScanApp {
         let mut double_clicked: Option<usize> = None;
         let mut ctrl_clicked: Option<usize> = None;
         let show_info = self.table.show_info;
+        // During a scan, a folder the scanner hasn't finished yet only has a
+        // name and running totals (its mode is still unset).
+        let live = self.scanning;
+        let pending = |c: &Node| live && c.is_dir && c.mode == 0;
         let sort_before = self.contents_sort;
         let contents_sort = &mut self.contents_sort;
         let user_cache = &mut self.user_cache;
@@ -548,6 +558,11 @@ impl DiskScanApp {
                             }
                             Cell::Opt(TableCol::Files) => {
                                 ui.label(format_count(c.file_count));
+                            }
+                            // A folder still being scanned (live table) has
+                            // no details yet: "…", not values that look real.
+                            Cell::Opt(TableCol::Modified | TableCol::Changed | TableCol::Perms) if pending(c) => {
+                                ui.weak("…");
                             }
                             Cell::Opt(TableCol::Modified) => {
                                 ui.label(if c.mtime == 0 { "-".to_string() } else { format_epoch(c.mtime) });
@@ -720,7 +735,7 @@ impl DiskScanApp {
                         } else {
                             draw_file_icon(ui.painter(), r, color);
                         }
-                        ui.add(egui::Label::new(egui::RichText::new(show_path(&h.path)).monospace()).wrap());
+                        ui.add(egui::Label::new(egui::RichText::new(short_path(&h.path)).monospace()).wrap());
                     });
                     ui.separator();
                     details_grid(
@@ -1156,15 +1171,12 @@ mod perf {
     fn row_order_300k() {
         let mut app = DiskScanApp::default();
         let children: Vec<Node> = (0..300_000u64)
-            .map(|i| Node {
-                name: format!("file_{:06}.dat", (i * 7919) % 300_000),
-                path: PathBuf::from(format!("/t/many/file_{:06}.dat", (i * 7919) % 300_000)),
-                size: [0, 0, 4096, 8192, 20480, 69632][(i % 6) as usize],
-                file_count: 1,
-                ..empty_node()
+            .map(|i| {
+                let path = format!("/t/many/file_{:06}.dat", (i * 7919) % 300_000);
+                test_node(&path, [0, 0, 4096, 8192, 20480, 69632][(i % 6) as usize], false, vec![])
             })
             .collect();
-        let folder = Node { children, is_dir: true, ..empty_node() };
+        let folder = test_node("/t/many", 0, true, children);
         for (column, ascending) in [
             (SortColumn::Size, false),
             (SortColumn::Size, true),
@@ -1199,16 +1211,9 @@ mod cursor_tests {
         let children: Vec<Node> = names
             .iter()
             .enumerate()
-            .map(|(i, n)| Node {
-                name: n.to_string(),
-                path: PathBuf::from(format!("/t/{n}")),
-                size: 1000 - i as u64,
-                file_count: 1,
-                is_dir: false,
-                ..empty_node()
-            })
+            .map(|(i, n)| test_node(&format!("/t/{n}"), 1000 - i as u64, false, vec![]))
             .collect();
-        let root = Arc::new(Node { path: PathBuf::from("/t"), children, is_dir: true, ..empty_node() });
+        let root = Arc::new(test_node("/t", 0, true, children));
         app.root = Some(root.clone());
         app.summary_view = true;
         let key = OrderKey {
@@ -1269,7 +1274,7 @@ mod live_tests {
     use super::*;
 
     fn folder(name: &str, size: u64) -> Node {
-        Node { name: name.into(), path: PathBuf::from(format!("/scan/{name}")), size, is_dir: true, ..empty_node() }
+        test_node(&format!("/scan/{name}"), size, true, vec![])
     }
 
     /// Re-sorts the live table as table_ui does on a refresh.
@@ -1301,7 +1306,7 @@ mod live_tests {
         let mut app = DiskScanApp::default();
         app.scanning = true;
         app.contents_sort = SortState { column: SortColumn::Size, ascending: false };
-        app.partial_root = Node { path: PathBuf::from("/scan"), children: vec![folder("a", 30), folder("b", 20)], ..empty_node() };
+        app.partial_root = test_node("/scan", 0, true, vec![folder("a", 30), folder("b", 20)]);
         refresh(&mut app);
         assert_eq!(names(&app), ["a", "b"]);
         app.table.cursor = Some(PathBuf::from("/scan/b"));

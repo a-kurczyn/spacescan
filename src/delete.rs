@@ -120,7 +120,7 @@ fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()
             if m.dev() != dev {
                 return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&show_path(&child)])));
             }
-            remove_dir_in(&child, &handle, dev)?;
+            deep(|| remove_dir_in(&child, &handle, dev))?;
         } else {
             std::fs::remove_file(openable(&child, &handle))?;
         }
@@ -162,12 +162,18 @@ pub(crate) struct Removal {
 /// file count from every folder above it. Returns what was removed, or
 /// None if `target` isn't in the tree.
 fn remove_from_tree(node: &mut Node, target: &Path) -> Option<(u64, u64)> {
-    let i = node.children.iter().position(|c| target.starts_with(&c.path))?;
-    let removed = if node.children[i].path == target {
+    let parts = rel_parts(&node.path, target)?;
+    remove_at(node, &parts)
+}
+
+fn remove_at(node: &mut Node, parts: &[&std::ffi::OsStr]) -> Option<(u64, u64)> {
+    let (first, rest) = parts.split_first()?;
+    let i = child_named(node, first)?;
+    let removed = if rest.is_empty() {
         let c = node.children.remove(i);
         (c.size, c.file_count)
     } else {
-        remove_from_tree(&mut node.children[i], target)?
+        deep(|| remove_at(&mut node.children[i], rest))?
     };
     node.size = node.size.saturating_sub(removed.0);
     node.file_count = node.file_count.saturating_sub(removed.1);
@@ -176,11 +182,11 @@ fn remove_from_tree(node: &mut Node, target: &Path) -> Option<(u64, u64)> {
 
 /// The node at `path`, if it's in the tree.
 pub(crate) fn find_node<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
-    if root.path == path {
-        return Some(root);
+    let mut n = root;
+    for name in rel_parts(&root.path, path)? {
+        n = &n.children[child_named(n, name)?];
     }
-    let child = root.children.iter().find(|c| path.starts_with(&c.path))?;
-    find_node(child, path)
+    Some(n)
 }
 
 impl DiskScanApp {
@@ -286,7 +292,7 @@ impl DiskScanApp {
                     ui.add_space(6.0);
                     match single_is_dir {
                         Some(is_dir) => {
-                            ui.label(egui::RichText::new(show_path(&paths[0])).monospace());
+                            ui.label(egui::RichText::new(short_path(&paths[0])).monospace());
                             let link = std::fs::read_link(&paths[0]).ok();
                             ui.label(match (&link, *is_dir) {
                                 // Removing a link never touches its target.
@@ -524,15 +530,100 @@ mod tests {
     #[test]
     fn delete_dialog_counts_unreadable_folders_inside() {
         let mut app = DiskScanApp::default();
-        let locked = Node { name: "locked".into(), path: PathBuf::from("/nonexistent-qa/locked"), is_dir: true, ..empty_node() };
-        let other = Node { name: "other".into(), path: PathBuf::from("/nonexistent-qa/other"), is_dir: true, ..empty_node() };
-        app.root = Some(Arc::new(Node { path: PathBuf::from("/nonexistent-qa"), children: vec![locked, other], is_dir: true, ..empty_node() }));
+        let locked = test_node("/nonexistent-qa/locked", 0, true, vec![]);
+        let other = test_node("/nonexistent-qa/other", 0, true, vec![]);
+        app.root = Some(Arc::new(test_node("/nonexistent-qa", 0, true, vec![locked, other])));
         app.unreadable = vec![PathBuf::from("/nonexistent-qa/locked/secret"), PathBuf::from("/nonexistent-qa/elsewhere")];
         app.ask_delete(vec![PathBuf::from("/nonexistent-qa/locked")]);
         assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 1, .. })));
         app.removal.confirm = None;
         app.ask_delete(vec![PathBuf::from("/nonexistent-qa/other")]);
         assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 0, .. })));
+    }
+
+    /// Builds a chain of `levels` nested folders named "d" (files every
+    /// 500 levels and at the bottom), then runs every tree operation over
+    /// it: scan, live-preview graft, extension breakdown, filter, clone,
+    /// find, replace, remove, drop, and the delete from disk.
+    fn deep_chain(levels: usize) {
+        use std::os::unix::fs::MetadataExt;
+        let base = std::env::temp_dir().join(format!("spacemap-deep-{levels}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let top = base.join("chain");
+        std::fs::create_dir(&top).unwrap();
+        let mut dir = top.clone();
+        let mut handle: DirHandle = None;
+        let mut files = 0;
+        for i in 0..levels {
+            let next = dir.join("d");
+            std::fs::create_dir(openable(&next, &handle)).unwrap();
+            handle = if next.as_os_str().len() + 256 > LONG_PATH {
+                Some(std::fs::File::open(openable(&next, &handle)).unwrap())
+            } else {
+                None
+            };
+            dir = next;
+            if i % 500 == 0 || i == levels - 1 {
+                std::fs::write(openable(&dir.join("f.bin"), &handle), [1u8; 10]).unwrap();
+                files += 1;
+            }
+        }
+        drop(handle);
+        let bottom = dir.clone();
+
+        // Scan.
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let ctx = ScanCtx {
+            root_dev: std::fs::metadata(&top).unwrap().dev(),
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &Default::default(),
+            progress_interval: 512,
+            apparent_size: true,
+            hard_links: Default::default(),
+        };
+        let tree = scan_dir(&top, &ctx);
+        assert_eq!(tree.file_count, files);
+        assert_eq!(find_node(&tree, &bottom.join("f.bin")).map(|n| n.size), Some(10));
+
+        // Live-preview graft of the deepest folder.
+        let mut partial = empty_node();
+        partial.path = top.clone();
+        graft_slice(&mut partial, &bottom, 10, 1, 0, 0, 0, 0, 0);
+        assert!(find_node(&partial, &bottom).is_some());
+
+        // Extensions, filter, clone.
+        assert_eq!(extension_breakdown(&tree).iter().find(|e| e.0 == "bin").map(|e| e.2), Some(files));
+        let filter = CompiledFilter::compile(&FilterForm { name: "*.bin".into(), ..Default::default() }).unwrap().unwrap();
+        assert_eq!(filter_tree(&tree, &filter).map(|t| t.file_count), Some(files));
+        let mut copy = tree.clone();
+
+        // Replace (a folder rescan) and remove (a delete) at the bottom.
+        let fresh = find_node(&tree, &bottom).unwrap().clone();
+        assert!(table::replace_in_tree(&mut copy, &bottom, fresh).is_some());
+        assert_eq!(remove_from_tree(&mut copy, &bottom.join("f.bin")), Some((10, 1)));
+        assert_eq!(copy.file_count, files - 1);
+        drop(copy);
+        drop(partial);
+        drop(tree);
+
+        // Delete from disk.
+        remove_dir_one_fs(&top, std::fs::metadata(&top).unwrap().dev()).unwrap();
+        assert!(!top.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn very_deep_folder_chains_are_handled() {
+        deep_chain(5_000);
+    }
+
+    #[test]
+    #[ignore]
+    fn extremely_deep_folder_chains_are_handled() {
+        deep_chain(30_000);
     }
 
     #[test]

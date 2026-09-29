@@ -208,7 +208,7 @@ pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter) -> Option<Node> {
     if !n.is_dir {
         return f.matches_file(n).then(|| n.clone());
     }
-    let mut children: Vec<Node> = n.children.par_iter().filter_map(|c| filter_tree(c, f)).collect();
+    let mut children: Vec<Node> = n.children.par_iter().filter_map(|c| deep(|| filter_tree(c, f))).collect();
     if children.is_empty() {
         return None;
     }

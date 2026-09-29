@@ -5,7 +5,16 @@ use super::*;
 
 // ---------------- Data model ----------------
 
-#[derive(Clone)]
+/// Runs `f` (the next level of a recursion over the tree or a folder chain)
+/// with enough stack, growing it on the heap when a recursion runs deep:
+/// folder chains can be nested far deeper than any fixed stack allows (one
+/// frame per level; ~1,000 levels used to crash the app). Every recursive
+/// function over folders or the tree calls its next level through this.
+#[inline]
+pub(crate) fn deep<R>(f: impl FnOnce() -> R) -> R {
+    stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, f)
+}
+
 pub(crate) struct Node {
     pub(crate) name: String,
     pub(crate) path: PathBuf,
@@ -21,6 +30,53 @@ pub(crate) struct Node {
     pub(crate) gid: u32,
     /// Birth (creation) time, 0 when the filesystem doesn't report one.
     pub(crate) btime: i64,
+}
+
+// Clone and drop by hand: the derived versions recurse one level per
+// folder, which overflows the stack on very deep chains.
+impl Clone for Node {
+    fn clone(&self) -> Self {
+        deep(|| Node {
+            name: self.name.clone(),
+            path: self.path.clone(),
+            size: self.size,
+            file_count: self.file_count,
+            is_dir: self.is_dir,
+            children: self.children.clone(),
+            mode: self.mode,
+            mtime: self.mtime,
+            ctime: self.ctime,
+            uid: self.uid,
+            gid: self.gid,
+            btime: self.btime,
+        })
+    }
+}
+
+impl Drop for Node {
+    /// Frees the subtree without recursing: descendants are moved onto a
+    /// work list and each is dropped once it has no children left.
+    fn drop(&mut self) {
+        let mut pending = std::mem::take(&mut self.children);
+        while let Some(mut n) = pending.pop() {
+            pending.append(&mut n.children);
+        }
+    }
+}
+
+/// A node for tests: `path` (its name is the last component), size,
+/// folder or file, children. (Nodes can't be built with `..empty_node()`:
+/// Node has a Drop.)
+#[cfg(test)]
+pub(crate) fn test_node(path: &str, size: u64, is_dir: bool, children: Vec<Node>) -> Node {
+    let mut n = empty_node();
+    n.path = PathBuf::from(path);
+    n.name = file_name_of(&n.path);
+    n.size = size;
+    n.file_count = u64::from(!is_dir);
+    n.is_dir = is_dir;
+    n.children = children;
+    n
 }
 
 /// "755 (rwxr-xr-x)" style permission summary.
@@ -149,49 +205,46 @@ pub(crate) fn graft_slice(
     uid: u32,
     gid: u32,
 ) {
-    if node.path == target_path {
-        node.size = size;
-        node.file_count = file_count;
-        node.mode = mode;
-        node.mtime = mtime;
-        node.ctime = ctime;
-        node.uid = uid;
-        node.gid = gid;
-        return;
-    }
-    let rel = match target_path.strip_prefix(&node.path) {
-        Ok(r) => r,
-        Err(_) => return, // not actually a descendant; ignore
+    let Ok(rel) = target_path.strip_prefix(&node.path) else {
+        return; // not actually a descendant; ignore
     };
-    let Some(first) = rel.components().next() else {
+    // The target's path components below `node`, split once: each level
+    // then matches just its own name. (Comparing whole paths at every level
+    // made grafting cost depth² per folder — a freeze on very deep chains.)
+    let parts: Vec<&std::ffi::OsStr> = rel.components().map(|c| c.as_os_str()).collect();
+    graft_at(node, &parts, &|n: &mut Node| {
+        n.size = size;
+        n.file_count = file_count;
+        n.mode = mode;
+        n.mtime = mtime;
+        n.ctime = ctime;
+        n.uid = uid;
+        n.gid = gid;
+    });
+}
+
+/// `graft_slice` one level down: `rest` are the remaining path components
+/// to the target folder, `set` fills in its values.
+fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node)) {
+    let Some((first, rest)) = rest.split_first() else {
+        set(node);
         return;
     };
-    let first = first.as_os_str();
     // Match on the final path component (a plain byte compare) rather than
     // Path::starts_with, which re-parses both paths component by component
     // for every sibling — that dominated frame time on wide directories.
-    let idx = match node.children.iter().position(|c| c.path.file_name() == Some(first)) {
+    let idx = match node.children.iter().position(|c| c.path.file_name() == Some(*first)) {
         Some(i) => i,
         None => {
-            let child_path = node.path.join(first);
-            node.children.push(Node {
-                name: first.to_string_lossy().to_string(),
-                path: child_path,
-                size: 0,
-                file_count: 0,
-                is_dir: true,
-                children: Vec::new(),
-                mode: 0,
-                mtime: 0,
-                ctime: 0,
-                uid: 0,
-                gid: 0,
-                btime: 0,
-            });
+            let mut child = empty_node();
+            child.name = show_os(first);
+            child.path = node.path.join(first);
+            child.is_dir = true;
+            node.children.push(child);
             node.children.len() - 1
         }
     };
-    graft_slice(&mut node.children[idx], target_path, size, file_count, mode, mtime, ctime, uid, gid);
+    deep(|| graft_at(&mut node.children[idx], rest, set));
     node.size = node.children.iter().map(|c| c.size).sum();
     node.file_count = node.children.iter().map(|c| c.file_count).sum();
     // Children stay sorted by size (descending) and only children[idx]
@@ -224,7 +277,7 @@ pub(crate) const MAX_EXTENSIONS_SHOWN: usize = 40;
 pub(crate) fn collect_extensions(node: &Node, map: &mut std::collections::HashMap<String, (u64, u64)>) {
     if node.is_dir {
         for c in &node.children {
-            collect_extensions(c, map);
+            deep(|| collect_extensions(c, map));
         }
     } else {
         let ext = Path::new(&node.name)
@@ -287,13 +340,13 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
 /// `n` with its children but none of theirs: what the live table needs
 /// of the preview tree, cheap to copy.
 pub(crate) fn flat_copy(n: &Node) -> Node {
-    let shallow = |c: &Node| Node {
+    let shallow = |c: &Node, children: Vec<Node>| Node {
         name: c.name.clone(),
         path: c.path.clone(),
         size: c.size,
         file_count: c.file_count,
         is_dir: c.is_dir,
-        children: Vec::new(),
+        children,
         mode: c.mode,
         mtime: c.mtime,
         ctime: c.ctime,
@@ -301,7 +354,7 @@ pub(crate) fn flat_copy(n: &Node) -> Node {
         gid: c.gid,
         btime: c.btime,
     };
-    Node { children: n.children.iter().map(shallow).collect(), ..shallow(n) }
+    shallow(n, n.children.iter().map(|c| shallow(c, Vec::new())).collect())
 }
 
 /// Sort key for name order as file managers use it: case-insensitive, with
@@ -349,6 +402,28 @@ pub(crate) fn natural_key(name: &str) -> Vec<u8> {
 /// same.
 pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     natural_key(a).cmp(&natural_key(b)).then_with(|| a.cmp(b))
+}
+
+/// `s` cut to at most `max` characters by replacing its middle with "…"
+/// (keeping the end, where a path's name is).
+pub(crate) fn shorten_middle(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    if n <= max {
+        return s.to_string();
+    }
+    let head = max / 3;
+    let tail = max - head - 1;
+    let mut out: String = s.chars().take(head).collect();
+    out.push('…');
+    out.extend(s.chars().skip(n - tail));
+    out
+}
+
+/// A path for labels and dialogs: escaped like `show_path` and at most
+/// ~240 characters (a folder chain thousands of levels deep has a path far
+/// too long to lay out every frame, or to read).
+pub(crate) fn short_path(p: &Path) -> String {
+    shorten_middle(&show_path(p), 240)
 }
 
 /// A whole path for display, escaped like `show_os`.
@@ -465,7 +540,7 @@ pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHand
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
                 }
             } else {
-                scan_dir_in(&p, dir, ctx)
+                deep(|| scan_dir_in(&p, dir, ctx))
             }
         }
         _ => {
@@ -648,7 +723,7 @@ pub(crate) fn count_entries(path: &Path, root_dev: u64, found: &std::sync::atomi
         let is_dir = e.file_type().is_ok_and(|ft| ft.is_dir() && !ft.is_symlink());
         // Only directories need a stat, to stay on the same filesystem.
         if is_dir && e.metadata().is_ok_and(|m| m.dev() == root_dev) {
-            count_entries(&e.path(), root_dev, found, stop);
+            deep(|| count_entries(&e.path(), root_dev, found, stop));
         }
     });
 }
@@ -718,12 +793,25 @@ pub(crate) fn is_real_mount_point(path: &Path) -> bool {
 
 /// Re-finds the folder at `idx` (child indices from `old`'s root) in `new`,
 /// matching by path; stops at the deepest folder that still exists.
+/// `target`'s path components below `base`, or None if it isn't below it.
+/// Tree lookups walk these one name per level: comparing whole paths at
+/// every level costs depth² per lookup, which very deep chains can't afford.
+pub(crate) fn rel_parts<'a>(base: &Path, target: &'a Path) -> Option<Vec<&'a std::ffi::OsStr>> {
+    Some(target.strip_prefix(base).ok()?.components().map(|c| c.as_os_str()).collect())
+}
+
+/// Index of `node`'s child named `name`.
+pub(crate) fn child_named(node: &Node, name: &std::ffi::OsStr) -> Option<usize> {
+    node.children.iter().position(|c| c.path.file_name() == Some(name))
+}
+
 pub(crate) fn remap_index_path(old: &Node, new: &Node, idx: &[usize]) -> Vec<usize> {
     let (mut o, mut n) = (old, new);
     let mut out = Vec::new();
     for &i in idx {
         let Some(oc) = o.children.get(i) else { break };
-        let Some(j) = n.children.iter().position(|c| c.path == oc.path) else { break };
+        // Same parent, so the same name means the same folder.
+        let Some(j) = oc.path.file_name().and_then(|name| child_named(n, name)) else { break };
         out.push(j);
         o = oc;
         n = &n.children[j];

@@ -92,18 +92,29 @@ impl DiskScanApp {
         let editing_path = self.path_editing || current_path.is_none();
         let focus_path_edit = std::mem::take(&mut self.path_edit_focus_pending);
         // Clickable segments of the current path: "/", "mnt", "DATA", ...
-        let crumbs: Vec<(String, PathBuf)> = current_path
+        // Only the first and last few segments of a very deep path, with a
+        // "…" (None) between: one button per level would mean thousands
+        // (and copying every ancestor's path each frame).
+        const HEAD: usize = 2;
+        const TAIL: usize = 6;
+        let crumbs: Vec<Option<(String, PathBuf)>> = current_path
             .as_ref()
             .map(|p| {
-                let mut v: Vec<(String, PathBuf)> = p
-                    .ancestors()
-                    .map(|a| {
-                        let label = a.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| show_path(&a));
-                        (label, a.to_path_buf())
-                    })
-                    .collect();
-                v.reverse();
-                v
+                let mut levels: Vec<&Path> = p.ancestors().collect();
+                levels.reverse();
+                let crumb = |a: &Path| {
+                    let label = a.file_name().map(show_os).unwrap_or_else(|| show_path(a));
+                    Some((label, a.to_path_buf()))
+                };
+                let n = levels.len();
+                if n <= HEAD + TAIL + 1 {
+                    levels.iter().map(|a| crumb(a)).collect()
+                } else {
+                    let mut v: Vec<_> = levels[..HEAD].iter().map(|a| crumb(a)).collect();
+                    v.push(None);
+                    v.extend(levels[n - TAIL..].iter().map(|a| crumb(a)));
+                    v
+                }
             })
             .unwrap_or_default();
         let mut submit: Option<String> = None;
@@ -192,13 +203,18 @@ impl DiskScanApp {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 2.0;
                                     let last = crumbs.len().saturating_sub(1);
-                                    for (i, (label, path)) in crumbs.iter().enumerate() {
-                                        if i > 0 && i <= last && !(i == 1 && crumbs[0].0 == "/") {
+                                    let root_first = crumbs.first().is_some_and(|c| c.as_ref().is_some_and(|(l, _)| l == "/"));
+                                    for (i, crumb) in crumbs.iter().enumerate() {
+                                        if i > 0 && !(i == 1 && root_first) {
                                             ui.weak("/");
                                         }
+                                        let Some((label, path)) = crumb else {
+                                            ui.weak("…");
+                                            continue;
+                                        };
                                         let btn = egui::Button::new(if i == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) })
                                             .frame(false);
-                                        if ui.add(btn).on_hover_text(show_path(&path)).clicked() && i != last {
+                                        if ui.add(btn).on_hover_text(short_path(path)).clicked() && i != last {
                                             crumb_click = Some(path.clone());
                                         }
                                     }
@@ -1210,7 +1226,7 @@ impl DiskScanApp {
             } else {
                 None
             };
-            let path_str = show_path(&h.path);
+            let path_str = short_path(&h.path);
 
             // Keyed by path: egui's Area/Grid persist and only ever
             // grow their sizing per Id across frames (to avoid jitter),

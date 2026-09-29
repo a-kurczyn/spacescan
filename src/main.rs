@@ -835,7 +835,7 @@ impl eframe::App for DiskScanApp {
                     .show(&ctx, |ui| {
                         let n = selected.unwrap_or(view_node);
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                        ui.strong(show_path(&n.path));
+                        ui.strong(short_path(&n.path));
                         folder_stats_ui(ui, n);
                     });
             }
@@ -898,7 +898,22 @@ impl eframe::App for DiskScanApp {
     }
 }
 
+/// Scanning or deleting folder chains past the kernel's path length limit
+/// keeps one folder open per level; the usual soft limit of 1,024 open
+/// files would cut very deep chains short. Raise it to the hard limit (as
+/// file managers and `find` effectively allow).
+fn raise_open_file_limit() {
+    let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 && lim.rlim_cur < lim.rlim_max {
+            lim.rlim_cur = lim.rlim_max;
+            libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+        }
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    raise_open_file_limit();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
         ..Default::default()

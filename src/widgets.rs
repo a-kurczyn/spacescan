@@ -341,6 +341,9 @@ pub(crate) fn details_grid(
 /// `text` cut to fit `width` by replacing its middle with "…", so both the
 /// start and the end (where error messages put the reason) stay visible.
 pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
+    // Nothing wider than a few hundred characters fits a line anyway:
+    // cut huge texts (errors naming very deep paths) before measuring.
+    let text = &shorten_middle(text, 600);
     let fits = |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) <= width;
     if fits(text) {
         return text.to_string();
