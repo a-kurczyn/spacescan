@@ -257,6 +257,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// categories.json: written when missing, used when edited, left alone
+    /// (built-in categories used) when broken.
+    #[test]
+    fn categories_file_is_written_used_and_kept() {
+        with_home(|_| {
+            let path = config_dir().join("categories.json");
+            let (m, problem) = CategoryModel::load();
+            assert!(problem.is_none() && path.is_file());
+            assert_eq!(m, CategoryModel::defaults());
+
+            std::fs::write(&path, r#"{"categories": [{"name": "Mail", "extensions": ["eml"], "names": ["Inbox"]}]}"#).unwrap();
+            let (m, problem) = CategoryModel::load();
+            assert!(problem.is_none());
+            assert_eq!(m.label(m.of_name("Inbox")), "Mail");
+            assert_eq!(m.of_name("a.mkv"), m.other());
+
+            std::fs::write(&path, "{ oops").unwrap();
+            let (m, problem) = CategoryModel::load();
+            assert!(problem.is_some());
+            assert_eq!(m, CategoryModel::defaults());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ oops");
+        });
+    }
+
     #[test]
     fn one_bad_value_keeps_the_rest() {
         with_home(|_| {

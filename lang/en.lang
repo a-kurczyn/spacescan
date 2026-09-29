@@ -263,6 +263,7 @@ HELP_HELP=This help
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=Categories
+# Category names: the tokens used as "name" in categories.json.
 CAT_VIDEO=Video
 CAT_AUDIO=Audio
 CAT_IMAGES=Images
@@ -277,3 +278,11 @@ CAT_CLEAR=Show all categories
 CAT_NO_FILES=No files here
 CAT_CLICK=Click to show only these files
 CAT_CLICK_AGAIN=Click again to show all files
+ERR_CATEGORIES_FILE=Couldn't use the categories file %s (%s); using the built-in categories.
+ERR_CATEGORIES_PROBLEMS=Categories file %s: skipped %s
+ERR_CATEGORIES_SAVE=Couldn't write the categories file %s: %s
+ERR_CATEGORIES_NO_LIST=it needs a "categories" list
+ERR_CATEGORIES_NO_NAME=%s has no name
+ERR_CATEGORIES_ENTRY=%s: not a valid entry in "%s": %s
+ERR_CATEGORIES_TWICE=%s is already in "%s"
+ERR_CATEGORIES_MANY=%s categories: past %s, their colors are hard to tell apart

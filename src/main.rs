@@ -193,6 +193,8 @@ struct DiskScanApp {
     filter_applied: FilterForm,
     filter: Option<Arc<CompiledFilter>>,
     filter_error: Option<String>,
+    /// The categories from categories.json (reloaded at each new scan).
+    cats: Arc<CategoryModel>,
     /// Category picked in the summary view's category bar (None = all).
     /// Applied on top of `filter`.
     category: Option<Category>,
@@ -355,6 +357,7 @@ impl Default for DiskScanApp {
             show_settings: false,
             path_input: String::new(),
             path_input_focused: false,
+            cats: Arc::new(CategoryModel::defaults()),
             category: None,
             cat_base: None,
             cat_breakdown: Vec::new(),
@@ -376,12 +379,32 @@ impl Default for DiskScanApp {
         if let Some(p) = problem {
             app.log_issue(p);
         }
+        // Tests build the app too: they keep the built-in categories and
+        // never write the user's categories.json.
+        if !cfg!(test) {
+            app.reload_categories();
+        }
         app
     }
 }
 
 impl DiskScanApp {
+    /// Rereads categories.json (edits show up at the next scan). A changed
+    /// list drops the picked category: positions may mean something else.
+    fn reload_categories(&mut self) {
+        let (model, problem) = CategoryModel::load();
+        if *self.cats != model {
+            self.cats = Arc::new(model);
+            self.category = None;
+            self.cat_breakdown_for = None;
+        }
+        if let Some(p) = problem {
+            self.log_issue(p);
+        }
+    }
+
     fn start_scan(&mut self, path: PathBuf) {
+        self.reload_categories();
         // Scan the canonical path: no "./", "..", doubled slashes or
         // relative roots in breadcrumbs, dialogs or the Issues log.
         let path = true_case(&std::fs::canonicalize(&path).unwrap_or(path));
@@ -495,7 +518,10 @@ impl DiskScanApp {
             None => full.clone(),
         };
         let new_root = match self.category {
-            Some(cat) => Arc::new(filter_tree_by(&base, &|n: &Node| Category::of_name(&n.name) == cat).unwrap_or_else(|| empty(&full))),
+            Some(cat) => {
+                let cats = self.cats.clone();
+                Arc::new(filter_tree_by(&base, &|n: &Node| cats.of_name(&n.name) == cat).unwrap_or_else(|| empty(&full)))
+            }
             None => base.clone(),
         };
         self.cat_base = Some(base);

@@ -607,7 +607,8 @@ mod tests {
         assert!(find_node(&partial, &bottom).is_some());
 
         // Categories, filter, clone.
-        assert_eq!(category_breakdown(&tree).iter().find(|r| r.cat == Category::Data).map(|r| r.files), Some(files));
+        let cats = CategoryModel::defaults();
+        assert_eq!(category_breakdown(&tree, &cats).iter().find(|r| r.cat == cats.of_name("f.bin")).map(|r| r.files), Some(files));
         let filter = CompiledFilter::compile(&FilterForm { name: "*.bin".into(), ..Default::default() }).unwrap().unwrap();
         assert_eq!(filter_tree(&tree, &filter).map(|t| t.file_count), Some(files));
         let mut copy = tree.clone();

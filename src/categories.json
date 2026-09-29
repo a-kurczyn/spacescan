@@ -1,0 +1,71 @@
+{
+  "categories": [
+    {
+      "name": "CAT_VIDEO",
+      "extensions": [
+        "mkv", "mp4", "m4v", "avi", "mov", "wmv", "flv", "webm", "mpg", "mpeg", "m2ts", "mts",
+        "ts", "vob", "ogv", "3gp", "divx", "rm", "rmvb", "asf", "f4v", "m2v", "srt", "ass", "ssa",
+        "sub", "idx", "vtt", "sup"
+      ]
+    },
+    {
+      "name": "CAT_AUDIO",
+      "extensions": [
+        "mp3", "flac", "wav", "ogg", "oga", "opus", "m4a", "m4b", "aac", "wma", "aiff", "aif",
+        "alac", "ape", "dsf", "dff", "mka", "mid", "midi", "wv", "ac3", "dts", "amr", "au", "cue",
+        "m3u", "m3u8", "pls"
+      ]
+    },
+    {
+      "name": "CAT_IMAGES",
+      "extensions": [
+        "jpg", "jpeg", "jpe", "png", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "avif",
+        "jxl", "svg", "svgz", "ico", "icns", "psd", "xcf", "kra", "raw", "cr2", "cr3", "nef",
+        "arw", "dng", "orf", "rw2", "raf", "srw", "pef", "exr", "hdr", "tga"
+      ]
+    },
+    {
+      "name": "CAT_DOCUMENTS",
+      "extensions": [
+        "pdf", "doc", "docx", "odt", "rtf", "txt", "md", "epub", "mobi", "azw", "azw3", "djvu",
+        "fb2", "cbz", "cbr", "xls", "xlsx", "ods", "csv", "tsv", "ppt", "pptx", "odp", "odg",
+        "tex", "nfo", "pages", "numbers", "key", "ps", "eps", "xps", "oxps", "org", "rst"
+      ]
+    },
+    {
+      "name": "CAT_ARCHIVES",
+      "extensions": [
+        "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "lz", "lz4",
+        "lzma", "z", "cab", "arj", "iso", "img", "dmg", "cpio", "par2"
+      ]
+    },
+    {
+      "name": "CAT_APPLICATIONS",
+      "extensions": [
+        "exe", "msi", "appimage", "deb", "rpm", "apk", "flatpak", "flatpakref", "snap", "dll",
+        "so", "run", "jar", "pkg", "app", "bat", "cmd", "com", "elf", "ko", "efi", "sys", "drv",
+        "xpi", "crx"
+      ]
+    },
+    {
+      "name": "CAT_CODE",
+      "extensions": [
+        "rs", "py", "js", "mjs", "cjs", "jsx", "tsx", "c", "h", "cpp", "hpp", "cc", "hh", "cxx",
+        "java", "kt", "kts", "go", "rb", "php", "sh", "bash", "zsh", "fish", "pl", "pm", "lua",
+        "cs", "swift", "scala", "hs", "ml", "r", "m", "dart", "vue", "svelte", "html", "htm",
+        "css", "scss", "sass", "less", "json", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf",
+        "sql", "ipynb", "cmake", "mk", "gradle", "patch", "diff", "o", "a", "class", "pyc", "wasm",
+        "rlib", "rmeta"
+      ]
+    },
+    {
+      "name": "CAT_DATA",
+      "extensions": [
+        "db", "sqlite", "sqlite3", "mdb", "accdb", "log", "bak", "old", "tmp", "temp", "cache",
+        "lock", "dat", "bin", "pak", "qcow2", "vdi", "vmdk", "vhd", "vhdx", "swp", "dump",
+        "parquet", "pack", "torrent", "part", "crdownload", "ldb", "sqlite-shm", "sqlite-wal",
+        "db-wal", "db-shm", "jsonlz4", "mozlz4", "baklz4", "idx2"
+      ]
+    }
+  ]
+}

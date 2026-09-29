@@ -252,6 +252,7 @@ HELP_HELP=Esta ayuda
 
 # ---- Categorías (barra junto a la tabla de contenido) ----
 SUMMARY_CATEGORIES=Categorías
+# Nombres de categoría: los tokens usados como "name" en categories.json.
 CAT_VIDEO=Vídeo
 CAT_AUDIO=Audio
 CAT_IMAGES=Imágenes
@@ -266,3 +267,11 @@ CAT_CLEAR=Mostrar todas las categorías
 CAT_NO_FILES=No hay archivos aquí
 CAT_CLICK=Clic para mostrar solo estos archivos
 CAT_CLICK_AGAIN=Clic de nuevo para mostrar todos los archivos
+ERR_CATEGORIES_FILE=No se pudo usar el archivo de categorías %s (%s); se usan las categorías integradas.
+ERR_CATEGORIES_PROBLEMS=Archivo de categorías %s: se omitió %s
+ERR_CATEGORIES_SAVE=No se pudo escribir el archivo de categorías %s: %s
+ERR_CATEGORIES_NO_LIST=necesita una lista "categories"
+ERR_CATEGORIES_NO_NAME=%s no tiene nombre
+ERR_CATEGORIES_ENTRY=%s: entrada no válida en "%s": %s
+ERR_CATEGORIES_TWICE=%s ya está en "%s"
+ERR_CATEGORIES_MANY=%s categorías: a partir de %s, sus colores son difíciles de distinguir

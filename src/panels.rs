@@ -916,7 +916,7 @@ impl DiskScanApp {
         let key = (view_node.path.clone(), self.tree_gen);
         if self.cat_breakdown_for.as_ref() != Some(&key) {
             let base = self.cat_base.as_deref().and_then(|b| find_by_path(b, &view_node.path));
-            self.cat_breakdown = category_breakdown(base.unwrap_or(view_node));
+            self.cat_breakdown = category_breakdown(base.unwrap_or(view_node), &self.cats);
             self.cat_breakdown_for = Some(key);
         }
 
@@ -1021,7 +1021,7 @@ impl DiskScanApp {
                     sw: if i + 1 == n { r } else { 0 },
                     se: if i + 1 == n { r } else { 0 },
                 };
-                let color = row.cat.color(dark);
+                let color = self.cats.color(row.cat, dark);
                 painter.rect_filled(seg, radius, if dimmed { color.gamma_multiply(0.3) } else { color });
                 if hovered || picked {
                     painter.rect_stroke(seg, radius, egui::Stroke::new(1.5, ui.visuals().strong_text_color()), egui::StrokeKind::Outside);
@@ -1037,7 +1037,7 @@ impl DiskScanApp {
                     painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
                     painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
                 }
-                painter.text(Pos2::new(label_x, label_y[i] + 2.0), egui::Align2::LEFT_TOP, row.cat.label(), font.clone(), ink);
+                painter.text(Pos2::new(label_x, label_y[i] + 2.0), egui::Align2::LEFT_TOP, self.cats.label(row.cat), font.clone(), ink);
                 let pct = row.size as f64 * 100.0 / total as f64;
                 painter.text(
                     Pos2::new(label_x, label_y[i] + 2.0 + line_h),
@@ -1048,7 +1048,7 @@ impl DiskScanApp {
                 );
 
                 let hit = hit.on_hover_ui(|ui| {
-                    ui.strong(row.cat.label());
+                    ui.strong(self.cats.label(row.cat));
                     ui.label(format!("{} · {} · {} {}", human_size(row.size), format!("{pct:.1}%"), format_count(row.files), tr("CAT_FILES")));
                     let exts: Vec<String> = row
                         .exts
