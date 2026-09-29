@@ -108,3 +108,44 @@ pub(crate) fn apply_theme(ctx: &egui::Context) {
     visuals.widgets.noninteractive.bg_fill = kde.window_bg;
     ctx.set_visuals(visuals);
 }
+
+/// egui's built-in fonts have no Chinese/Japanese/Korean glyphs, so such
+/// names drew as boxes. This adds a system font that has them (found via
+/// fontconfig) as the last fallback. The compact Droid Sans Fallback (~4 MB)
+/// is preferred over the full CJK collections (30 MB+, all kept in memory).
+pub(crate) fn add_cjk_fallback_font(ctx: &egui::Context) {
+    let find = |pattern: &str| -> Option<PathBuf> {
+        let out = std::process::Command::new("fc-match").args(["-f", "%{file}", pattern]).output().ok()?;
+        let path = PathBuf::from(String::from_utf8(out.stdout).ok()?);
+        path.is_file().then_some(path)
+    };
+    let font = find("Droid Sans Fallback")
+        .filter(|p| p.to_string_lossy().contains("DroidSansFallback"))
+        .or_else(|| find("sans-serif:lang=ja"));
+    let Some(bytes) = font.and_then(|p| std::fs::read(p).ok()) else { return };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("cjk_fallback".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("cjk_fallback".into());
+    }
+    ctx.set_fonts(fonts);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cjk_names_have_glyphs() {
+        let ctx = egui::Context::default();
+        add_cjk_fallback_font(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let font = egui::FontId::proportional(14.0);
+        let has = |c: char| ctx.fonts_mut(|f| f.has_glyph(&font, c));
+        assert!(has('ü'));
+        // Only meaningful where a CJK font is installed (as on the dev box).
+        if std::process::Command::new("fc-list").arg(":lang=ja").output().is_ok_and(|o| !o.stdout.is_empty()) {
+            assert!(has('日') && has('本') && has('語'));
+        }
+    }
+}

@@ -51,6 +51,14 @@ pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn
     let gap = pad.x * 0.8;
     let size = Vec2::new(pad.x * 2.0 + galley.size().x + gap + chevron_w, (galley.size().y + pad.y * 2.0).max(ui.spacing().interact_size.y));
     let resp = ui.add(egui::Button::new("").min_size(size));
+    // The label is painted, not the button's own text: name it for screen
+    // readers, with the sort state when this is the sorted column.
+    let name = match (is_active, state.ascending) {
+        (false, _) => label.to_string(),
+        (true, true) => trf("A11Y_SORTED_ASC", &[label]),
+        (true, false) => trf("A11Y_SORTED_DESC", &[label]),
+    };
+    name_for_screen_readers(&resp, &name, Some(is_active));
     let color = ui.style().interact(&resp).text_color();
     let text_pos = Pos2::new(resp.rect.left() + pad.x, resp.rect.center().y - galley.size().y / 2.0);
     // Headers read as bold, like the previous `.strong()` label: overdraw
@@ -223,10 +231,13 @@ pub(crate) fn draw_layout_icon(painter: &egui::Painter, rect: egui::Rect, color:
 /// afterward using the same resolved color the button would have used for
 /// text in that state (idle/hovered/selected), so it blends in exactly
 /// like a normal labeled button would.
+/// `name` is both its tooltip and its name for screen readers (the drawn
+/// icon gives it no text of its own).
 pub(crate) fn icon_toolbar_button(
     ui: &mut egui::Ui,
     selected: bool,
     enabled: bool,
+    name: &str,
     draw: impl FnOnce(&egui::Painter, egui::Rect, Color32),
 ) -> egui::Response {
     let size = ui.spacing().interact_size.y;
@@ -234,7 +245,31 @@ pub(crate) fn icon_toolbar_button(
     let color = ui.style().interact_selectable(&resp, selected).text_color();
     let icon_rect = resp.rect.shrink(resp.rect.width() * 0.24);
     draw(ui.painter(), icon_rect, color);
-    resp
+    name_for_screen_readers(&resp, name, Some(selected));
+    resp.on_hover_text(name)
+}
+
+/// `.named(x)` on a glyph button (🔍, ⟳, ⚙ …): `x` becomes its tooltip and
+/// its name for screen readers, which would otherwise read the glyph.
+pub(crate) trait Named {
+    fn named(self, name: &str) -> Self;
+}
+
+impl Named for egui::Response {
+    fn named(self, name: &str) -> Self {
+        name_for_screen_readers(&self, name, None);
+        self.on_hover_text(name)
+    }
+}
+
+/// Gives a button drawn without text (a glyph or painted icon) a name for
+/// screen readers and UI automation; `selected` for toggle buttons.
+pub(crate) fn name_for_screen_readers(resp: &egui::Response, name: &str, selected: Option<bool>) {
+    let enabled = resp.enabled();
+    resp.widget_info(|| match selected {
+        Some(sel) => egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, sel, name),
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name),
+    });
 }
 
 /// Size / counts / permissions / times / owner / type of one item, as a
@@ -327,4 +362,31 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
         if fits(&cut(mid)) { lo = mid } else { hi = mid - 1 }
     }
     cut(lo)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn painted_buttons_have_accessible_names() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut state = SortState { column: SortColumn::Size, ascending: false };
+        let mut run = || {
+            ctx.run_ui(Default::default(), |ui| {
+                sortable_header(ui, "Size", SortColumn::Size, &mut state);
+                icon_toolbar_button(ui, true, true, "Chart view", draw_chart_icon);
+                let _ = ui.button("⟳").named("Rescan");
+            })
+        };
+        let _ = run();
+        let out = run();
+        let update = out.platform_output.accesskit_update.expect("accesskit output");
+        let labels: Vec<String> = update.nodes.iter().filter_map(|(_, n)| n.label().map(str::to_string)).collect();
+        eprintln!("{labels:?}");
+        assert!(labels.iter().any(|l| l.contains("Size") && l.contains("descending")));
+        assert!(labels.iter().any(|l| l == "Chart view"));
+        assert!(labels.iter().any(|l| l == "Rescan"));
+    }
 }

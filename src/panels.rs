@@ -118,28 +118,28 @@ impl DiskScanApp {
                     // while they're the current scan target.
                     if ui
                         .add_enabled(!picking_folder, egui::Button::new("🔍"))
-                        .on_hover_text(tr("TOOLBAR_PICK_FOLDER"))
+                        .named(&tr("TOOLBAR_PICK_FOLDER"))
                         .clicked()
                     {
                         open_picker = true;
                     }
                     if ui
                         .add(egui::Button::new("/").selected(current_path.as_deref() == Some(Path::new("/"))))
-                        .on_hover_text(tr("TOOLBAR_SCAN_ROOT"))
+                        .named(&tr("TOOLBAR_SCAN_ROOT"))
                         .clicked()
                     {
                         start_at = Some(PathBuf::from("/"));
                     }
                     if ui
                         .add(egui::Button::new("🏠").selected(current_path.as_deref() == Some(home.as_path())))
-                        .on_hover_text(trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]))
+                        .named(&trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]))
                         .clicked()
                     {
                         start_at = Some(home.clone());
                     }
                     if ui
                         .add_enabled(can_reload, egui::Button::new("⟳"))
-                        .on_hover_text(tr("TOOLBAR_RESCAN"))
+                        .named(&tr("TOOLBAR_RESCAN"))
                         .clicked()
                     {
                         rescan = true;
@@ -210,7 +210,7 @@ impl DiskScanApp {
                         // its click target, which is exactly the padding
                         // asked to go away — a Label has none.
                         let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
-                        if pencil.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tr("TOOLBAR_PATH_EDIT_TOOLTIP")).clicked() {
+                        if pencil.on_hover_cursor(egui::CursorIcon::PointingHand).named(&tr("TOOLBAR_PATH_EDIT_TOOLTIP")).clicked() {
                             start_path_edit = true;
                         }
                     }
@@ -225,32 +225,29 @@ impl DiskScanApp {
                 |ui| {
                     if ui
                         .add(egui::Button::new("⚙").selected(settings_open))
-                        .on_hover_text(tr("SETTINGS_TITLE"))
+                        .named(&tr("SETTINGS_TITLE"))
                         .clicked()
                     {
                         settings_toggled = true;
                     }
                     // Lit while the panel is open, and while a filter is
                     // applied (so a hidden, active filter isn't forgotten).
-                    if icon_toolbar_button(ui, filters_open || filter_active, true, draw_filter_icon)
-                        .on_hover_text(if filter_active { tr("TOOLBAR_FILTERS_ACTIVE") } else { tr("FILTER_TITLE") })
+                    if icon_toolbar_button(ui, filters_open || filter_active, true, &if filter_active { tr("TOOLBAR_FILTERS_ACTIVE") } else { tr("FILTER_TITLE") }, draw_filter_icon)
                         .clicked()
                     {
                         filters_toggled = true;
                     }
                     ui.separator();
 
-                    if ui.button("🗑").on_hover_text(tr("TOOLBAR_EMPTY_TRASH")).clicked() {
+                    if ui.button("🗑").named(&tr("TOOLBAR_EMPTY_TRASH")).clicked() {
                         empty_bin = true;
                     }
-                    if icon_toolbar_button(ui, summary_on, true, draw_table_icon)
-                        .on_hover_text(tr("TOOLBAR_SUMMARY_VIEW"))
+                    if icon_toolbar_button(ui, summary_on, true, &tr("TOOLBAR_SUMMARY_VIEW"), draw_table_icon)
                         .clicked()
                     {
                         set_summary = Some(true);
                     }
-                    if icon_toolbar_button(ui, !summary_on, true, draw_chart_icon)
-                        .on_hover_text(tr("TOOLBAR_CHART_VIEW"))
+                    if icon_toolbar_button(ui, !summary_on, true, &tr("TOOLBAR_CHART_VIEW"), draw_chart_icon)
                         .clicked()
                     {
                         set_summary = Some(false);
@@ -384,7 +381,7 @@ impl DiskScanApp {
                     ui.horizontal(|ui| {
                         ui.heading(tr("FILTER_TITLE"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("×").on_hover_text(tr("FILTER_CLOSE")).clicked() {
+                            if ui.small_button("×").named(&tr("FILTER_CLOSE")).clicked() {
                                 self.show_filters = false;
                             }
                         });
@@ -551,7 +548,7 @@ impl DiskScanApp {
                     ui.horizontal(|ui| {
                         ui.heading(tr("SETTINGS_TITLE"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("×").on_hover_text(tr("SETTINGS_CLOSE")).clicked() {
+                            if ui.small_button("×").named(&tr("SETTINGS_CLOSE")).clicked() {
                                 self.show_settings = false;
                             }
                         });
@@ -980,8 +977,7 @@ impl DiskScanApp {
             ui.heading(tr("SUMMARY_BY_EXTENSION"));
             let beside = self.table.ext_beside;
             // The icon previews the layout the button switches to.
-            if icon_toolbar_button(ui, false, true, |p, r, c| draw_layout_icon(p, r, c, !beside))
-                .on_hover_text(tr(if beside { "EXT_SHOW_BELOW" } else { "EXT_SHOW_BESIDE" }))
+            if icon_toolbar_button(ui, false, true, &tr(if beside { "EXT_SHOW_BELOW" } else { "EXT_SHOW_BESIDE" }), |p, r, c| draw_layout_icon(p, r, c, !beside))
                 .clicked()
             {
                 self.table.ext_beside = !beside;
@@ -1017,6 +1013,9 @@ impl DiskScanApp {
         let ctx = ui.ctx().clone();
         let (center, hub_radius, ring_thickness) = geom;
         let view_node = get_node(root, self.view_stack.last().unwrap());
+        // The chart is one painted area: give it a name for screen readers.
+        let chart_name = trf("A11Y_CHART", &[&show_path(&view_node.path), &human_size(view_node.size)]);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &chart_name));
         let bg = ui.visuals().panel_fill;
         let free_color = gamma_lighten(bg, self.settings.free_space_gamma);
 
@@ -1300,8 +1299,7 @@ impl DiskScanApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     for (order, glyph, tip) in [(ChartOrder::Size, "9", "CHART_ORDER_SIZE"), (ChartOrder::Name, "A", "CHART_ORDER_NAME")] {
-                        if icon_toolbar_button(ui, self.chart_order == order, true, |p, r, c| draw_sort_order_icon(p, r, c, glyph))
-                            .on_hover_text(tr(tip))
+                        if icon_toolbar_button(ui, self.chart_order == order, true, &tr(tip), |p, r, c| draw_sort_order_icon(p, r, c, glyph))
                             .clicked()
                         {
                             self.chart_order = order;

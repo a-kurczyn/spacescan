@@ -877,6 +877,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
+            add_cjk_fallback_font(&cc.egui_ctx);
             Ok(Box::new(DiskScanApp::default()))
         }),
     )
