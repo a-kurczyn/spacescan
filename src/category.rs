@@ -58,17 +58,18 @@ const ARCHIVES: &[&str] = &[
 ];
 const APPLICATIONS: &[&str] = &[
     "exe", "msi", "appimage", "deb", "rpm", "apk", "flatpak", "flatpakref", "snap", "dll", "so", "run", "jar", "pkg",
-    "app", "bat", "cmd", "com", "elf", "ko", "efi", "sys", "drv",
+    "app", "bat", "cmd", "com", "elf", "ko", "efi", "sys", "drv", "xpi", "crx",
 ];
 const CODE: &[&str] = &[
     "rs", "py", "js", "mjs", "cjs", "jsx", "tsx", "c", "h", "cpp", "hpp", "cc", "hh", "cxx", "java", "kt", "kts", "go",
     "rb", "php", "sh", "bash", "zsh", "fish", "pl", "pm", "lua", "cs", "swift", "scala", "hs", "ml", "r", "m", "dart",
     "vue", "svelte", "html", "htm", "css", "scss", "sass", "less", "json", "yaml", "yml", "toml", "xml", "ini", "cfg",
-    "conf", "sql", "ipynb", "cmake", "mk", "gradle", "patch", "diff", "o", "a", "class", "pyc", "wasm",
+    "conf", "sql", "ipynb", "cmake", "mk", "gradle", "patch", "diff", "o", "a", "class", "pyc", "wasm", "rlib", "rmeta",
 ];
 const DATA: &[&str] = &[
     "db", "sqlite", "sqlite3", "mdb", "accdb", "log", "bak", "old", "tmp", "temp", "cache", "lock", "dat", "bin",
     "pak", "qcow2", "vdi", "vmdk", "vhd", "vhdx", "swp", "dump", "parquet", "pack", "torrent", "part", "crdownload",
+    "ldb", "sqlite-shm", "sqlite-wal", "db-wal", "db-shm", "jsonlz4", "mozlz4", "baklz4", "idx2",
 ];
 
 static BY_EXTENSION: LazyLock<HashMap<&'static str, Category>> = LazyLock::new(|| {

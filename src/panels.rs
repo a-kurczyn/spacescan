@@ -924,7 +924,7 @@ impl DiskScanApp {
         // panel always clips it instead of being drawn over.
         let avail = ui.available_height();
         let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
-        let cat_w = 190.0;
+        let cat_w = 210.0;
         let table_w = (ui.available_width() - cat_w - 16.0).max(320.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(Vec2::new(cat_w, avail), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -994,7 +994,8 @@ impl DiskScanApp {
                 label_y[i] = label_y[i].min(max).max(rect.top());
             }
 
-            let label_x = rect.left() + bar_w + 14.0;
+            // Room for leader lines to slope gently to labels that moved.
+            let label_x = rect.left() + bar_w + 34.0;
             let n = rows.len();
             for (i, row) in rows.iter().enumerate() {
                 let (y0, y1) = spans[i];
@@ -1028,13 +1029,13 @@ impl DiskScanApp {
 
                 // A short leader from the segment to a label that had to move.
                 let mid = (y0 + y1) / 2.0;
-                let label_mid = label_y[i] + label_h / 2.0;
                 let ink = if dimmed { ui.visuals().weak_text_color() } else { ui.visuals().strong_text_color() };
-                if (mid - label_mid).abs() > 2.0 {
-                    painter.line_segment(
-                        [Pos2::new(seg.right() + 2.0, mid), Pos2::new(label_x - 8.0, label_mid)],
-                        egui::Stroke::new(1.0, ui.visuals().weak_text_color()),
-                    );
+                let name_mid = label_y[i] + 2.0 + line_h / 2.0;
+                if (mid - name_mid).abs() > 2.0 {
+                    let stroke = egui::Stroke::new(1.0, ui.visuals().weak_text_color().gamma_multiply(0.6));
+                    let elbow = Pos2::new(seg.right() + 8.0, mid);
+                    painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
+                    painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
                 }
                 painter.text(Pos2::new(label_x, label_y[i] + 2.0), egui::Align2::LEFT_TOP, row.cat.label(), font.clone(), ink);
                 let pct = row.size as f64 * 100.0 / total as f64;
