@@ -261,6 +261,7 @@ CAT_ARCHIVES=Archivos comprimidos
 CAT_APPLICATIONS=Aplicaciones
 CAT_CODE=Código
 CAT_DATA=Datos
+CAT_MAIL=Correo
 CAT_OTHER=Otros
 CAT_FILES=archivos
 CAT_CLEAR=Mostrar todas las categorías

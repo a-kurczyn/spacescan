@@ -272,6 +272,7 @@ CAT_ARCHIVES=Archives
 CAT_APPLICATIONS=Applications
 CAT_CODE=Code
 CAT_DATA=Data
+CAT_MAIL=Mail
 CAT_OTHER=Other
 CAT_FILES=files
 CAT_CLEAR=Show all categories
