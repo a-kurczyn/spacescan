@@ -158,16 +158,18 @@ pub(crate) fn layout_sunburst(
     let rest: Vec<(usize, &Node)> = visible_children.iter().skip(split).cloned().collect();
     let rest_size: u64 = rest.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
 
-    // "Other" is a "there's more, but no room to show it individually"
-    // marker, not a value-proportional bucket: it gets a fixed minimum
-    // width (the same min-slice-angle threshold that decided those items
-    // were too small/numerous to show on their own), and every shown
-    // slice stretches to fill whatever space that leaves — sized against
-    // just the shown total, not the grand total that included what got
-    // grouped away. Otherwise "other" could end up as the single biggest
-    // wedge in the ring purely because a lot of mid-sized items landed
-    // past the count cap, which is what made it read as disproportionate.
-    let other_frac = if rest_size > 0 { min_frac.min(0.5) } else { 0.0 };
+    // "Other" gets its true share of the ring, never less than the
+    // min-slice-angle (so a bucket of many tiny items stays visible and
+    // clickable). The shown slices split whatever that leaves in
+    // proportion to each other. A fixed-width "other" is wrong: in a folder
+    // of 1200 similar-sized movies only the largest clears the threshold,
+    // and it would be stretched over the whole ring while the other 1199
+    // (nearly all the bytes) were squeezed into a sliver.
+    let other_frac = if rest_size > 0 {
+        (rest_size as f32 / total as f32).max(min_frac).min(1.0)
+    } else {
+        0.0
+    };
     let available_frac = (1.0 - other_frac).max(0.0);
     let shown_total = shown.iter().map(|(_, c)| c.size as f32).sum::<f32>().max(1.0);
 
@@ -408,4 +410,43 @@ pub(crate) fn draw_arc_mesh(
         outline.push(center + arc_dir(t) * r0);
     }
     painter.add(egui::Shape::closed_line(outline, stroke));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A folder of many similar items where only the largest clears the
+    /// min-slice threshold: it must keep its true share, not the whole ring.
+    #[test]
+    fn other_bucket_keeps_its_true_share() {
+        let mut kids = vec![test_node("/m/big", 171, false, vec![])];
+        kids.extend((0..1198).map(|i| test_node(&format!("/m/{i}"), 30, false, vec![])));
+        let root = test_node("/m", 171 + 1198 * 30, true, kids);
+        let mut segs = Vec::new();
+        let settings = Settings::default();
+        let span = 160f32.to_radians();
+        layout_sunburst(&root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
+        let width = |s: &Segment| (s.end_angle - s.start_angle) / span;
+        let big = segs.iter().find(|s| s.name == "big").unwrap();
+        let other = segs.iter().find(|s| s.is_other).unwrap();
+        assert!(width(big) < 0.01, "biggest item drawn over {:.1}% of the ring", width(big) * 100.0);
+        assert!(width(other) > 0.99);
+        assert!((other.end_angle - span).abs() < 1e-4);
+    }
+
+    /// A handful of tiny leftovers still get a visible, clickable sliver.
+    #[test]
+    fn tiny_other_bucket_gets_min_width() {
+        let root = test_node("/m", 1_000_001, true, vec![
+            test_node("/m/a", 1_000_000, false, vec![]),
+            test_node("/m/b", 1, false, vec![]),
+        ]);
+        let mut segs = Vec::new();
+        let settings = Settings::default();
+        layout_sunburst(&root, vec![], 0.0, std::f32::consts::TAU, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
+        let other = segs.iter().find(|s| s.is_other).unwrap();
+        let min = settings.min_segment_angle_deg.to_radians();
+        assert!(other.end_angle - other.start_angle >= min * 0.999);
+    }
 }
