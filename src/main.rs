@@ -210,6 +210,18 @@ struct DiskScanApp {
     scan_start: Instant,
     hidden: HashSet<PathBuf>,
     hovered: Option<HoverInfo>,
+    /// Counts folders added to the live-preview tree (`partial_root`)
+    /// during a scan; the live table refreshes from it at most every
+    /// 250 ms (`live_gen`, bumped when `partial_gen` moved on).
+    partial_gen: u64,
+    live_gen: u64,
+    /// What the live table shows: a flat copy of the preview tree's top
+    /// level (no subtrees), taken at each refresh. The preview tree itself
+    /// keeps re-sorting its children as data arrives, so rows can't point
+    /// into it between refreshes.
+    live_view: Node,
+    live_seen: u64,
+    live_refreshed: Instant,
     /// Counts changes to the displayed tree (every one goes through
     /// rebuild_view_tree), so views derived from it know to recompute.
     tree_gen: u64,
@@ -307,6 +319,11 @@ impl Default for DiskScanApp {
             unreadable: Vec::new(),
             window_grown: Default::default(),
             tree_gen: 0,
+            partial_gen: 0,
+            live_gen: 0,
+            live_view: empty_node(),
+            live_seen: 0,
+            live_refreshed: Instant::now(),
             summary_view: false,
             chart_order: ChartOrder::Size,
             chart_scale: 1.0,
@@ -359,6 +376,9 @@ impl DiskScanApp {
         // Any new scan supersedes a pending folder rescan ("r").
         self.graft = None;
         self.scanning = true;
+        // A new live table: nothing cached from a previous scan's.
+        self.live_gen += 1;
+        self.live_view = empty_node();
         // Not the previous scan's "completed in …" while this one runs.
         self.status = tr("STATUS_SCANNING");
         // This scan re-reports whatever it can't read under `path`.
@@ -730,6 +750,7 @@ impl DiskScanApp {
                     }
                     Ok(ScanMsg::SliceDone { path, size, file_count, mode, mtime, ctime, uid, gid }) => {
                         graft_slice(&mut self.partial_root, &path, size, file_count, mode, mtime, ctime, uid, gid);
+                        self.partial_gen += 1;
                     }
                     Ok(ScanMsg::Done(node, secs)) => {
                         if self.graft.is_some() {
@@ -827,7 +848,8 @@ impl eframe::App for DiskScanApp {
         // it to the trash, r rescans the folder being viewed. Summary view:
         // the table's keys, see table.rs.
         self.save_config_if_changed();
-        if self.root.is_some() && !self.scanning && self.summary_view {
+        // The table also runs live during a scan (see live_table_ui).
+        if self.summary_view && (self.root.is_some() || self.scanning) {
             self.table_keys(&ctx);
             self.table_overlays(&ctx, area);
         }

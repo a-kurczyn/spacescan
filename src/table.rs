@@ -77,8 +77,11 @@ impl SortColumn {
 /// Everything the table's row order depends on.
 #[derive(PartialEq)]
 struct OrderKey {
-    /// Bumped on every change to the displayed tree (see `tree_gen`).
+    /// Bumped on every change to the displayed tree (see `tree_gen`), or,
+    /// for the live table during a scan, on every refresh (`live_gen`).
     tree_gen: u64,
+    /// Rows of the live table during a scan (from the preview tree).
+    live: bool,
     view: Vec<usize>,
     sort: SortState,
     dirs_first: bool,
@@ -302,8 +305,9 @@ impl DiskScanApp {
         // folder sluggish, so the order is kept until something it depends
         // on changes.
         let key = OrderKey {
-            tree_gen: self.tree_gen,
-            view: self.view_stack.last().unwrap().clone(),
+            tree_gen: if self.scanning { self.live_gen } else { self.tree_gen },
+            view: if self.scanning { vec![] } else { self.view_stack.last().unwrap().clone() },
+            live: self.scanning,
             sort: self.contents_sort,
             dirs_first: self.table.dirs_first,
             show_dotfiles: self.table.show_dotfiles,
@@ -345,6 +349,9 @@ impl DiskScanApp {
                     "· {}",
                     trf("TABLE_TAG_MARKED", &[&format_count(self.table.marked.len() as u64), &human_size(size)])
                 ));
+            }
+            if self.scanning {
+                ui.weak(format!("· {}", tr("TABLE_TAG_SCANNING")));
             }
             ui.weak(format!("· {}", tr("TABLE_HELP_HINT")));
         });
@@ -668,7 +675,7 @@ impl DiskScanApp {
 
     /// Details panel (i) and help (?), drawn over the main area `area`.
     pub(crate) fn table_overlays(&mut self, ctx: &egui::Context, area: egui::Rect) {
-        if self.table.show_info {
+        if self.table.show_info && !self.scanning {
             self.info_panel(ctx, area);
         }
         if self.table.show_help {
@@ -847,14 +854,15 @@ impl DiskScanApp {
                     self.table.show_dotfiles = !self.table.show_dotfiles;
                     self.table.scroll_pending = true;
                 }
-                'i' => self.table.show_info = !self.table.show_info,
-                'r' => self.rescan_current(),
+                'i' if !self.scanning => self.table.show_info = !self.table.show_info,
+                'r' if !self.scanning => self.rescan_current(),
                 '?' => self.table.show_help = true,
                 '/' => {
                     self.table.jump = Some(String::new());
                     self.table.jump_focus_pending = true;
                 }
                 'D' => self.request_delete(),
+                'T' if self.scanning => {}
                 'T' => {
                     self.queue_trash(self.selected_targets());
                     ctx.request_repaint();
@@ -871,7 +879,12 @@ impl DiskScanApp {
     /// what's shown now (the tree changed since it was drawn).
     fn listed(&self) -> Option<(&Node, &[usize])> {
         let order = self.table.order.as_ref()?;
-        if order.key.tree_gen != self.tree_gen || Some(&order.key.view) != self.view_stack.last() {
+        if self.scanning {
+            // The live table: rows of its snapshot of the preview tree.
+            let current = order.key.live && order.key.tree_gen == self.live_gen;
+            return current.then_some((&self.live_view, &order.idx[..]));
+        }
+        if order.key.live || order.key.tree_gen != self.tree_gen || Some(&order.key.view) != self.view_stack.last() {
             return None;
         }
         Some((get_node(self.root.as_ref()?, &order.key.view), &order.idx))
@@ -923,6 +936,9 @@ impl DiskScanApp {
     }
 
     fn open_dir(&mut self, path: &Path) {
+        if self.scanning {
+            return; // see live_table_ui: navigation waits for the scan
+        }
         let Some(root) = self.root.clone() else { return };
         if let Some(vp) = index_path_to(&root, path) {
             self.view_stack.push(vp);
@@ -933,6 +949,9 @@ impl DiskScanApp {
 
     /// Up to the parent folder, with the folder just left under the cursor.
     fn go_parent(&mut self) {
+        if self.scanning {
+            return;
+        }
         let Some(root) = self.root.clone() else { return };
         let view = self.view_stack.last().unwrap().clone();
         if let Some((_, parent_view)) = view.split_last() {
@@ -946,6 +965,9 @@ impl DiskScanApp {
     /// Enter / double-click: opens the folder under the cursor, or hands a
     /// file to the desktop's default application for it.
     fn open_cursor(&mut self) {
+        if self.scanning {
+            return;
+        }
         let Some((path, is_dir)) = self.cursor_row() else { return };
         if is_dir {
             self.open_dir(&path);
@@ -1053,6 +1075,10 @@ impl DiskScanApp {
 
     /// D: asks to permanently delete the marked rows or the cursor row.
     fn request_delete(&mut self) {
+        // Sizes are still partial while scanning: delete waits for the end.
+        if self.scanning {
+            return;
+        }
         self.ask_delete(self.selected_targets());
     }
 
@@ -1153,6 +1179,7 @@ mod perf {
                 dirs_first: false,
                 show_dotfiles: true,
                 hidden: 0,
+                live: false,
             };
             let t = Instant::now();
             let order = app.row_order(&folder, key);
@@ -1191,6 +1218,7 @@ mod cursor_tests {
             dirs_first: false,
             show_dotfiles: true,
             hidden: 0,
+            live: false,
         };
         let order = app.row_order(&root, key);
         app.table.order = Some(order);
@@ -1233,5 +1261,74 @@ mod cursor_tests {
         assert_eq!(app.cursor_row(), None);
         app.move_cursor(1);
         assert_eq!(cursor(&app), "a");
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    fn folder(name: &str, size: u64) -> Node {
+        Node { name: name.into(), path: PathBuf::from(format!("/scan/{name}")), size, is_dir: true, ..empty_node() }
+    }
+
+    /// Re-sorts the live table as table_ui does on a refresh.
+    fn refresh(app: &mut DiskScanApp) {
+        app.live_gen += 1;
+        app.live_view = flat_copy(&app.partial_root);
+        let partial = std::mem::replace(&mut app.live_view, empty_node());
+        let key = OrderKey {
+            tree_gen: app.live_gen,
+            view: vec![],
+            sort: app.contents_sort,
+            dirs_first: false,
+            show_dotfiles: true,
+            hidden: 0,
+            live: true,
+        };
+        let order = app.row_order(&partial, key);
+        app.table.order = Some(order);
+        app.live_view = partial;
+    }
+
+    fn names(app: &DiskScanApp) -> Vec<String> {
+        let (view, idx) = app.listed().unwrap();
+        idx.iter().map(|&k| view.children[k].name.clone()).collect()
+    }
+
+    #[test]
+    fn live_rows_follow_the_scan_and_the_cursor_stays_put() {
+        let mut app = DiskScanApp::default();
+        app.scanning = true;
+        app.contents_sort = SortState { column: SortColumn::Size, ascending: false };
+        app.partial_root = Node { path: PathBuf::from("/scan"), children: vec![folder("a", 30), folder("b", 20)], ..empty_node() };
+        refresh(&mut app);
+        assert_eq!(names(&app), ["a", "b"]);
+        app.table.cursor = Some(PathBuf::from("/scan/b"));
+
+        // More data arrives: b grows past a, c appears.
+        app.partial_root.children[1].size = 50;
+        app.partial_root.children.push(folder("c", 40));
+        refresh(&mut app);
+        assert_eq!(names(&app), ["b", "c", "a"]);
+        assert_eq!(app.cursor_row().map(|(p, _)| p), Some(PathBuf::from("/scan/b")));
+        // The preview tree re-sorts itself as data arrives; until the next
+        // refresh the table keeps showing its snapshot, row for row.
+        app.partial_root.children.reverse();
+        app.partial_root.children.push(folder("d", 99));
+        assert_eq!(names(&app), ["b", "c", "a"]);
+        app.move_cursor(1);
+        assert_eq!(app.table.cursor, Some(PathBuf::from("/scan/c")));
+
+        // Opening, delete and trash wait for the scan to finish.
+        let views_before = app.view_stack.clone();
+        app.open_dir(Path::new("/scan/c"));
+        app.request_delete();
+        assert_eq!(app.view_stack, views_before);
+        assert!(!app.delete_dialog_open());
+
+        // When the scan ends, rows from the live tree are no longer used.
+        app.scanning = false;
+        assert!(app.listed().is_none());
     }
 }

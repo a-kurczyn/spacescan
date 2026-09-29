@@ -284,6 +284,26 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     out
 }
 
+/// `n` with its children but none of theirs: what the live table needs
+/// of the preview tree, cheap to copy.
+pub(crate) fn flat_copy(n: &Node) -> Node {
+    let shallow = |c: &Node| Node {
+        name: c.name.clone(),
+        path: c.path.clone(),
+        size: c.size,
+        file_count: c.file_count,
+        is_dir: c.is_dir,
+        children: Vec::new(),
+        mode: c.mode,
+        mtime: c.mtime,
+        ctime: c.ctime,
+        uid: c.uid,
+        gid: c.gid,
+        btime: c.btime,
+    };
+    Node { children: n.children.iter().map(shallow).collect(), ..shallow(n) }
+}
+
 /// Sort key for name order as file managers use it: case-insensitive, with
 /// runs of digits compared by value ("file2" before "file10", "007" = "7").
 /// Comparing these keys as bytes gives that order; building them once per

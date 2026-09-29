@@ -734,7 +734,13 @@ impl DiskScanApp {
                 return;
             }
             if self.scanning {
-                self.scan_preview_ui(ui);
+                // Each view stays itself during a scan: the chart grows
+                // live, and so does the table.
+                if self.summary_view {
+                    self.live_table_ui(ui);
+                } else {
+                    self.scan_preview_ui(ui);
+                }
                 return;
             }
 
@@ -769,6 +775,29 @@ impl DiskScanApp {
             self.chart_ui(ui, &root, &response, &painter, (center, hub_radius, ring_thickness));
         });
         central.response.rect
+    }
+
+    /// While scanning, in table view: the progress bar, then the contents
+    /// table of the folders scanned so far, re-sorted as they arrive (at
+    /// most every 250 ms, so huge scans stay smooth). The cursor stays on
+    /// its item and the view doesn't scroll on its own.
+    fn live_table_ui(&mut self, ui: &mut egui::Ui) {
+        if self.partial_gen != self.live_seen && self.live_refreshed.elapsed() >= std::time::Duration::from_millis(250) {
+            self.live_gen += 1;
+            self.live_seen = self.partial_gen;
+            self.live_refreshed = Instant::now();
+            self.live_view = flat_copy(&self.partial_root);
+        }
+        let width = ui.available_width();
+        self.scan_progress_bar(ui, width);
+        ui.add_space(6.0);
+        let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
+        let height = ui.available_height() - heading_h;
+        // table_ui needs &mut self and the folder shown at once: borrow the
+        // live rows out for the call.
+        let view = std::mem::replace(&mut self.live_view, empty_node());
+        self.table_ui(ui, &view, height);
+        self.live_view = view;
     }
 
     /// While scanning: a read-only live preview of the chart.
@@ -850,75 +879,17 @@ impl DiskScanApp {
             draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
         }
 
-        // Bytes-scanned-so-far vs. known total capacity is a cheap,
-        // filesystem-agnostic progress proxy (unlike file count,
-        // which has no reliable upfront total — see is_real_mount_point
-        // discussion; NTFS in particular fakes its inode totals).
-        // It's imperfect (many tiny files vs. one huge file skews
-        // it) but it's honest about what it measures and free to
-        // compute from data we already track.
-        //
-        // Any other folder has no such total, so a counting pass
-        // (count_entries) runs alongside the scan and progress is
-        // items scanned / items counted. Until counting finishes the
-        // total is a lower bound, so the fraction is held monotonic
-        // rather than letting the bar slide backwards as it grows.
-        let used_target = self.free_space.map(|(total, free)| total.saturating_sub(free));
-        let (raw, label) = match used_target.filter(|&u| u > 0) {
-            Some(u) => (
-                self.partial_root.size as f64 / u as f64,
-                trf("SCAN_PROGRESS_ITEMS_SCANNED", &[&format_count(self.scanned_count)]),
-            ),
-            None => {
-                use std::sync::atomic::Ordering;
-                let (found, counted) = self
-                    .entry_count
-                    .as_ref()
-                    .map_or((0, false), |c| (c.found.load(Ordering::Relaxed), c.done.load(Ordering::Relaxed)));
-                let total = found.max(self.scanned_count).max(1);
-                let label = if counted {
-                    trf("SCAN_PROGRESS_OF_TOTAL", &[&format_count(self.scanned_count), &format_count(total)])
-                } else {
-                    trf("SCAN_PROGRESS_ITEMS", &[&format_count(self.scanned_count)])
-                };
-                // Until counting finishes the total is only a lower
-                // bound — and on a cold disk the count isn't reliably
-                // ahead of the scan, so any fraction from it can
-                // wildly overshoot (and the bar never moves back).
-                // Hold at 0 meanwhile; the label shows it's working.
-                (if counted { self.scanned_count as f64 / total as f64 } else { 0.0 }, label)
-            }
-        };
-        self.progress_shown = self.progress_shown.max(raw.clamp(0.0, 1.0) as f32);
-        let fraction = self.progress_shown;
-
-        // Rendered directly into the reserved strip below the
-        // chart (ui's cursor sits there now, since the painter
-        // above only consumed content_height, not the full avail)
-        // — full width, and structurally unable to overlap the
-        // chart regardless of how full the drive is.
+        // Rendered directly into the reserved strip below the chart (ui's
+        // cursor sits there now, since the painter above only consumed
+        // content_height, not the full avail) — structurally unable to
+        // overlap the chart. Matches the chart's own width (`side`),
+        // centered under it.
         ui.add_space(4.0);
-        // Match the chart's own bounding width (`side`), not the
-        // full panel — the panel is usually wider than the circle
-        // (height is normally the limiting dimension), so a
-        // full-width bar visually mismatched the chart above it.
-        // Centered under the chart via a left inset.
         let left_inset = ((avail.x - side) / 2.0).max(0.0);
-        let bar_resp = ui
-            .horizontal(|ui| {
-                ui.add_space(left_inset);
-                ui.add(
-                    egui::ProgressBar::new(fraction).desired_width(side),
-                )
-            })
-            .inner;
-
-        // Centered on the bar. (egui's built-in ProgressBar text
-        // sits at the left edge instead.)
-        let text_color = ui.visuals().selection.stroke.color;
-        let galley = ui.painter().layout_no_wrap(label, egui::FontId::default(), text_color);
-        ui.painter()
-            .galley(bar_resp.rect.center() - galley.size() / 2.0, galley, text_color);
+        ui.horizontal(|ui| {
+            ui.add_space(left_inset);
+            self.scan_progress_bar(ui, side);
+        });
     }
 
     /// Summary view: the contents table (table.rs) and the by-extension
@@ -1307,5 +1278,59 @@ impl DiskScanApp {
                     }
                 });
             });
+    }
+
+    /// Scan progress bar, `width` wide, labelled with the count so far and
+    /// how to cancel. Shared by the chart preview and the live table.
+    pub(crate) fn scan_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
+        // Bytes-scanned-so-far vs. known total capacity is a cheap,
+        // filesystem-agnostic progress proxy (unlike file count,
+        // which has no reliable upfront total — see is_real_mount_point
+        // discussion; NTFS in particular fakes its inode totals).
+        // It's imperfect (many tiny files vs. one huge file skews
+        // it) but it's honest about what it measures and free to
+        // compute from data we already track.
+        //
+        // Any other folder has no such total, so a counting pass
+        // (count_entries) runs alongside the scan and progress is
+        // items scanned / items counted. Until counting finishes the
+        // total is a lower bound, so the fraction is held monotonic
+        // rather than letting the bar slide backwards as it grows.
+        let used_target = self.free_space.map(|(total, free)| total.saturating_sub(free));
+        let (raw, label) = match used_target.filter(|&u| u > 0) {
+            Some(u) => (
+                self.partial_root.size as f64 / u as f64,
+                trf("SCAN_PROGRESS_ITEMS_SCANNED", &[&format_count(self.scanned_count)]),
+            ),
+            None => {
+                use std::sync::atomic::Ordering;
+                let (found, counted) = self
+                    .entry_count
+                    .as_ref()
+                    .map_or((0, false), |c| (c.found.load(Ordering::Relaxed), c.done.load(Ordering::Relaxed)));
+                let total = found.max(self.scanned_count).max(1);
+                let label = if counted {
+                    trf("SCAN_PROGRESS_OF_TOTAL", &[&format_count(self.scanned_count), &format_count(total)])
+                } else {
+                    trf("SCAN_PROGRESS_ITEMS", &[&format_count(self.scanned_count)])
+                };
+                // Until counting finishes the total is only a lower
+                // bound — and on a cold disk the count isn't reliably
+                // ahead of the scan, so any fraction from it can
+                // wildly overshoot (and the bar never moves back).
+                // Hold at 0 meanwhile; the label shows it's working.
+                (if counted { self.scanned_count as f64 / total as f64 } else { 0.0 }, label)
+            }
+        };
+        self.progress_shown = self.progress_shown.max(raw.clamp(0.0, 1.0) as f32);
+        let fraction = self.progress_shown;
+
+        let label = trf("SCAN_PROGRESS_CANCEL_HINT", &[&label]);
+        let bar_resp = ui.add(egui::ProgressBar::new(fraction).desired_width(width));
+        // Centered on the bar. (egui's built-in ProgressBar text sits at the
+        // left edge instead.)
+        let text_color = ui.visuals().selection.stroke.color;
+        let galley = ui.painter().layout_no_wrap(label, egui::FontId::default(), text_color);
+        ui.painter().galley(bar_resp.rect.center() - galley.size() / 2.0, galley, text_color);
     }
 }
