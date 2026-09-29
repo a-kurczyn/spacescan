@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.45"
-eframe = "0.36.1"
-egui = "0.36.1"
-egui_extras = { version = "0.36.1", default-features = false }
+eframe = "0.36.2"
+egui = "0.36.2"
+egui_extras = { version = "0.36.2", default-features = false }
 infer = "0.22.0"
 libc = "0.2.189"
 rayon = "1.12.0"
