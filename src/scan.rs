@@ -129,8 +129,15 @@ pub(crate) fn format_mode_ls(mode: u32, is_dir: bool) -> String {
 
 /// Unix epoch seconds -> local "YYYY-MM-DD HH:MM" — free from the same
 /// `stat` struct already fetched, no extra syscall.
+/// Marks a time that isn't known (the entry couldn't be read, or a folder
+/// the live scan hasn't finished). Not 0: that's a real date, 1970-01-01.
+pub(crate) const NO_TIME: i64 = i64::MIN;
+
 pub(crate) fn format_epoch(secs: i64) -> String {
     use chrono::TimeZone;
+    if secs == NO_TIME {
+        return "-".to_string();
+    }
     match chrono::Local.timestamp_opt(secs, 0) {
         chrono::LocalResult::Single(dt) => dt.format("%Y-%m-%d %H:%M").to_string(),
         _ => "-".to_string(),
@@ -174,8 +181,8 @@ pub(crate) fn empty_node() -> Node {
         is_dir: true,
         children: Vec::new(),
         mode: 0,
-        mtime: 0,
-        ctime: 0,
+        mtime: NO_TIME,
+        ctime: NO_TIME,
         uid: 0,
         gid: 0,
         btime: 0,
@@ -245,8 +252,8 @@ fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node))
         }
     };
     deep(|| graft_at(&mut node.children[idx], rest, set));
-    node.size = node.children.iter().map(|c| c.size).sum();
-    node.file_count = node.children.iter().map(|c| c.file_count).sum();
+    node.size = node.children.iter().fold(0u64, |t, c| t.saturating_add(c.size));
+    node.file_count = node.children.iter().fold(0u64, |t, c| t.saturating_add(c.file_count));
     // Children stay sorted by size (descending) and only children[idx]
     // changed, so move just that one into place instead of re-sorting (a
     // full stable sort allocates a scratch buffer on every call).
@@ -286,7 +293,7 @@ pub(crate) fn collect_extensions(node: &Node, map: &mut std::collections::HashMa
             .filter(|e| !e.is_empty())
             .unwrap_or_else(|| tr("EXT_NO_EXTENSION"));
         let entry = map.entry(ext).or_insert((0, 0));
-        entry.0 += node.size;
+        entry.0 = entry.0.saturating_add(node.size);
         entry.1 += node.file_count.max(1);
     }
 }
@@ -387,9 +394,26 @@ pub(crate) fn natural_key(name: &str) -> Vec<u8> {
         if c.is_ascii() {
             key.push(c.to_ascii_lowercase() as u8);
         } else {
+            // Accents don't move a letter to the end: é sorts as e (then
+            // after plain e, by the byte-order tie-break), like in file
+            // managers.
             let mut buf = [0u8; 4];
             for l in c.to_lowercase() {
-                key.extend_from_slice(l.encode_utf8(&mut buf).as_bytes());
+                match l {
+                    'ß' => key.extend_from_slice(b"ss"),
+                    'æ' => key.extend_from_slice(b"ae"),
+                    'œ' => key.extend_from_slice(b"oe"),
+                    'ø' => key.push(b'o'),
+                    'ł' => key.push(b'l'),
+                    'đ' => key.push(b'd'),
+                    'þ' => key.extend_from_slice(b"th"),
+                    _ => {
+                        use unicode_normalization::UnicodeNormalization;
+                        for base in std::iter::once(l).nfd().filter(|b| !unicode_normalization::char::is_combining_mark(*b)) {
+                            key.extend_from_slice(base.encode_utf8(&mut buf).as_bytes());
+                        }
+                    }
+                }
             }
         }
         i += c.len_utf8();
@@ -435,13 +459,18 @@ pub(crate) fn show_path(p: &Path) -> String {
 /// user asked for, e.g. "can't find that directory" / "don't have permission
 /// to read or enter that folder", instead of a raw errno string.
 pub(crate) fn friendly_io_error(path: &Path, e: &std::io::Error) -> String {
+    trf("ERR_IO_LINE", &[&show_path(&path), &io_reason(e)])
+}
+
+/// Plain-language reason for an I/O error ("not found", "don't have
+/// permission…"), for error lines that name their subject themselves.
+pub(crate) fn io_reason(e: &std::io::Error) -> String {
     use std::io::ErrorKind::*;
-    let what = match e.kind() {
+    match e.kind() {
         NotFound => tr("ERR_IO_NOT_FOUND"),
         PermissionDenied => tr("ERR_IO_PERMISSION"),
         _ => trf("ERR_IO_OTHER", &[&e.to_string()]),
-    };
-    trf("ERR_IO_LINE", &[&show_path(&path), &what])
+    }
 }
 
 /// Scans a single directory entry: recurses if it's a (same-filesystem)
@@ -469,6 +498,9 @@ pub(crate) struct ScanCtx<'a> {
     /// (device, inode) of files with several hard links already counted,
     /// so each is counted once, like `du`.
     pub(crate) hard_links: std::sync::Mutex<HashSet<(u64, u64)>>,
+    /// Set once any name has Korean script in it, so the app can load a
+    /// font for it (see `install_fallback_fonts`).
+    pub(crate) saw_hangul: &'a std::sync::atomic::AtomicBool,
 }
 
 impl ScanCtx<'_> {
@@ -516,6 +548,11 @@ pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHand
     let ScanCtx { root_dev, progress, counter, progress_interval, .. } = *ctx;
     use std::os::unix::fs::MetadataExt;
     let p = path;
+    if !ctx.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
+        && p.file_name().is_some_and(|n| n.to_string_lossy().chars().any(is_hangul))
+    {
+        ctx.saw_hangul.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let ft = entry.file_type();
     let node = match ft {
         Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
@@ -533,8 +570,8 @@ pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHand
                     is_dir: true,
                     children: Vec::new(),
                     mode: meta.as_ref().map(|m| m.mode()).unwrap_or(0),
-                    mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(0),
-                    ctime: meta.as_ref().map(|m| m.ctime()).unwrap_or(0),
+                    mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(NO_TIME),
+                    ctime: meta.as_ref().map(|m| m.ctime()).unwrap_or(NO_TIME),
                     uid: meta.as_ref().map(|m| m.uid()).unwrap_or(0),
                     gid: meta.as_ref().map(|m| m.gid()).unwrap_or(0),
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
@@ -548,7 +585,7 @@ pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHand
                 Ok(m) => (ctx.size_of(&m), m.mode(), m.mtime(), m.ctime(), m.uid(), m.gid(), birth_secs(&m)),
                 Err(e) => {
                     let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
-                    (0, 0, 0, 0, 0, 0, 0)
+                    (0, 0, NO_TIME, NO_TIME, 0, 0, 0)
                 }
             };
             Node {
@@ -596,8 +633,8 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
             is_dir: true,
             children: Vec::new(),
             mode: 0,
-            mtime: 0,
-            ctime: 0,
+            mtime: NO_TIME,
+            ctime: NO_TIME,
             uid: 0,
             gid: 0,
             btime: 0,
@@ -617,8 +654,8 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     };
     let self_meta = std::fs::metadata(&listing).ok();
     let self_mode = self_meta.as_ref().map(|m| m.mode()).unwrap_or(0);
-    let self_mtime = self_meta.as_ref().map(|m| m.mtime()).unwrap_or(0);
-    let self_ctime = self_meta.as_ref().map(|m| m.ctime()).unwrap_or(0);
+    let self_mtime = self_meta.as_ref().map(|m| m.mtime()).unwrap_or(NO_TIME);
+    let self_ctime = self_meta.as_ref().map(|m| m.ctime()).unwrap_or(NO_TIME);
     let self_uid = self_meta.as_ref().map(|m| m.uid()).unwrap_or(0);
     let self_gid = self_meta.as_ref().map(|m| m.gid()).unwrap_or(0);
     let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(&listing) {
@@ -640,7 +677,8 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     // The folder's own entry takes space too (large on folders with many
     // entries).
     let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
-    let size = children.iter().map(|c| c.size).sum::<u64>() + own_size;
+    // Saturating: apparent sizes (sparse files) can add up past u64.
+    let size = children.iter().fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count = children.iter().map(|c| c.file_count).sum::<u64>() + if children.is_empty() { 0 } else { 0 };
     let file_count = if children.is_empty() { 0 } else { file_count };
 
@@ -730,7 +768,7 @@ pub(crate) fn count_entries(path: &Path, root_dev: u64, found: &std::sync::atomi
 
 pub(crate) fn human_size(bytes: u64) -> String {
     // Powers of 1024, so binary (IEC) unit names.
-    let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
     let mut v = bytes as f64;
     let mut u = 0;
     while v >= 1024.0 && u < units.len() - 1 {
@@ -793,6 +831,38 @@ pub(crate) fn is_real_mount_point(path: &Path) -> bool {
 
 /// Re-finds the folder at `idx` (child indices from `old`'s root) in `new`,
 /// matching by path; stops at the deepest folder that still exists.
+/// `p` spelled as it is on disk. On a case-insensitive filesystem (NTFS,
+/// FAT, exFAT) a path typed as "/mnt/data/PHOTOS" works but isn't the
+/// folder's real name ("Photos"); each component whose exact spelling isn't
+/// in its folder is replaced by the entry that matches it ignoring case.
+/// Case-sensitive filesystems always match exactly, so nothing changes.
+pub(crate) fn true_case(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in p.components() {
+        let Component::Normal(name) = comp else {
+            out.push(comp.as_os_str());
+            continue;
+        };
+        let folded = |s: &std::ffi::OsStr| s.to_string_lossy().to_lowercase();
+        let actual = std::fs::read_dir(&out).ok().and_then(|entries| {
+            let mut other_case = None;
+            for e in entries.flatten() {
+                let n = e.file_name();
+                if n == name {
+                    return None; // spelled right already
+                }
+                if other_case.is_none() && folded(&n) == folded(name) {
+                    other_case = Some(n);
+                }
+            }
+            other_case
+        });
+        out.push(actual.as_deref().unwrap_or(name));
+    }
+    out
+}
+
 /// `target`'s path components below `base`, or None if it isn't below it.
 /// Tree lookups walk these one name per level: comparing whole paths at
 /// every level costs depth² per lookup, which very deep chains can't afford.
@@ -851,8 +921,11 @@ mod tests {
     fn natural_name_order() {
         let mut names = vec!["file10", "File2", "file1", ".dotfile", "Beta", "alpha", "b", "Ärger", "a007", "a7", "a07x", "Zed"];
         names.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(names, vec![".dotfile", "a007", "a7", "a07x", "alpha", "b", "Beta", "file1", "File2", "file10", "Zed", "Ärger"]);
+        assert_eq!(names, vec![".dotfile", "a007", "a7", "a07x", "alpha", "Ärger", "b", "Beta", "file1", "File2", "file10", "Zed"]);
         assert_eq!(natural_cmp("abc", "abc"), std::cmp::Ordering::Equal);
+        let mut accented = vec!["Zed", "émile", "Árbol", "abc", "Ñandú", "emile", "Øre", "nube", "Straße", "strasse"];
+        accented.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(accented, vec!["abc", "Árbol", "emile", "émile", "Ñandú", "nube", "Øre", "Straße", "strasse", "Zed"]);
         assert_eq!(natural_cmp("x9", "x10"), std::cmp::Ordering::Less);
     }
 }
@@ -890,6 +963,7 @@ mod memory {
                 progress_interval: 512,
                 apparent_size: false,
                 hard_links: Default::default(),
+                saw_hangul: &Default::default(),
             };
             scan_dir(&root, &ctx)
         };
@@ -917,4 +991,62 @@ pub(crate) fn after_tree_dropped() {
     std::thread::spawn(|| unsafe {
         libc::malloc_trim(0);
     });
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+    #[test]
+    fn huge_sizes_and_epoch_dates() {
+        assert_eq!(human_size(u64::MAX), "16.00 EiB");
+        assert_eq!(human_size(3 << 60), "3.00 EiB");
+        assert_eq!(u64::MAX.saturating_add(5), u64::MAX);
+        assert_eq!(format_epoch(NO_TIME), "-");
+        assert!(format_epoch(0).starts_with("1970-01-01") || format_epoch(0).starts_with("1969-12-31"));
+    }
+}
+
+#[cfg(test)]
+mod hangul_tests {
+    use super::*;
+    #[test]
+    fn scan_notices_korean_names() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = std::env::temp_dir().join(format!("spacemap-hangul-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("한국어.txt"), "x").unwrap();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let seen = std::sync::atomic::AtomicBool::new(false);
+        let ctx = ScanCtx {
+            root_dev: std::fs::metadata(&dir).unwrap().dev(),
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &Default::default(),
+            progress_interval: 512,
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &seen,
+        };
+        let _ = scan_dir(&dir, &ctx);
+        assert!(seen.load(std::sync::atomic::Ordering::Relaxed));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod case_tests {
+    use super::*;
+    #[test]
+    fn typed_case_becomes_disk_case() {
+        // Case-sensitive filesystems are left alone.
+        assert_eq!(true_case(Path::new("/usr/share")), PathBuf::from("/usr/share"));
+        // On the dev machine /mnt/DATA is exFAT (case-insensitive).
+        let real = PathBuf::from("/mnt/DATA/System Volume Information");
+        let typed = PathBuf::from("/mnt/DATA/SYSTEM VOLUME INFORMATION");
+        if typed.is_dir() && real.is_dir() && typed != real {
+            assert_eq!(true_case(&typed), real);
+        }
+    }
 }

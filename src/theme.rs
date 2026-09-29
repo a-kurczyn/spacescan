@@ -109,26 +109,51 @@ pub(crate) fn apply_theme(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
+/// A system font file (and face index, for collections) matching the
+/// fontconfig `pattern`, or None.
+fn system_font(pattern: &str) -> Option<(PathBuf, u32)> {
+    let out = std::process::Command::new("fc-match").args(["-f", "%{file}|%{index}", pattern]).output().ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (file, index) = text.split_once('|')?;
+    let file = PathBuf::from(file);
+    // For variable fonts fontconfig puts a named-instance number in the high
+    // 16 bits; the face within the collection is the low 16.
+    let index = index.trim().parse::<u32>().unwrap_or(0) & 0xFFFF;
+    file.is_file().then_some((file, index))
+}
+
 /// egui's built-in fonts have no Chinese/Japanese/Korean glyphs, so such
-/// names drew as boxes. This adds a system font that has them (found via
-/// fontconfig) as the last fallback. The compact Droid Sans Fallback (~4 MB)
-/// is preferred over the full CJK collections (30 MB+, all kept in memory).
-pub(crate) fn add_cjk_fallback_font(ctx: &egui::Context) {
-    let find = |pattern: &str| -> Option<PathBuf> {
-        let out = std::process::Command::new("fc-match").args(["-f", "%{file}", pattern]).output().ok()?;
-        let path = PathBuf::from(String::from_utf8(out.stdout).ok()?);
-        path.is_file().then_some(path)
-    };
-    let font = find("Droid Sans Fallback")
-        .filter(|p| p.to_string_lossy().contains("DroidSansFallback"))
-        .or_else(|| find("sans-serif:lang=ja"));
-    let Some(bytes) = font.and_then(|p| std::fs::read(p).ok()) else { return };
+/// names drew as boxes. This adds system fonts that have them (found via
+/// fontconfig) as the last fallbacks: the compact Droid Sans Fallback
+/// (~4 MB) for Chinese/Japanese, and — only when `korean`, since the fonts
+/// with Hangul are usually full CJK collections (30 MB+, all kept in
+/// memory) — a Korean face. Korean is switched on once a scan meets a
+/// Hangul name (see `ScanCtx::saw_hangul`).
+pub(crate) fn install_fallback_fonts(ctx: &egui::Context, korean: bool) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("cjk_fallback".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push("cjk_fallback".into());
+    let mut add = |id: &str, font: Option<(PathBuf, u32)>| {
+        let Some((path, index)) = font else { return };
+        let Ok(bytes) = std::fs::read(path) else { return };
+        let mut data = egui::FontData::from_owned(bytes);
+        data.index = index;
+        fonts.font_data.insert(id.into(), std::sync::Arc::new(data));
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            fonts.families.entry(family).or_default().push(id.into());
+        }
+    };
+    let cjk = system_font("Droid Sans Fallback")
+        .filter(|(p, _)| p.to_string_lossy().contains("DroidSansFallback"))
+        .or_else(|| system_font("sans-serif:lang=ja"));
+    add("cjk_fallback", cjk);
+    if korean {
+        add("korean_fallback", system_font("sans-serif:lang=ko"));
     }
     ctx.set_fonts(fonts);
+}
+
+/// True for Korean script (Hangul syllables and jamo).
+pub(crate) fn is_hangul(c: char) -> bool {
+    matches!(c, '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}' | '\u{A960}'..='\u{A97F}' | '\u{AC00}'..='\u{D7FF}')
 }
 
 #[cfg(test)]
@@ -138,7 +163,7 @@ mod tests {
     #[test]
     fn cjk_names_have_glyphs() {
         let ctx = egui::Context::default();
-        add_cjk_fallback_font(&ctx);
+        install_fallback_fonts(&ctx, false);
         let _ = ctx.run_ui(Default::default(), |_| {});
         let font = egui::FontId::proportional(14.0);
         let has = |c: char| ctx.fonts_mut(|f| f.has_glyph(&font, c));
@@ -146,6 +171,13 @@ mod tests {
         // Only meaningful where a CJK font is installed (as on the dev box).
         if std::process::Command::new("fc-list").arg(":lang=ja").output().is_ok_and(|o| !o.stdout.is_empty()) {
             assert!(has('日') && has('本') && has('語'));
+        }
+        if std::process::Command::new("fc-list").arg(":lang=ko").output().is_ok_and(|o| !o.stdout.is_empty()) {
+            assert!(!has('한'));
+            install_fallback_fonts(&ctx, true);
+            let _ = ctx.run_ui(Default::default(), |_| {});
+            assert!(has('한') && has('국') && has('어'));
+            assert!(has('日'));
         }
     }
 }

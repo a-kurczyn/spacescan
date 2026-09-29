@@ -350,7 +350,7 @@ impl DiskScanApp {
                 ui.weak(format!("· {}", trf("TABLE_TAG_DOTFILES_HIDDEN", &[&human_size(order.dotfile_size)])));
             }
             if !self.table.marked.is_empty() {
-                let size: u64 = (0..n_rows).map(row).filter(|c| self.table.marked.contains(&c.path)).map(|c| c.size).sum();
+                let size: u64 = (0..n_rows).map(row).filter(|c| self.table.marked.contains(&c.path)).map(|c| c.size).fold(0u64, u64::saturating_add);
                 ui.strong(format!(
                     "· {}",
                     trf("TABLE_TAG_MARKED", &[&format_count(self.table.marked.len() as u64), &human_size(size)])
@@ -565,10 +565,10 @@ impl DiskScanApp {
                                 ui.weak("…");
                             }
                             Cell::Opt(TableCol::Modified) => {
-                                ui.label(if c.mtime == 0 { "-".to_string() } else { format_epoch(c.mtime) });
+                                ui.label(format_epoch(c.mtime));
                             }
                             Cell::Opt(TableCol::Changed) => {
-                                ui.label(if c.ctime == 0 { "-".to_string() } else { format_epoch(c.ctime) });
+                                ui.label(format_epoch(c.ctime));
                             }
                             Cell::Opt(TableCol::Perms) => {
                                 ui.label(
@@ -681,8 +681,8 @@ impl DiskScanApp {
             idx = keyed.into_iter().map(|k| (k & 0xFFFF_FFFF) as usize).collect();
         }
         RowOrder {
-            shown_size: idx.iter().map(|&i| children[i].size).sum(),
-            dotfile_size: children.iter().filter(|c| c.name.starts_with('.')).map(|c| c.size).sum(),
+            shown_size: idx.iter().map(|&i| children[i].size).fold(0u64, u64::saturating_add),
+            dotfile_size: children.iter().filter(|c| c.name.starts_with('.')).map(|c| c.size).fold(0u64, u64::saturating_add),
             idx,
             key,
         }

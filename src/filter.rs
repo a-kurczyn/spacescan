@@ -70,8 +70,11 @@ impl CompiledFilter {
         if self.min_size.is_some_and(|m| n.size < m) || self.max_size.is_some_and(|m| n.size > m) {
             return false;
         }
-        if !in_range(n.mtime, self.min_modified, self.max_modified) {
-            return false;
+        if self.min_modified.is_some() || self.max_modified.is_some() {
+            // Unknown modification time can't satisfy a modified-date limit.
+            if n.mtime == NO_TIME || !in_range(n.mtime, self.min_modified, self.max_modified) {
+                return false;
+            }
         }
         if self.min_created.is_some() || self.max_created.is_some() {
             // Unknown creation time can't satisfy a creation-date limit.
@@ -216,7 +219,7 @@ pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter) -> Option<Node> {
     Some(Node {
         name: n.name.clone(),
         path: n.path.clone(),
-        size: children.iter().map(|c| c.size).sum(),
+        size: children.iter().map(|c| c.size).fold(0u64, u64::saturating_add),
         file_count: children.iter().map(|c| c.file_count).sum(),
         is_dir: true,
         children,

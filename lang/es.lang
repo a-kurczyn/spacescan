@@ -192,6 +192,7 @@ COL_PERMS=Permisos
 DELETE_CONFIRM_MANY=%s elementos (%s, número de archivos: %s). No se puede deshacer.
 DELETE_CONFIRM_MORE=…y %s más
 ERR_TRASH_FAILED=No se pudo mover %s a la papelera: %s
+ERR_TRASH_ROOT=la carpeta raíz no se puede mover a la papelera
 ERR_TRASH_IN_TRASH=No se mueve %s a la papelera: está dentro de una carpeta de papelera (o contiene una). Usa Borrar permanentemente.
 ERR_CONTAINS_MOUNT=No se borra ni se mueve a la papelera %s: es o contiene un sistema de archivos montado (%s). Desmóntalo primero.
 ERR_OTHER_FS_INSIDE=detenido en %s, que está en otro sistema de archivos

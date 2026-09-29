@@ -106,7 +106,7 @@ pub(crate) fn layout_sunburst(
         .enumerate()
         .filter(|(_, c)| !hidden.contains(&c.path))
         .collect();
-    let real_total: u64 = visible_children.iter().map(|(_, c)| c.size).sum();
+    let real_total: u64 = visible_children.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
 
     // Free space gets a *fixed* share of the span, from known filesystem
     // capacity — it doesn't grow or shrink as the scan progresses. Whatever
@@ -156,7 +156,7 @@ pub(crate) fn layout_sunburst(
         shown.sort_by(|(_, a), (_, b)| cmp_names(a, b));
     }
     let rest: Vec<(usize, &Node)> = visible_children.iter().skip(split).cloned().collect();
-    let rest_size: u64 = rest.iter().map(|(_, c)| c.size).sum();
+    let rest_size: u64 = rest.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
 
     // "Other" is a "there's more, but no room to show it individually"
     // marker, not a value-proportional bucket: it gets a fixed minimum
@@ -169,7 +169,7 @@ pub(crate) fn layout_sunburst(
     // past the count cap, which is what made it read as disproportionate.
     let other_frac = if rest_size > 0 { min_frac.min(0.5) } else { 0.0 };
     let available_frac = (1.0 - other_frac).max(0.0);
-    let shown_total = shown.iter().map(|(_, c)| c.size).sum::<u64>().max(1) as f32;
+    let shown_total = shown.iter().map(|(_, c)| c.size as f32).sum::<f32>().max(1.0);
 
     let span = content_end_angle - start_angle;
     let mut cursor = start_angle;

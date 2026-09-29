@@ -230,6 +230,10 @@ struct DiskScanApp {
     /// Folders the last scan couldn't list (size unknown), for the delete
     /// dialog's warning.
     unreadable: Vec<PathBuf>,
+    /// Set by the scanner on meeting a Korean name; `korean_font` once the
+    /// font for it has been loaded (see install_fallback_fonts).
+    saw_hangul: Arc<std::sync::atomic::AtomicBool>,
+    korean_font: bool,
     /// Pending deletes and their confirmation (see delete.rs).
     removal: delete::Removal,
     /// Item the chart's right-click menu acts on, fixed when it opens.
@@ -316,6 +320,8 @@ impl Default for DiskScanApp {
             hovered: None,
             context_target: None,
             removal: Default::default(),
+            saw_hangul: Default::default(),
+            korean_font: false,
             unreadable: Vec::new(),
             window_grown: Default::default(),
             tree_gen: 0,
@@ -372,7 +378,7 @@ impl DiskScanApp {
     fn start_scan(&mut self, path: PathBuf) {
         // Scan the canonical path: no "./", "..", doubled slashes or
         // relative roots in breadcrumbs, dialogs or the Issues log.
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let path = true_case(&std::fs::canonicalize(&path).unwrap_or(path));
         // Any new scan supersedes a pending folder rescan ("r").
         self.graft = None;
         self.scanning = true;
@@ -406,6 +412,7 @@ impl DiskScanApp {
 
         let progress_interval: u64 = 1u64 << self.settings.progress_interval_pow2;
         let apparent_size = self.settings.apparent_size;
+        let saw_hangul = self.saw_hangul.clone();
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
@@ -453,6 +460,7 @@ impl DiskScanApp {
                 progress_interval,
                 apparent_size,
                 hard_links: Default::default(),
+                saw_hangul: &saw_hangul,
             };
             let root = scan_dir(&path, &ctx);
             scan_finished.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -793,20 +801,24 @@ impl eframe::App for DiskScanApp {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
         let scan_backlog = self.poll_scan();
+        if !self.korean_font && self.saw_hangul.load(std::sync::atomic::Ordering::Relaxed) {
+            self.korean_font = true;
+            install_fallback_fonts(&ctx, true);
+        }
         self.poll_mime();
         self.removal_frame_start(&ctx);
         self.table_frame_start(&ctx);
         if self.scanning && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.abort_scan();
         }
-        // While scanning, redraw ~10×/s for the live preview rather than as
+        // While scanning, redraw ~4×/s for the live preview rather than as
         // fast as possible: every frame costs the scan threads CPU (much more
         // with a screen reader, which gets the whole UI tree each frame).
         // Straight away only while scan results are still waiting.
         if scan_backlog || !self.mime_inflight.is_empty() {
             ctx.request_repaint();
         } else if self.scanning {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
 
         self.toolbar_ui(ui);
@@ -898,6 +910,22 @@ impl eframe::App for DiskScanApp {
     }
 }
 
+/// With no accessibility service in the session (the AT-SPI registry can't
+/// be started), the accessibility library's background thread panics on
+/// start-up (an unwrap inside accesskit_unix; no fixed release works with
+/// this egui yet). Nothing is lost — without the service no screen reader
+/// can connect — so that one panic is kept out of the terminal; every other
+/// panic is reported as usual.
+fn quiet_accessibility_panic() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.location().is_some_and(|l| l.file().contains("accesskit_unix")) {
+            return;
+        }
+        default(info);
+    }));
+}
+
 /// Scanning or deleting folder chains past the kernel's path length limit
 /// keeps one folder open per level; the usual soft limit of 1,024 open
 /// files would cut very deep chains short. Raise it to the hard limit (as
@@ -914,6 +942,7 @@ fn raise_open_file_limit() {
 
 fn main() -> eframe::Result<()> {
     raise_open_file_limit();
+    quiet_accessibility_panic();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
         ..Default::default()
@@ -923,7 +952,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
-            add_cjk_fallback_font(&cc.egui_ctx);
+            install_fallback_fonts(&cc.egui_ctx, false);
             Ok(Box::new(DiskScanApp::default()))
         }),
     )

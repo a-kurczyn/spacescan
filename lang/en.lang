@@ -203,6 +203,7 @@ COL_PERMS=Permissions
 DELETE_CONFIRM_MANY=%s items (%s, file count: %s). This can't be undone.
 DELETE_CONFIRM_MORE=…and %s more
 ERR_TRASH_FAILED=Couldn't move %s to the trash: %s
+ERR_TRASH_ROOT=the root folder can't be moved to the trash
 ERR_TRASH_IN_TRASH=Not moving %s to the trash: it is inside a trash folder (or contains one). Use Delete permanently instead.
 ERR_CONTAINS_MOUNT=Refusing to delete or trash %s: it is or contains a mounted filesystem (%s). Unmount it first.
 ERR_OTHER_FS_INSIDE=stopped at %s, which is on another filesystem

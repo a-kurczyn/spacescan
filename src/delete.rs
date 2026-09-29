@@ -91,6 +91,17 @@ fn trash_guard(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Plain-language reason a move to the trash failed, rather than the trash
+/// library's internal error text.
+fn trash_reason(e: &trash::Error) -> String {
+    match e {
+        trash::Error::FileSystem { source, .. } => io_reason(source),
+        trash::Error::TargetedRoot => tr("ERR_TRASH_ROOT"),
+        trash::Error::Unknown { description } => trf("ERR_IO_OTHER", &[description]),
+        other => trf("ERR_IO_OTHER", &[&other.to_string()]),
+    }
+}
+
 /// Like `remove_dir_all`, but never crosses into another filesystem: a
 /// folder on a different device than `dir` stops the delete with an error.
 /// Also works in trees deeper than the kernel's path length limit, the same
@@ -228,7 +239,7 @@ impl DiskScanApp {
         }
         self.removal.confirm = Some(Confirm::Delete {
             paths: nodes.iter().map(|n| n.path.clone()).collect(),
-            size: nodes.iter().map(|n| n.size).sum(),
+            size: nodes.iter().map(|n| n.size).fold(0u64, u64::saturating_add),
             file_count: nodes.iter().map(|n| n.file_count).sum(),
             unreadable: self.unreadable.iter().filter(|u| nodes.iter().any(|n| u.starts_with(&n.path))).count(),
             single_is_dir: (nodes.len() == 1).then(|| nodes[0].is_dir),
@@ -277,7 +288,7 @@ impl DiskScanApp {
         match trash::os_limited::list() {
             Ok(items) if items.is_empty() => self.status = tr("STATUS_TRASH_EMPTY"),
             Ok(items) => self.removal.confirm = Some(Confirm::EmptyTrash(items)),
-            Err(e) => self.log_issue(trf("ERR_EMPTY_TRASH", &[&e.to_string()])),
+            Err(e) => self.log_issue(trf("ERR_EMPTY_TRASH", &[&trash_reason(&e)])),
         }
     }
 
@@ -369,7 +380,7 @@ impl DiskScanApp {
                         }
                         let (tx, rx) = channel();
                         std::thread::spawn(move || {
-                            let _ = tx.send(trash::os_limited::purge_all(&items).map_err(|e| e.to_string()));
+                            let _ = tx.send(trash::os_limited::purge_all(&items).map_err(|e| trash_reason(&e)));
                         });
                         self.removal.purge_rx = Some(rx);
                         self.status = tr("STATUS_EMPTYING_TRASH");
@@ -406,7 +417,7 @@ impl DiskScanApp {
                 }
                 .map_err(|e| e.to_string())
             } else {
-                trash::delete(&p).map_err(|e| e.to_string())
+                trash::delete(&p).map_err(|e| trash_reason(&e))
             };
             match result {
                 Ok(()) => done.push(p),
@@ -583,6 +594,7 @@ mod tests {
             progress_interval: 512,
             apparent_size: true,
             hard_links: Default::default(),
+            saw_hangul: &Default::default(),
         };
         let tree = scan_dir(&top, &ctx);
         assert_eq!(tree.file_count, files);
