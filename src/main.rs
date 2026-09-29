@@ -195,6 +195,9 @@ struct DiskScanApp {
     filter_error: Option<String>,
     /// The categories from categories.json (reloaded at each new scan).
     cats: Arc<CategoryModel>,
+    /// A click in the category bar, applied once the frame's table is drawn
+    /// (the table is drawn from the tree as it was when the frame began).
+    category_pending: Option<Option<Category>>,
     /// Category picked in the summary view's category bar (None = all).
     /// Applied on top of `filter`.
     category: Option<Category>,
@@ -359,6 +362,7 @@ impl Default for DiskScanApp {
             path_input_focused: false,
             cats: Arc::new(CategoryModel::defaults()),
             category: None,
+            category_pending: None,
             cat_base: None,
             cat_breakdown: Vec::new(),
             cat_breakdown_for: None,

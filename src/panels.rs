@@ -937,6 +937,13 @@ impl DiskScanApp {
                 self.table_ui(ui, view_node, avail - heading_h);
             });
         });
+        // Only now: `view_node` belongs to the tree this frame started with,
+        // and the table must not mix it with the rebuilt one.
+        if let Some(cat) = self.category_pending.take() {
+            self.category = cat;
+            self.rebuild_view_tree();
+            ui.ctx().request_repaint();
+        }
     }
 
     /// "Categories": a vertical bar split by the space each category takes
@@ -1066,11 +1073,10 @@ impl DiskScanApp {
         }
 
         if clear || clicked.is_some() {
-            self.category = match clicked {
+            self.category_pending = Some(match clicked {
                 Some(c) if self.category != Some(c) => Some(c),
                 _ => None,
-            };
-            self.rebuild_view_tree();
+            });
         }
     }
 
@@ -1436,5 +1442,44 @@ impl DiskScanApp {
         let text_color = ui.visuals().selection.stroke.color;
         let galley = ui.painter().layout_no_wrap(label, egui::FontId::default(), text_color);
         ui.painter().galley(bar_resp.rect.center() - galley.size() / 2.0, galley, text_color);
+    }
+}
+
+#[cfg(test)]
+mod category_bar_tests {
+    use super::*;
+
+    /// Draws one Summary view frame, headless.
+    fn frame(app: &mut DiskScanApp) {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let root = app.root.clone().unwrap();
+            let view = get_node(&root, app.view_stack.last().unwrap());
+            app.summary_ui(ui, view);
+        });
+    }
+
+    /// Picking a category (or dropping it) while the table is on screen
+    /// takes effect after the frame, without mixing up the table's rows.
+    #[test]
+    fn picking_a_category_refilters_after_the_frame() {
+        let mut app = DiskScanApp::default();
+        app.summary_view = true;
+        let files = |d: &str| (0..30).map(|i| test_node(&format!("/t/{d}/f{i}.xyz"), 10, false, vec![])).collect::<Vec<_>>();
+        let mut kids = vec![test_node("/t/a.mkv", 5000, false, vec![]), test_node("/t/b.eml", 50, false, vec![])];
+        kids.extend((0..20).map(|i| test_node(&format!("/t/d{i}"), 300, true, files(&format!("d{i}")))));
+        app.full_root = Some(Arc::new(test_node("/t", 11050, true, kids)));
+        app.rebuild_view_tree();
+        frame(&mut app);
+        assert_eq!(app.root.as_ref().unwrap().children.len(), 22);
+
+        let video = app.cats.of_name("x.mkv");
+        for (pick, rows) in [(Some(video), 1), (None, 22), (Some(app.cats.other()), 21)] {
+            app.category_pending = Some(pick);
+            frame(&mut app);
+            assert_eq!(app.category, pick);
+            assert_eq!(app.root.as_ref().unwrap().children.len(), rows);
+            frame(&mut app);
+        }
     }
 }
