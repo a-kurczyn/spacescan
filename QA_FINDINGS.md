@@ -61,6 +61,7 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-39 | S4 | Trash errors show raw internal error text | VERIFIED | 90cabab | Trash errors show a plain reason (not found, no permission, root folder) instead of internal error text. — **QA ✔ plain-language trash errors.** |
 | SM-40 | S4 | Case-insensitive drives: path typed in a different case is shown in that case | VERIFIED | 90cabab | A path typed in a different case on a case-insensitive drive is shown with the real names' case. — **QA ✔ on-disk case shown for wrong-case typed paths.** |
 | SM-41 | S4 | Sizes show needless decimals (".00") — user request | VERIFIED | ff6a978 | Sizes show at most one decimal and none when it would be .0 (4 KiB, 1.5 GiB, 95.4 MiB) everywhere; size columns are right-aligned; a capped total reads "≥ 16 EiB" (SM-38 note). — **QA ✔ every size string on screen (table, chart, details, dialog, filter summary, extension table) has at most one decimal and no ".0"; unit rollover at 1023.95 is correct; columns right-aligned.** |
+| SM-42 | S3 | Chart: one item stretched over a whole folder's arc; similar items not comparable — user report | FIXED | c6de79b (branch chart-other-share) | A ring holds as many slices as fit at the min slice angle (at most 360 around a full circle, and no more than "Max slices"). The largest items fill all but the last, sized in proportion to each other; no slice is drawn narrower than the min angle, and the rest go into one min-width "other" at the end. | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -299,6 +300,11 @@ Expected:
 - Actual: `4.00 KiB`, `10.00 MiB`, `1.50 GiB`, `4096.00 PiB`. The trailing zeros carry no information.
 - **User decision (2026-09-28):** at most **one decimal**, and drop a trailing `.0`: `4 KiB`, `10 MiB`, `1.5 GiB`, `95.4 MiB`, `723.9 MiB`, `4 EiB`. Counts stay integers. Keep the column right-aligned so the numbers line up.
 - Also approved by the user: when a total is capped at the maximum, show it as `≥ 16 EiB` (see SM-38).
+
+### SM-42 · S3 · Chart: one item stretched over a whole folder's arc — user report (2026-09-29)
+- Scenario: a folder with many similar-sized items (e.g. a movie library of ~1200 folders of 30–170 GB) that takes a large share of the chart, on the default chart settings.
+- Actual: only the single largest item got its own slice and was drawn over nearly the whole folder's arc; items almost as large (a few GB smaller) were lumped into a thin "other". A folder of very unevenly sized items instead drew its tail as a band of 1–2 px slivers.
+- Expected (user-approved behaviour): similar-sized items get comparable slices, in proportion to each other; a ring shows as many slices as fit at the min slice angle (never more than 360 around a full circle, nor more than the "Max slices" setting); no slice is narrower than the min angle; whatever doesn't fit goes into one min-width "other" slice at the end of the ring.
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.
