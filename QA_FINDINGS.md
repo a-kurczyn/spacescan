@@ -61,7 +61,16 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-39 | S4 | Trash errors show raw internal error text | VERIFIED | 90cabab | Trash errors show a plain reason (not found, no permission, root folder) instead of internal error text. — **QA ✔ plain-language trash errors.** |
 | SM-40 | S4 | Case-insensitive drives: path typed in a different case is shown in that case | VERIFIED | 90cabab | A path typed in a different case on a case-insensitive drive is shown with the real names' case. — **QA ✔ on-disk case shown for wrong-case typed paths.** |
 | SM-41 | S4 | Sizes show needless decimals (".00") — user request | VERIFIED | ff6a978 | Sizes show at most one decimal and none when it would be .0 (4 KiB, 1.5 GiB, 95.4 MiB) everywhere; size columns are right-aligned; a capped total reads "≥ 16 EiB" (SM-38 note). — **QA ✔ every size string on screen (table, chart, details, dialog, filter summary, extension table) has at most one decimal and no ".0"; unit rollover at 1023.95 is correct; columns right-aligned.** |
-| SM-42 | S3 | Chart: one item stretched over a whole folder's arc; similar items not comparable — user report | FIXED | c6de79b (branch chart-other-share) | A ring holds as many slices as fit at the min slice angle (at most 360 around a full circle, and no more than "Max slices"). The largest items fill all but the last, sized in proportion to each other; no slice is drawn narrower than the min angle, and the rest go into one min-width "other" at the end. | |
+| SM-42 | S3 | Chart: one item stretched over a whole folder's arc; similar items not comparable — user report | VERIFIED | c6de79b (branch chart-other-share) | A ring holds as many slices as fit at the min slice angle (at most 360 around a full circle, and no more than "Max slices"). The largest items fill all but the last, sized in proportion to each other; no slice is drawn narrower than the min angle, and the rest go into one min-width "other" at the end. | **QA ✔ (build 0bc8794, real window): a folder of ~1,200 similar items fills its ring with comparable slices up to Max slices, one "other" at the end; a small sibling folder gets a min-width slice, no sliver bands.** |
+| SM-43 | S1 | Delete/Trash of a folder while a filter or category is active removes hidden files; the dialog counts only the visible ones | OPEN | | |
+| SM-44 | S3 | Problems in the categories file are never visible: the Issue is cleared when any scan starts | OPEN | | |
+| SM-45 | S3 | Chart view with a picked category: no sign of the category and no way to clear it | OPEN | | |
+| SM-46 | S3 | Picked category absent from the current folder: empty table with no explanation | OPEN | | |
+| SM-47 | S4 | Category bar is not accessible (unnamed segments and labels, no keyboard) | OPEN | | |
+| SM-48 | S4 | Category ✕ (clear) button draws as an empty box | OPEN | | |
+| SM-49 | S4 | Category panel: labels pile up in short windows; panel doesn't shrink in narrow windows | OPEN | | |
+| SM-50 | S4 | Spanish UI: the category panel and tooltips stay English with the installed language file | OPEN | | |
+| SM-51 | S4 | Category names and extensions: display oddities | OPEN | | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -305,6 +314,53 @@ Expected:
 - Scenario: a folder with many similar-sized items (e.g. a movie library of ~1200 folders of 30–170 GB) that takes a large share of the chart, on the default chart settings.
 - Actual: only the single largest item got its own slice and was drawn over nearly the whole folder's arc; items almost as large (a few GB smaller) were lumped into a thin "other". A folder of very unevenly sized items instead drew its tail as a band of 1–2 px slivers.
 - Expected (user-approved behaviour): similar-sized items get comparable slices, in proportion to each other; a ring shows as many slices as fit at the min slice angle (never more than 360 around a full circle, nor more than the "Max slices" setting); no slice is narrower than the min angle; whatever doesn't fit goes into one min-width "other" slice at the end of the ring.
+
+### SM-43 · S1 · Delete/Trash of a folder while a filter or category is active removes hidden files
+- Scenario: pick a category in the bar (e.g. Video), or set a name pattern in the Filters panel. A folder that also holds other files now shows only its matching files (e.g. "1 file, 6 MiB"). Select that folder and press D (or T).
+- Actual: the dialog says "The folder and everything in it (6 MiB, file count: 1)". Confirming permanently deletes the whole folder, including the files the filter hid, which the dialog never mentions. T moves the whole folder to the trash without a dialog. This also happens with the Filters panel alone, but a category makes it a single click away.
+- Expected: the dialog must describe what will actually be deleted (the folder's real size and file count, and that N files are hidden by the active filter). Alternatively, delete/trash act only on the files shown, but whichever is chosen must match what the dialog says.
+
+### SM-44 · S3 · Problems in the categories file are never visible
+- Scenario: the categories file has invalid JSON, a duplicate extension, an entry without a name, more than 8 categories, or is a folder/special file. Start the app and scan anything, or edit the file and start a new scan (the moment a user who just edited the file would look).
+- Actual: the Issue appears on the start screen, but it's cleared as soon as a scan starts, so it shows "Issues: none" while the fallback or skipped entries are in effect. Duplicates, skipped entries and the 9+ categories note were never visible in any case tried.
+- Expected: file problems stay in Issues for the scan that uses that file (they're re-reported on each reload).
+
+### SM-45 · S3 · Chart view with a picked category: no sign of the category and no way to clear it
+- Scenario: pick a category in the Summary view, then switch to the chart.
+- Actual: the chart, its hub and "Size/Files" show only that category's files, but nothing names the category. The Filters button shows "active", but the Filters panel is empty and its Clear doesn't remove the category. The only way out is to go back to the Summary view.
+- Expected: the chart view shows which category is active (e.g. next to the size) and offers a way to clear it; Filters → Clear should clear it too, or the panel should say that a category is active.
+
+### SM-46 · S3 · Picked category absent from the current folder: empty table with no explanation
+- Scenario: pick a category, then open or scan a folder that has no files of that category.
+- Actual: the table is empty with no message, and the bar has no segment for the picked category (everything is dimmed). The folder looks empty, although it isn't.
+- Expected: say so, e.g. "No Video files here (N other files hidden) ✕", or keep the picked category visible at 0.
+
+### SM-47 · S4 · Category bar is not accessible
+- Scenario: screen reader or keyboard use of the Categories panel.
+- Actual: the segments and labels are exposed as unnamed elements, so their names and sizes aren't read and they can't be reached with the keyboard. Only the ✕ button is named.
+- Expected: each segment/label is a named button (e.g. "Video, 48%, 17 MiB, 7 files") that can be focused and activated with the keyboard.
+
+### SM-48 · S4 · Category ✕ (clear) button draws as an empty box
+- Scenario: pick any category and look at the button next to "Categories".
+- Actual: it shows an empty rectangle (a missing glyph), although its accessible name is "✕". The Filters panel's close button draws fine.
+- Expected: a visible ✕ (use the same glyph/icon as the other close buttons).
+
+### SM-49 · S4 · Category panel in short or narrow windows
+- Scenario: make the window about 300 px tall or less, or about 400 px wide or less.
+- Actual: when short, the labels are drawn on top of each other and are unreadable. When narrow, the panel keeps its full width and squeezes the contents table to almost nothing.
+- Expected: drop or abbreviate labels that don't fit (tooltips still work), and narrow or hide the panel when the window is narrow.
+
+### SM-50 · S4 · Spanish UI: the category panel stays English with the installed language file
+- Scenario: language Spanish using the language file currently installed in the user's config folder.
+- Actual: the rest of the UI is Spanish, but "Categories", the category names, "files" and "Click to show only these files" are English.
+- Expected: the installed language file gets the new strings when the app is updated, or missing strings fall back to built-in Spanish, not English.
+
+### SM-51 · S4 · Category names and extensions: display oddities
+- A user category named "Other" appears next to the built-in grey "Other", giving two "Other" entries. Expected: reject or rename it with an Issue.
+- A very long category name is cut off at the panel edge with no ellipsis. Expected: ellipsis, with the full name in the tooltip.
+- A file whose extension has a trailing space ("x.mkv ") is listed in Other's tooltip as ".mkv", which reads like a contradiction. Expected: show the space, e.g. quoted.
+- For the user to decide: the default list puts `.ts` in Video (so TypeScript source shows as Video) and `.idx` in Video (so git pack indexes show as Video).
+- Note (not a bug): `r` (rescan folder) does reread the categories file and clears a picked category if the list changed. The coder's description said it doesn't.
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.
