@@ -3,13 +3,10 @@
 
 use super::*;
 
-// ---------------- Data model ----------------
-
-/// Runs `f` (the next level of a recursion over the tree or a folder chain)
-/// with enough stack, growing it on the heap when a recursion runs deep:
-/// folder chains can be nested far deeper than any fixed stack allows (one
-/// frame per level; ~1,000 levels used to crash the app). Every recursive
-/// function over folders or the tree calls its next level through this.
+/// Runs `f`, the next level of a recursion over folders, with enough stack:
+/// more is allocated when a recursion runs deep, since folders can be
+/// nested deeper than any fixed stack allows. Every recursion over folders
+/// or the tree calls its next level through this.
 #[inline]
 pub(crate) fn deep<R>(f: impl FnOnce() -> R) -> R {
     stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, f)
@@ -23,7 +20,6 @@ pub(crate) struct Node {
     pub(crate) is_dir: bool,
     pub(crate) children: Vec<Node>,
     pub(crate) mode: u32,
-    /// All free — same `stat` struct already fetched for size/mode.
     pub(crate) mtime: i64,
     pub(crate) ctime: i64,
     pub(crate) uid: u32,
@@ -32,8 +28,8 @@ pub(crate) struct Node {
     pub(crate) btime: i64,
 }
 
-// Clone and drop by hand: the derived versions recurse one level per
-// folder, which overflows the stack on very deep chains.
+// Clone and drop are written by hand: the derived versions recurse once per
+// level and overflow the stack on very deep folder chains.
 impl Clone for Node {
     fn clone(&self) -> Self {
         deep(|| Node {
@@ -127,12 +123,10 @@ pub(crate) fn format_mode_ls(mode: u32, is_dir: bool) -> String {
     s
 }
 
-/// Unix epoch seconds -> local "YYYY-MM-DD HH:MM" — free from the same
-/// `stat` struct already fetched, no extra syscall.
-/// Marks a time that isn't known (the entry couldn't be read, or a folder
-/// the live scan hasn't finished). Not 0: that's a real date, 1970-01-01.
+/// A time that isn't known (0 would be a real date: 1970-01-01).
 pub(crate) const NO_TIME: i64 = i64::MIN;
 
+/// Unix seconds as local "YYYY-MM-DD HH:MM", or "-" if unknown.
 pub(crate) fn format_epoch(secs: i64) -> String {
     use chrono::TimeZone;
     if secs == NO_TIME {
@@ -144,9 +138,7 @@ pub(crate) fn format_epoch(secs: i64) -> String {
     }
 }
 
-/// uid/gid -> username/groupname, cached (uzers hits the system's NSS
-/// lookup each call — cheap, but no reason to repeat it every frame while
-/// the pointer sits still over the same file).
+/// User and group names for uids and gids, cached.
 pub(crate) fn format_owner(
     uid: u32,
     gid: u32,
@@ -189,17 +181,9 @@ pub(crate) fn empty_node() -> Node {
     }
 }
 
-/// Inserts a completed directory's final stats into the growing live-scan
-/// tree, by path, creating placeholder ancestors on the way down as needed.
-///
-/// `node` starts as the tree root and target_path is always node.path or a
-/// descendant of it. When we reach the exact target, its value is
-/// authoritative (that directory is done) — set directly, don't derive from
-/// children, since files aren't individually streamed and would make a
-/// sum-of-children an undercount. Every *ancestor* on the way back up gets
-/// its aggregate recomputed as "sum of what's known so far", which is
-/// naturally just an interim lower bound until that ancestor's own
-/// SliceDone arrives and overwrites it with the real value the same way.
+/// Puts a finished folder's totals into the live scan tree at
+/// `target_path`, creating the folders above it as needed. Each folder
+/// above gets the sum of what's known so far, until its own totals arrive.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn graft_slice(
     node: &mut Node,
@@ -213,11 +197,9 @@ pub(crate) fn graft_slice(
     gid: u32,
 ) {
     let Ok(rel) = target_path.strip_prefix(&node.path) else {
-        return; // not actually a descendant; ignore
+        return; // not inside `node`
     };
-    // The target's path components below `node`, split once: each level
-    // then matches just its own name. (Comparing whole paths at every level
-    // made grafting cost depth² per folder — a freeze on very deep chains.)
+    // Split once, so each level compares just one name.
     let parts: Vec<&std::ffi::OsStr> = rel.components().map(|c| c.as_os_str()).collect();
     graft_at(node, &parts, &|n: &mut Node| {
         n.size = size;
@@ -237,9 +219,7 @@ fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node))
         set(node);
         return;
     };
-    // Match on the final path component (a plain byte compare) rather than
-    // Path::starts_with, which re-parses both paths component by component
-    // for every sibling — that dominated frame time on wide directories.
+    // Compare last path components as bytes: fast on wide folders.
     let idx = match node.children.iter().position(|c| c.path.file_name() == Some(*first)) {
         Some(i) => i,
         None => {
@@ -254,9 +234,7 @@ fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node))
     deep(|| graft_at(&mut node.children[idx], rest, set));
     node.size = node.children.iter().fold(0u64, |t, c| t.saturating_add(c.size));
     node.file_count = node.children.iter().fold(0u64, |t, c| t.saturating_add(c.file_count));
-    // Children stay sorted by size (descending) and only children[idx]
-    // changed, so move just that one into place instead of re-sorting (a
-    // full stable sort allocates a scratch buffer on every call).
+    // Only children[idx] changed: move it into place instead of re-sorting.
     reposition_by_size(&mut node.children, idx);
 }
 
@@ -283,11 +261,9 @@ pub(crate) fn file_name_of(p: &Path) -> String {
     p.file_name().map(show_os).unwrap_or_else(|| show_path(p))
 }
 
-/// A name for display that can't be mistaken for a different one: bytes
-/// that aren't valid UTF-8 are written as `\xFF` and control characters
-/// (newlines, tabs…) as `\n`, `\t` or `\x1B`, like `ls -b`. Otherwise a
-/// non-UTF-8 name and a look-alike with a real U+FFFD would both show as
-/// `x�y`. A literal backslash is doubled so an escape can't be faked.
+/// A name for display that can't be mistaken for another, like `ls -b`:
+/// invalid UTF-8 bytes appear as `\xFF`, control characters as `\n`,
+/// `\t` or `\x1B`, and a backslash as `\\`.
 pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     use std::os::unix::ffi::OsStrExt;
     let mut out = String::new();
@@ -309,8 +285,7 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     out
 }
 
-/// `n` with its children but none of theirs: what the live table needs
-/// of the preview tree, cheap to copy.
+/// `n` with its children but not theirs: what the live table shows.
 pub(crate) fn flat_copy(n: &Node) -> Node {
     let shallow = |c: &Node, children: Vec<Node>| Node {
         name: c.name.clone(),
@@ -329,14 +304,11 @@ pub(crate) fn flat_copy(n: &Node) -> Node {
     shallow(n, n.children.iter().map(|c| shallow(c, Vec::new())).collect())
 }
 
-/// Sort key for name order as file managers use it: case-insensitive, with
-/// runs of digits compared by value ("file2" before "file10", "007" = "7").
-/// Comparing these keys as bytes gives that order; building them once per
-/// name keeps sorting a huge folder fast.
+/// Sort key for file-manager name order: case-insensitive, numbers by value
+/// ("file2" before "file10", "007" = "7"). Keys compare as plain bytes.
 ///
-/// A digit run becomes '0', its length without leading zeros (two bytes),
-/// then those digits: like a digit it sorts after '/' and before ':' and
-/// letters, and shorter numbers sort first.
+/// A run of digits becomes '0', its length without leading zeros (two
+/// bytes), then the digits, so shorter numbers sort first.
 pub(crate) fn natural_key(name: &str) -> Vec<u8> {
     let bytes = name.as_bytes();
     let mut key = Vec::with_capacity(bytes.len() + 4);
@@ -359,9 +331,7 @@ pub(crate) fn natural_key(name: &str) -> Vec<u8> {
         if c.is_ascii() {
             key.push(c.to_ascii_lowercase() as u8);
         } else {
-            // Accents don't move a letter to the end: é sorts as e (then
-            // after plain e, by the byte-order tie-break), like in file
-            // managers.
+            // é sorts as e (just after plain e).
             let mut buf = [0u8; 4];
             for l in c.to_lowercase() {
                 match l {
@@ -386,9 +356,8 @@ pub(crate) fn natural_key(name: &str) -> Vec<u8> {
     key
 }
 
-/// Natural, case-insensitive name order (see `natural_key`); names equal
-/// under those rules fall back to plain byte order, so it's always the
-/// same.
+/// Natural, case-insensitive name order (see `natural_key`), then byte
+/// order for names that tie.
 pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     natural_key(a).cmp(&natural_key(b)).then_with(|| a.cmp(b))
 }
@@ -408,9 +377,8 @@ pub(crate) fn shorten_middle(s: &str, max: usize) -> String {
     out
 }
 
-/// A path for labels and dialogs: escaped like `show_path` and at most
-/// ~240 characters (a folder chain thousands of levels deep has a path far
-/// too long to lay out every frame, or to read).
+/// A path for labels and dialogs: escaped like `show_path` and shortened to
+/// about 240 characters.
 pub(crate) fn short_path(p: &Path) -> String {
     shorten_middle(&show_path(p), 240)
 }
@@ -420,9 +388,7 @@ pub(crate) fn show_path(p: &Path) -> String {
     show_os(p.as_os_str())
 }
 
-/// Turns an io::Error into the kind of plain-language line a non-technical
-/// user asked for, e.g. "can't find that directory" / "don't have permission
-/// to read or enter that folder", instead of a raw errno string.
+/// An I/O error as a plain-language line naming `path`.
 pub(crate) fn friendly_io_error(path: &Path, e: &std::io::Error) -> String {
     trf("ERR_IO_LINE", &[&show_path(&path), &io_reason(e)])
 }
@@ -438,10 +404,7 @@ pub(crate) fn io_reason(e: &std::io::Error) -> String {
     }
 }
 
-/// Scans a single directory entry: recurses if it's a (same-filesystem)
-/// directory, otherwise builds a leaf file Node. Shared by `scan_dir`'s
-/// normal recursion and the top-level streaming scan in `start_scan`.
-/// Birth (creation) time in Unix seconds via statx; 0 if unavailable.
+/// Birth (creation) time in Unix seconds; 0 if unavailable.
 pub(crate) fn birth_secs(m: &std::fs::Metadata) -> i64 {
     m.created()
         .ok()
@@ -507,8 +470,9 @@ pub(crate) fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
     }
 }
 
-/// `path` is the entry's real full path (DirEntry::path would be relative
-/// to however its folder was opened); `dir` is its folder's handle.
+/// Scans one folder entry: a folder on the same filesystem is scanned into
+/// a subtree, anything else becomes a file node. `path` is the entry's full
+/// path; `dir` is its folder's handle.
 pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHandle, ctx: &ScanCtx) -> Node {
     let ScanCtx { root_dev, progress, counter, progress_interval, .. } = *ctx;
     use std::os::unix::fs::MetadataExt;
@@ -521,9 +485,7 @@ pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHand
     let ft = entry.file_type();
     let node = match ft {
         Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
-            // Don't cross filesystem/mount boundaries (matches `du -x`):
-            // a drive/mount-point scan should not silently absorb other
-            // mounted filesystems nested under it.
+            // Other filesystems mounted inside aren't entered (like `du -x`).
             let meta = entry.metadata().ok();
             let dev = meta.as_ref().map(|m| m.dev()).unwrap_or(root_dev);
             if dev != root_dev {
@@ -588,8 +550,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     use std::sync::atomic::Ordering;
     let name = file_name_of(path);
     if cancel.load(Ordering::Relaxed) {
-        // A newer scan superseded this one: stop doing work immediately.
-        // The result is discarded by the caller either way.
+        // Cancelled: stop at once; the result is discarded.
         return Node {
             name,
             path: path.to_path_buf(),
@@ -639,13 +600,11 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
 
     let mut children = children;
     children.sort_by(|a, b| b.size.cmp(&a.size));
-    // The folder's own entry takes space too (large on folders with many
-    // entries).
+    // The folder's own entry uses space too. Saturating: apparent sizes of
+    // sparse files can add up past u64.
     let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
-    // Saturating: apparent sizes (sparse files) can add up past u64.
     let size = children.iter().fold(own_size, |t, c| t.saturating_add(c.size));
-    let file_count = children.iter().map(|c| c.file_count).sum::<u64>() + if children.is_empty() { 0 } else { 0 };
-    let file_count = if children.is_empty() { 0 } else { file_count };
+    let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
     let mut exts: Vec<(String, u64, u64)> = Vec::new();
     for c in children.iter().filter(|c| !c.is_dir) {
@@ -688,10 +647,8 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
 
 pub(crate) enum ScanMsg {
     Progress(u64),
-    /// A directory (any depth) just finished — its final size/count, not the
-    /// subtree itself (cheap: no cloning). The UI grafts it into the growing
-    /// partial tree by path, so the sunburst blossoms slice by slice at
-    /// every level, not just the top one.
+    /// A folder (at any depth) finished scanning: its totals, for the live
+    /// chart and table.
     SliceDone {
         path: PathBuf,
         size: u64,
@@ -708,26 +665,22 @@ pub(crate) enum ScanMsg {
     Done(Node, f64),
     Error(String),
     LogError(String),
-    /// A folder whose contents couldn't be listed (so its size is unknown),
-    /// besides the LogError line for the Issues log.
+    /// A folder whose contents couldn't be listed (its size is unknown).
     Unreadable(PathBuf),
 }
 
-/// Live result of the counting pass. Shared directly rather than sent as
-/// ScanMsgs: the scan channel can hold a long backlog of SliceDones the UI
-/// grafts a few milliseconds' worth at a time, and a total that only arrives
-/// after that backlog is useless to the progress bar.
+/// The running result of the counting pass, for the progress bar. Shared
+/// directly rather than sent as a message, so a backlog of scan messages
+/// can't delay it.
 #[derive(Default)]
 pub(crate) struct EntryCount {
     pub(crate) found: std::sync::atomic::AtomicU64,
     pub(crate) done: std::sync::atomic::AtomicBool,
 }
 
-/// Counts every entry under `path` that the scan will visit (same
-/// filesystem, symlinks not followed), using only directory listings — no
-/// per-file stat, which is most of the real scan's cost — so it normally
-/// finishes well ahead of the scan and gives the progress bar a real total
-/// for folders that aren't whole drives.
+/// Counts the entries under `path` that the scan will visit, from folder
+/// listings alone (no per-file stat), so it finishes well ahead of the scan
+/// and gives the progress bar its total.
 pub(crate) fn count_entries(path: &Path, root_dev: u64, found: &std::sync::atomic::AtomicU64, stop: &(dyn Fn() -> bool + Sync)) {
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
@@ -787,8 +740,6 @@ pub(crate) fn format_count(n: u64) -> String {
     out.chars().rev().collect()
 }
 
-// ---------------- Filesystem capacity ----------------
-
 /// Returns (total_bytes, free_bytes) for the filesystem containing `path`.
 pub(crate) fn fs_space(path: &Path) -> Option<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
@@ -805,14 +756,11 @@ pub(crate) fn fs_space(path: &Path) -> Option<(u64, u64)> {
     }
 }
 
-/// True if `path` is itself a filesystem root (its device ID differs from
-/// its parent's) — i.e. a genuine mount point. Works for any starting point
-/// (Root/Home buttons, the folder picker, or a path typed into the path
-/// bar), including network shares and just-plugged-in drives.
+/// True if `path` is a mount point (on another device than its parent).
 pub(crate) fn is_real_mount_point(path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let Some(parent) = path.parent() else {
-        return true; // "/" has no parent: trivially a mount point
+        return true; // "/"
     };
     let (Ok(here), Ok(up)) = (std::fs::metadata(path), std::fs::metadata(parent)) else {
         return false;
@@ -820,14 +768,8 @@ pub(crate) fn is_real_mount_point(path: &Path) -> bool {
     here.dev() != up.dev()
 }
 
-
-/// Re-finds the folder at `idx` (child indices from `old`'s root) in `new`,
-/// matching by path; stops at the deepest folder that still exists.
-/// `p` spelled as it is on disk. On a case-insensitive filesystem (NTFS,
-/// FAT, exFAT) a path typed as "/mnt/data/PHOTOS" works but isn't the
-/// folder's real name ("Photos"); each component whose exact spelling isn't
-/// in its folder is replaced by the entry that matches it ignoring case.
-/// Case-sensitive filesystems always match exactly, so nothing changes.
+/// `p` spelled as on disk: on a case-insensitive filesystem, a component
+/// typed in another case ("PHOTOS") becomes the real name ("Photos").
 pub(crate) fn true_case(p: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
@@ -856,8 +798,8 @@ pub(crate) fn true_case(p: &Path) -> PathBuf {
 }
 
 /// `target`'s path components below `base`, or None if it isn't below it.
-/// Tree lookups walk these one name per level: comparing whole paths at
-/// every level costs depth² per lookup, which very deep chains can't afford.
+/// Tree lookups compare one name per level (whole paths would be slow on
+/// deep chains).
 pub(crate) fn rel_parts<'a>(base: &Path, target: &'a Path) -> Option<Vec<&'a std::ffi::OsStr>> {
     Some(target.strip_prefix(base).ok()?.components().map(|c| c.as_os_str()).collect())
 }
@@ -867,6 +809,8 @@ pub(crate) fn child_named(node: &Node, name: &std::ffi::OsStr) -> Option<usize> 
     node.children.iter().position(|c| c.path.file_name() == Some(name))
 }
 
+/// Re-finds the folder at `idx` (child indices from `old`'s root) in `new`,
+/// by path; stops at the deepest folder that still exists.
 pub(crate) fn remap_index_path(old: &Node, new: &Node, idx: &[usize]) -> Vec<usize> {
     let (mut o, mut n) = (old, new);
     let mut out = Vec::new();
@@ -973,11 +917,8 @@ mod memory {
     }
 }
 
-/// Called after a whole scanned tree has been freed. glibc keeps freed
-/// memory for reuse (spread over the scan threads' arenas), so without this
-/// every rescan left the process about one tree bigger; this hands it back
-/// to the system. On a background thread: it can take a moment on a big
-/// heap.
+/// Returns freed memory to the system after a scanned tree is dropped
+/// (glibc otherwise keeps it). Runs on a background thread.
 pub(crate) fn after_tree_dropped() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     std::thread::spawn(|| unsafe {
