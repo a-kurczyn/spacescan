@@ -69,7 +69,7 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-47 | S4 | Category bar is not accessible (unnamed segments and labels, no keyboard) | OPEN | | |
 | SM-48 | S4 | Category ✕ (clear) button draws as an empty box | FIXED | 781e7c0 | The clear button shows ×, like the other close buttons. | |
 | SM-49 | S4 | Category panel: labels pile up in short windows; panel doesn't shrink in narrow windows | OPEN | | |
-| SM-50 | S4 | Spanish UI: the category panel and tooltips stay English with the installed language file | OPEN | | |
+| SM-50 | S4 | Spanish UI: the category panel and tooltips stay English with the installed language file | FIXED | b8155cd | All languages are built into the app; a language file in the user's folder only overrides the lines it contains, so anything it lacks shows in the built-in translation (Spanish here), not English. Adds French, German, Italian, Portuguese, Russian, Japanese, Chinese and Korean. | |
 | SM-51 | S4 | Category names and extensions: display oddities | OPEN | | |
 | SM-52 | S3 | Light KDE colour scheme: highlighted text is white on white (category names, current folder, chart hub) | FIXED | 20808f2 | With a light KDE scheme the whole UI uses a light style: highlighted, selected and hovered text, table headers, the chart hub and path are dark on light; category colors use their light-background shades; the free-space slice is a little darker than the background instead of invisible. | |
 
