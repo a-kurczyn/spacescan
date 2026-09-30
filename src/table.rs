@@ -356,6 +356,10 @@ impl DiskScanApp {
         // Heading line: title, what's switched on, and where the keys are.
         ui.horizontal(|ui| {
             ui.heading(tr("SUMMARY_CONTENTS"));
+            if let Some(cat) = self.category.filter(|_| !self.scanning) {
+                let tag = trf("TABLE_TAG_CATEGORY", &[&self.cats.label(cat)]);
+                ui.label(egui::RichText::new(format!("· {tag}")).color(ui.visuals().warn_fg_color));
+            }
             if self.table.dirs_first {
                 ui.weak(format!("· {}", tr("TABLE_TAG_DIRS_FIRST")));
             }

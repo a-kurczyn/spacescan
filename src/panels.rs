@@ -523,7 +523,9 @@ impl DiskScanApp {
                         }
                         if ui
                             .add_enabled(
-                                self.filter.is_some() || self.filter_form != FilterForm::default(),
+                                self.filter.is_some()
+                                    || self.category.is_some()
+                                    || self.filter_form != FilterForm::default(),
                                 egui::Button::new(tr("FILTER_CLEAR")),
                             )
                             .clicked()
@@ -533,6 +535,7 @@ impl DiskScanApp {
                     });
                     if clear {
                         self.filter_form = FilterForm::default();
+                        self.category = None;
                         submitted = true;
                     } else if !valid {
                         // Enter with an invalid field applies nothing.
@@ -573,6 +576,17 @@ impl DiskScanApp {
                         }
                         if self.scanning {
                             ui.weak(tr("FILTER_LIVE_UNFILTERED"));
+                        }
+                    }
+                    if let Some(cat) = self.category {
+                        let mut clear_category = false;
+                        ui.horizontal(|ui| {
+                            ui.label(trf("CAT_ACTIVE", &[&self.cats.label(cat)]));
+                            clear_category = ui.small_button("×").named(&tr("CAT_CLEAR")).clicked();
+                        });
+                        if clear_category {
+                            self.category = None;
+                            self.rebuild_view_tree();
                         }
                     }
                     ui.add_space(6.0);
@@ -1003,9 +1017,24 @@ impl DiskScanApp {
             }
         });
         let mut height = height;
+        let line_h = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
         if self.scanning && self.category.is_some() {
             ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
-            height -= ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
+            height -= line_h;
+        } else if let Some(cat) = self.category
+            && !self.cat_breakdown.iter().any(|r| r.cat == cat)
+        {
+            // The picked category has no files in this folder.
+            let hidden: u64 = self.cat_breakdown.iter().map(|r| r.files).sum();
+            let text = trf(
+                "CAT_NONE_HERE",
+                &[&self.cats.label(cat), &format_count(hidden)],
+            );
+            let label = ui.add(
+                egui::Label::new(egui::RichText::new(text).color(ui.visuals().warn_fg_color))
+                    .wrap(),
+            );
+            height -= label.rect.height() + ui.spacing().item_spacing.y;
         }
 
         let rows = &self.cat_breakdown;
@@ -1522,12 +1551,20 @@ impl DiskScanApp {
     /// Chart order, in the chart's top-right corner: largest first ("9")
     /// or A–Z ("A"), the active one highlighted.
     pub(crate) fn chart_order_buttons(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        let mut clear_category = false;
         egui::Area::new("chart_order".into())
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::RIGHT_TOP)
             .fixed_pos(area.right_top() + Vec2::new(-8.0, 8.0))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
+                    if let Some(cat) = self.category {
+                        ui.label(trf("CAT_ACTIVE", &[&self.cats.label(cat)]));
+                        if ui.small_button("×").named(&tr("CAT_CLEAR")).clicked() {
+                            clear_category = true;
+                        }
+                        ui.separator();
+                    }
                     for (order, glyph, tip) in [
                         (ChartOrder::Size, "9", "CHART_ORDER_SIZE"),
                         (ChartOrder::Name, "A", "CHART_ORDER_NAME"),
@@ -1546,6 +1583,10 @@ impl DiskScanApp {
                     }
                 });
             });
+        if clear_category {
+            self.category = None;
+            self.rebuild_view_tree();
+        }
     }
 
     /// Scan progress bar, `width` wide, labelled with the count so far and
