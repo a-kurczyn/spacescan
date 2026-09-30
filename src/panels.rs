@@ -887,7 +887,7 @@ impl DiskScanApp {
         let ring_thickness = (max_radius - hub_radius) / self.settings.max_render_depth as f32;
 
         let bg = ui.visuals().panel_fill;
-        let free_color = gamma_lighten(bg, self.settings.free_space_gamma);
+        let free_color = free_space_color(ui.visuals(), self.settings.free_space_gamma);
         painter.circle_filled(center, hub_radius, bg);
         draw_hub_text(
             &painter,
@@ -895,6 +895,7 @@ impl DiskScanApp {
             hub_radius,
             &self.partial_root.name,
             self.partial_root.size,
+            ui.visuals().strong_text_color(),
         );
 
         // Free space is shown once the first folder has arrived.
@@ -1266,11 +1267,18 @@ impl DiskScanApp {
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &chart_name));
         let bg = ui.visuals().panel_fill;
-        let free_color = gamma_lighten(bg, self.settings.free_space_gamma);
+        let free_color = free_space_color(ui.visuals(), self.settings.free_space_gamma);
 
         // The hub; clicking it goes up a level.
         painter.circle_filled(center, hub_radius, bg);
-        draw_hub_text(painter, center, hub_radius, &view_node.name, view_node.size);
+        draw_hub_text(
+            painter,
+            center,
+            hub_radius,
+            &view_node.name,
+            view_node.size,
+            ui.visuals().strong_text_color(),
+        );
 
         // Free space only on the scanned folder's own chart.
         let free = if self.view_stack.len() == 1 {

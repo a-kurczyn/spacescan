@@ -9,6 +9,8 @@ pub(crate) struct KdeColors {
     pub(crate) view_bg: Color32,
     pub(crate) text: Color32,
     pub(crate) accent: Color32,
+    /// Text on the selection color.
+    pub(crate) accent_text: Option<Color32>,
     pub(crate) button_bg: Color32,
 }
 
@@ -23,11 +25,14 @@ pub(crate) fn parse_rgb(s: &str) -> Option<Color32> {
 
 /// The colors from ~/.config/kdeglobals, if it's there.
 pub(crate) fn read_kde_colors() -> Option<KdeColors> {
-    let content = std::fs::read_to_string(home_dir().join(".config/kdeglobals")).ok()?;
+    parse_kde_colors(&std::fs::read_to_string(home_dir().join(".config/kdeglobals")).ok()?)
+}
 
+/// The colors in a KDE color scheme file (kdeglobals or *.colors).
+pub(crate) fn parse_kde_colors(content: &str) -> Option<KdeColors> {
     let mut section = String::new();
-    let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) =
-        (None, None, None, None, None);
+    let (mut window_bg, mut view_bg, mut text, mut accent, mut accent_text, mut button_bg) =
+        (None, None, None, None, None, None);
 
     for line in content.lines() {
         let line = line.trim();
@@ -43,19 +48,40 @@ pub(crate) fn read_kde_colors() -> Option<KdeColors> {
             ("[Colors:Window]", "ForegroundNormal") => text = parse_rgb(value),
             ("[Colors:View]", "BackgroundNormal") => view_bg = parse_rgb(value),
             ("[Colors:Selection]", "BackgroundNormal") => accent = parse_rgb(value),
+            ("[Colors:Selection]", "ForegroundNormal") => accent_text = parse_rgb(value),
             ("[Colors:Button]", "BackgroundNormal") => button_bg = parse_rgb(value),
             _ => {}
         }
     }
 
     let window_bg = window_bg?;
+    let view_bg = view_bg.unwrap_or(window_bg);
+    let default_text = if is_light(view_bg) {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    };
     Some(KdeColors {
-        view_bg: view_bg.unwrap_or(window_bg),
-        text: text.unwrap_or(Color32::WHITE),
+        view_bg,
+        text: text.unwrap_or(default_text),
         accent: accent?,
+        accent_text,
         button_bg: button_bg.unwrap_or(window_bg),
         window_bg,
     })
+}
+
+/// True for a light color (relative luminance above one half).
+pub(crate) fn is_light(c: Color32) -> bool {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b()) > 0.5
 }
 
 /// Corner rounding and spacing, the same for every color scheme.
@@ -78,26 +104,48 @@ pub(crate) fn apply_structural_style(ctx: &egui::Context) {
 /// Applies the style, and KDE's colors when available (else egui's own).
 pub(crate) fn apply_theme(ctx: &egui::Context) {
     apply_structural_style(ctx);
-    let Some(kde) = read_kde_colors() else {
-        return;
+    if let Some(kde) = read_kde_colors() {
+        ctx.set_visuals(kde_visuals(&kde));
+    }
+}
+
+/// egui's look in KDE's colors: its light or dark style (whichever matches
+/// the scheme's background), recolored.
+pub(crate) fn kde_visuals(kde: &KdeColors) -> egui::Visuals {
+    let light = is_light(kde.view_bg);
+    let mut visuals = if light {
+        egui::Visuals::light()
+    } else {
+        egui::Visuals::dark()
     };
-    let mut visuals = egui::Visuals::dark();
     visuals.override_text_color = Some(kde.text);
     visuals.panel_fill = kde.view_bg;
     visuals.window_fill = kde.window_bg;
-    // The empty part of progress bars, sliders and text fields: lighter
-    // than the panel so it stands out.
-    visuals.extreme_bg_color = gamma_lighten(kde.view_bg, 0.55);
-    visuals.faint_bg_color = kde.window_bg.gamma_multiply(1.1);
+    // The empty part of progress bars, sliders and text fields stands out
+    // from the panel: darker on a light scheme, lighter on a dark one.
+    visuals.extreme_bg_color = if light {
+        kde.view_bg.gamma_multiply(0.92)
+    } else {
+        gamma_lighten(kde.view_bg, 0.55)
+    };
+    let shade = |c: Color32, amount: f32| {
+        if light {
+            c.gamma_multiply(1.0 - amount)
+        } else {
+            c.gamma_multiply(1.0 + amount)
+        }
+    };
+    visuals.faint_bg_color = shade(kde.window_bg, 0.1);
     visuals.hyperlink_color = kde.accent;
     visuals.selection.bg_fill = kde.accent;
-    visuals.selection.stroke.color = kde.text;
+    visuals.selection.stroke.color = kde.accent_text.unwrap_or(kde.text);
     visuals.widgets.inactive.bg_fill = kde.button_bg;
     visuals.widgets.inactive.weak_bg_fill = kde.button_bg;
-    visuals.widgets.hovered.bg_fill = kde.button_bg.gamma_multiply(1.25);
+    visuals.widgets.hovered.bg_fill = shade(kde.button_bg, 0.25);
+    visuals.widgets.hovered.weak_bg_fill = shade(kde.button_bg, 0.15);
     visuals.widgets.active.bg_fill = kde.accent;
     visuals.widgets.noninteractive.bg_fill = kde.window_bg;
-    ctx.set_visuals(visuals);
+    visuals
 }
 
 /// A system font file (and face index, for collections) matching the
@@ -152,6 +200,50 @@ pub(crate) fn is_hangul(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Contrast ratio (1 to 21) between two colors, as in WCAG.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let lin = |v: u8| {
+                let v = v as f32 / 255.0;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    const BREEZE_LIGHT: &str = "[Colors:Button]\nBackgroundNormal=252,252,252\n[Colors:Selection]\n\
+        BackgroundNormal=61,174,233\nForegroundNormal=255,255,255\n[Colors:View]\nBackgroundNormal=255,255,255\n\
+        [Colors:Window]\nBackgroundNormal=239,240,241\nForegroundNormal=35,38,41\n";
+    const BREEZE_DARK: &str = "[Colors:Button]\nBackgroundNormal=41,44,48\n[Colors:Selection]\n\
+        BackgroundNormal=61,174,233\nForegroundNormal=252,252,252\n[Colors:View]\nBackgroundNormal=20,22,24\n\
+        [Colors:Window]\nBackgroundNormal=32,35,38\nForegroundNormal=252,252,252\n";
+
+    /// Light and dark schemes both give readable text, strong text and
+    /// selected text.
+    #[test]
+    fn kde_schemes_stay_readable() {
+        for (scheme, light) in [(BREEZE_LIGHT, true), (BREEZE_DARK, false)] {
+            let v = kde_visuals(&parse_kde_colors(scheme).unwrap());
+            assert_eq!(v.dark_mode, !light);
+            assert!(contrast(v.text_color(), v.panel_fill) > 7.0);
+            assert!(
+                contrast(v.strong_text_color(), v.panel_fill) > 7.0,
+                "strong text, light={light}"
+            );
+            assert!(
+                contrast(v.weak_text_color(), v.panel_fill) > 2.5,
+                "weak text, light={light}"
+            );
+            assert!(contrast(v.selection.stroke.color, v.selection.bg_fill) > 2.0);
+        }
+    }
 
     #[test]
     fn cjk_names_have_glyphs() {

@@ -326,6 +326,17 @@ pub(crate) fn gamma_lighten(c: Color32, gamma: f32) -> Color32 {
     Color32::from_rgb(f(c.r()), f(c.g()), f(c.b()))
 }
 
+/// Color of the free-space slice: the panel background, lightened by
+/// `gamma` on a dark theme and darkened by as much on a light one.
+pub(crate) fn free_space_color(visuals: &egui::Visuals, gamma: f32) -> Color32 {
+    let gamma = if visuals.dark_mode {
+        gamma
+    } else {
+        1.0 / gamma.max(0.01)
+    };
+    gamma_lighten(visuals.panel_fill, gamma)
+}
+
 /// A slice's color: its top-level slice's hue, darker on outer rings.
 pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Settings) -> Color32 {
     if seg.is_other {
@@ -337,13 +348,15 @@ pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Setti
     hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
 }
 
-/// Folder name and size in the center hub, wrapped to fit inside it.
+/// Folder name and size in the center hub, in `color`, wrapped to fit
+/// inside it.
 pub(crate) fn draw_hub_text(
     painter: &egui::Painter,
     center: Pos2,
     hub_radius: f32,
     name: &str,
     size: u64,
+    color: Color32,
 ) {
     // About the width of a rectangle inside the circle, with a margin.
     let wrap_width = (hub_radius * 1.3).max(24.0);
@@ -352,7 +365,7 @@ pub(crate) fn draw_hub_text(
     let name_job = egui::text::LayoutJob::simple(
         display_name.to_string(),
         egui::FontId::proportional(14.0),
-        Color32::WHITE,
+        color,
         wrap_width,
     );
     let name_galley = painter.layout_job(name_job);
@@ -360,7 +373,7 @@ pub(crate) fn draw_hub_text(
     let size_job = egui::text::LayoutJob::simple(
         human_size(size),
         egui::FontId::proportional(18.0),
-        Color32::WHITE,
+        color,
         wrap_width,
     );
     let size_galley = painter.layout_job(size_job);
@@ -370,13 +383,13 @@ pub(crate) fn draw_hub_text(
     let top = center.y - total_height / 2.0;
 
     let name_pos = Pos2::new(center.x - name_galley.size().x / 2.0, top);
-    painter.galley(name_pos, name_galley.clone(), Color32::WHITE);
+    painter.galley(name_pos, name_galley.clone(), color);
 
     let size_pos = Pos2::new(
         center.x - size_galley.size().x / 2.0,
         top + name_galley.size().y + gap,
     );
-    painter.galley(size_pos, size_galley.clone(), Color32::WHITE);
+    painter.galley(size_pos, size_galley.clone(), color);
 }
 
 /// Inner and outer radius of ring `ring`.
