@@ -27,10 +27,14 @@ pub(crate) fn folder_stats_ui(ui: &mut egui::Ui, n: &Node) {
     ui.label(trf("STATS_PERMS", &[&format_perms(n.mode)]));
 }
 
-
 /// A clickable column header. Clicking the sorted column reverses it;
 /// clicking another sorts by it, largest first (A–Z for names).
-pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn, state: &mut SortState) -> egui::Response {
+pub(crate) fn sortable_header(
+    ui: &mut egui::Ui,
+    label: &str,
+    column: SortColumn,
+    state: &mut SortState,
+) -> egui::Response {
     let is_active = state.column == column;
     // Label and direction chevron are painted over an empty button. Every
     // header reserves room for the chevron, so widths don't jump when the
@@ -43,7 +47,10 @@ pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn
     let pad = ui.spacing().button_padding;
     let chevron_w = galley.size().y * 0.55;
     let gap = pad.x * 0.8;
-    let size = Vec2::new(pad.x * 2.0 + galley.size().x + gap + chevron_w, (galley.size().y + pad.y * 2.0).max(ui.spacing().interact_size.y));
+    let size = Vec2::new(
+        pad.x * 2.0 + galley.size().x + gap + chevron_w,
+        (galley.size().y + pad.y * 2.0).max(ui.spacing().interact_size.y),
+    );
     let resp = ui.add(egui::Button::new("").min_size(size));
     // The name screen readers announce, with the sort direction if sorted.
     let name = match (is_active, state.ascending) {
@@ -241,56 +248,53 @@ pub(crate) fn details_grid(
     user_cache: &mut HashMap<u32, String>,
     group_cache: &mut HashMap<u32, String>,
 ) {
-    egui::Grid::new(id)
-        .num_columns(2)
-        .spacing([12.0, 4.0])
-        .show(ui, |ui| {
-            ui.label(if h.is_free { tr("HOVER_AVAILABLE") } else { tr("HOVER_SIZE") });
-            ui.label(human_size(h.size));
+    egui::Grid::new(id).num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+        ui.label(if h.is_free { tr("HOVER_AVAILABLE") } else { tr("HOVER_SIZE") });
+        ui.label(human_size(h.size));
+        ui.end_row();
+
+        // File count: shown for folders and "other" only.
+        if h.is_dir {
+            ui.label(tr("HOVER_FILES"));
+            ui.label(format_count(h.file_count));
             ui.end_row();
+        }
 
-            // File count: shown for folders and "other" only.
-            if h.is_dir {
-                ui.label(tr("HOVER_FILES"));
-                ui.label(format_count(h.file_count));
+        if let Some(m) = h.mode {
+            ui.label(tr("HOVER_PERMS"));
+            ui.label(format_perms(m));
+            ui.end_row();
+            // Symbolic link: where it points (not counted in sizes).
+            if m & 0o170000 == 0o120000 {
+                ui.label(tr("HOVER_LINK"));
+                ui.label(match std::fs::read_link(&h.path) {
+                    Ok(target) => trf("HOVER_LINK_TARGET", &[&show_path(&target)]),
+                    Err(_) => tr("HOVER_LINK_UNREADABLE"),
+                });
                 ui.end_row();
             }
-
-            if let Some(m) = h.mode {
-                ui.label(tr("HOVER_PERMS"));
-                ui.label(format_perms(m));
-                ui.end_row();
-                // Symbolic link: where it points (not counted in sizes).
-                if m & 0o170000 == 0o120000 {
-                    ui.label(tr("HOVER_LINK"));
-                    ui.label(match std::fs::read_link(&h.path) {
-                        Ok(target) => trf("HOVER_LINK_TARGET", &[&show_path(&target)]),
-                        Err(_) => tr("HOVER_LINK_UNREADABLE"),
-                    });
-                    ui.end_row();
-                }
-            }
-            if let Some(mt) = h.mtime {
-                ui.label(tr("HOVER_MODIFIED"));
-                ui.label(format_epoch(mt));
-                ui.end_row();
-            }
-            if let Some(ct) = h.ctime {
-                ui.label(tr("HOVER_CHANGED"));
-                ui.label(format_epoch(ct));
-                ui.end_row();
-            }
-            if let (Some(uid), Some(gid)) = (h.uid, h.gid) {
-                ui.label(tr("HOVER_OWNER"));
-                ui.label(format_owner(uid, gid, user_cache, group_cache));
-                ui.end_row();
-            }
-            if let Some(mime) = mime {
-                ui.label(tr("HOVER_TYPE"));
-                ui.label(mime);
-                ui.end_row();
-            }
-        });
+        }
+        if let Some(mt) = h.mtime {
+            ui.label(tr("HOVER_MODIFIED"));
+            ui.label(format_epoch(mt));
+            ui.end_row();
+        }
+        if let Some(ct) = h.ctime {
+            ui.label(tr("HOVER_CHANGED"));
+            ui.label(format_epoch(ct));
+            ui.end_row();
+        }
+        if let (Some(uid), Some(gid)) = (h.uid, h.gid) {
+            ui.label(tr("HOVER_OWNER"));
+            ui.label(format_owner(uid, gid, user_cache, group_cache));
+            ui.end_row();
+        }
+        if let Some(mime) = mime {
+            ui.label(tr("HOVER_TYPE"));
+            ui.label(mime);
+            ui.end_row();
+        }
+    });
 }
 
 /// `text` cut to fit `width` by replacing its middle with "…", so both the
@@ -299,7 +303,8 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
     // Cut very long texts first; no line fits more than a few hundred
     // characters.
     let text = &shorten_middle(text, 600);
-    let fits = |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) <= width;
+    let fits =
+        |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) <= width;
     if fits(text) {
         return text.to_string();
     }

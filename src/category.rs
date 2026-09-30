@@ -111,7 +111,10 @@ impl CategoryModel {
                     Some(Value::Array(items)) => items
                         .iter()
                         .filter_map(|v| {
-                            let s = v.as_str().map(|s| s.trim().trim_start_matches('.').to_lowercase()).filter(|s| !s.is_empty());
+                            let s = v
+                                .as_str()
+                                .map(|s| s.trim().trim_start_matches('.').to_lowercase())
+                                .filter(|s| !s.is_empty());
                             if s.is_none() {
                                 problems.push(trf("ERR_CATEGORIES_ENTRY", &[&at, key, &v.to_string()]));
                             }
@@ -126,7 +129,9 @@ impl CategoryModel {
             };
             for ext in strings("extensions", &mut problems) {
                 match model.by_ext.get(&ext) {
-                    Some(&first) => problems.push(trf("ERR_CATEGORIES_TWICE", &[&format!(".{ext}"), &tr(&model.names[first])])),
+                    Some(&first) => {
+                        problems.push(trf("ERR_CATEGORIES_TWICE", &[&format!(".{ext}"), &tr(&model.names[first])]))
+                    }
                     None => {
                         model.by_ext.insert(ext, idx);
                     }
@@ -146,7 +151,8 @@ impl CategoryModel {
         let path = config_dir().join("categories.json");
         let text = match std::fs::metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let written = std::fs::create_dir_all(config_dir()).and_then(|_| std::fs::write(&path, DEFAULT_CATEGORIES));
+                let written =
+                    std::fs::create_dir_all(config_dir()).and_then(|_| std::fs::write(&path, DEFAULT_CATEGORIES));
                 let problem = written.err().map(|e| trf("ERR_CATEGORIES_SAVE", &[&show_path(&path), &e.to_string()]));
                 return (Self::defaults(), problem);
             }
@@ -157,7 +163,9 @@ impl CategoryModel {
         };
         match text.and_then(|t| Self::parse(&t)) {
             Ok((model, problems)) if problems.is_empty() => (model, None),
-            Ok((model, problems)) => (model, Some(trf("ERR_CATEGORIES_PROBLEMS", &[&show_path(&path), &problems.join("; ")]))),
+            Ok((model, problems)) => {
+                (model, Some(trf("ERR_CATEGORIES_PROBLEMS", &[&show_path(&path), &problems.join("; ")])))
+            }
             Err(e) => (Self::defaults(), Some(trf("ERR_CATEGORIES_FILE", &[&show_path(&path), &e]))),
         }
     }
@@ -307,14 +315,24 @@ mod tests {
     #[test]
     fn breakdown_sums_and_orders() {
         let m = CategoryModel::defaults();
-        let tree = test_node("/r", 0, true, vec![
-            test_node("/r/a.mkv", 100, false, vec![]),
-            test_node("/r/d", 0, true, vec![
-                test_node("/r/d/b.mp4", 50, false, vec![]),
-                test_node("/r/d/c.pdf", 200, false, vec![]),
-                test_node("/r/d/README", 999, false, vec![]),
-            ]),
-        ]);
+        let tree = test_node(
+            "/r",
+            0,
+            true,
+            vec![
+                test_node("/r/a.mkv", 100, false, vec![]),
+                test_node(
+                    "/r/d",
+                    0,
+                    true,
+                    vec![
+                        test_node("/r/d/b.mp4", 50, false, vec![]),
+                        test_node("/r/d/c.pdf", 200, false, vec![]),
+                        test_node("/r/d/README", 999, false, vec![]),
+                    ],
+                ),
+            ],
+        );
         let rows = category_breakdown(&tree, &m);
         let b: Vec<(String, u64, u64)> = rows.iter().map(|r| (m.label(r.cat), r.size, r.files)).collect();
         assert_eq!(b, vec![("Documents".into(), 200, 1), ("Video".into(), 150, 2), ("Other".into(), 999, 1)]);
@@ -327,14 +345,21 @@ mod tests {
     fn category_filter_keeps_only_its_files() {
         let m = CategoryModel::defaults();
         let video = m.of_name("x.mkv");
-        let tree = test_node("/r", 0, true, vec![
-            test_node("/r/a.mkv", 100, false, vec![]),
-            test_node("/r/docs", 0, true, vec![test_node("/r/docs/c.pdf", 200, false, vec![])]),
-            test_node("/r/d", 0, true, vec![
-                test_node("/r/d/b.srt", 5, false, vec![]),
-                test_node("/r/d/n.txt", 7, false, vec![]),
-            ]),
-        ]);
+        let tree = test_node(
+            "/r",
+            0,
+            true,
+            vec![
+                test_node("/r/a.mkv", 100, false, vec![]),
+                test_node("/r/docs", 0, true, vec![test_node("/r/docs/c.pdf", 200, false, vec![])]),
+                test_node(
+                    "/r/d",
+                    0,
+                    true,
+                    vec![test_node("/r/d/b.srt", 5, false, vec![]), test_node("/r/d/n.txt", 7, false, vec![])],
+                ),
+            ],
+        );
         let only = filter_tree_by(&tree, &|n: &Node| m.of_name(&n.name) == video).unwrap();
         assert_eq!((only.size, only.file_count), (105, 2));
         let names: Vec<&str> = only.children.iter().map(|c| c.name.as_str()).collect();

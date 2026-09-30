@@ -246,7 +246,6 @@ enum Cell {
 }
 
 impl DiskScanApp {
-
     /// The table's layout, as saved in settings.json.
     pub(crate) fn table_prefs(&self) -> TablePrefs {
         TablePrefs {
@@ -272,7 +271,6 @@ impl DiskScanApp {
         self.table.dirs_first = p.dirs_first;
     }
 
-
     /// Start of every frame: keeps keyboard focus off the table's buttons,
     /// so a clicked header doesn't also react to Enter or Space.
     pub(crate) fn table_frame_start(&mut self, ctx: &egui::Context) {
@@ -284,7 +282,6 @@ impl DiskScanApp {
             });
         }
     }
-
 
     /// Draws the contents table of `view_node`, no taller than `max_height`.
     pub(crate) fn table_ui(&mut self, ui: &mut egui::Ui, view_node: &Node, max_height: f32) {
@@ -312,7 +309,8 @@ impl DiskScanApp {
         let n_rows = order.idx.len();
         let shown_size = order.shown_size;
         // The cursor goes to the first row when it isn't in this folder.
-        let found = self.table.cursor.as_ref().and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
+        let found =
+            self.table.cursor.as_ref().and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
         let cursor_row = match found {
             Some(i) => Some(i),
             None => {
@@ -334,7 +332,11 @@ impl DiskScanApp {
                 ui.weak(format!("· {}", trf("TABLE_TAG_DOTFILES_HIDDEN", &[&human_size(order.dotfile_size)])));
             }
             if !self.table.marked.is_empty() {
-                let size: u64 = (0..n_rows).map(row).filter(|c| self.table.marked.contains(&c.path)).map(|c| c.size).fold(0u64, u64::saturating_add);
+                let size: u64 = (0..n_rows)
+                    .map(row)
+                    .filter(|c| self.table.marked.contains(&c.path))
+                    .map(|c| c.size)
+                    .fold(0u64, u64::saturating_add);
                 ui.strong(format!(
                     "· {}",
                     trf("TABLE_TAG_MARKED", &[&format_count(self.table.marked.len() as u64), &human_size(size)])
@@ -376,7 +378,8 @@ impl DiskScanApp {
         ui.add_space(4.0);
 
         let mut cells = vec![Cell::Mark];
-        cells.extend(self.table.col_order.iter().filter(|c| !self.table.hidden_cols.contains(c)).map(|c| Cell::Opt(*c)));
+        cells
+            .extend(self.table.col_order.iter().filter(|c| !self.table.hidden_cols.contains(c)).map(|c| Cell::Opt(*c)));
         cells.push(Cell::Name);
 
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
@@ -505,7 +508,8 @@ impl DiskScanApp {
                             }
                             Cell::Opt(TableCol::Bar) => {
                                 // Share of the folder, matching the % column.
-                                let (r, _) = ui.allocate_exact_size(Vec2::new(86.0, row_h * 0.55), egui::Sense::hover());
+                                let (r, _) =
+                                    ui.allocate_exact_size(Vec2::new(86.0, row_h * 0.55), egui::Sense::hover());
                                 let frac = c.size as f32 / total as f32;
                                 if selected {
                                     // A dark track under the fill.
@@ -654,7 +658,11 @@ impl DiskScanApp {
         }
         RowOrder {
             shown_size: idx.iter().map(|&i| children[i].size).fold(0u64, u64::saturating_add),
-            dotfile_size: children.iter().filter(|c| c.name.starts_with('.')).map(|c| c.size).fold(0u64, u64::saturating_add),
+            dotfile_size: children
+                .iter()
+                .filter(|c| c.name.starts_with('.'))
+                .map(|c| c.size)
+                .fold(0u64, u64::saturating_add),
             idx,
             key,
         }
@@ -748,7 +756,6 @@ impl DiskScanApp {
         }
     }
 
-
     /// Table keys, once per frame after drawing.
     pub(crate) fn table_keys(&mut self, ctx: &egui::Context) {
         if self.table.show_help {
@@ -766,19 +773,11 @@ impl DiskScanApp {
         let (arrow, named, typed) = ctx.input(|i| {
             let plain = !i.modifiers.command && !i.modifiers.alt;
             let arrow = arrow_nav(i);
-            let named: Vec<Key> = [
-                Key::PageUp,
-                Key::PageDown,
-                Key::Home,
-                Key::End,
-                Key::Enter,
-                Key::Backspace,
-                Key::Escape,
-                Key::Space,
-            ]
-            .into_iter()
-            .filter(|k| plain && i.key_pressed(*k))
-            .collect();
+            let named: Vec<Key> =
+                [Key::PageUp, Key::PageDown, Key::Home, Key::End, Key::Enter, Key::Backspace, Key::Escape, Key::Space]
+                    .into_iter()
+                    .filter(|k| plain && i.key_pressed(*k))
+                    .collect();
             // Letters and symbols come from text input, so they follow the keyboard
             // layout, and Shift gives the uppercase commands.
             let typed: String = i
@@ -856,7 +855,6 @@ impl DiskScanApp {
             }
         }
     }
-
 
     /// The folder shown and its children's indices in display order; None if
     /// the tree changed since the rows were computed.

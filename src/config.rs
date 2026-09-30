@@ -91,7 +91,12 @@ fn read_settings() -> Result<Option<String>, Unreadable> {
 /// `default`: a field whose value doesn't fit keeps its default and is
 /// listed in `dropped` as "section.field". For a list, only the entries that
 /// don't fit are dropped.
-fn lenient<T: Serialize + DeserializeOwned>(default: T, file: Option<&Value>, section: &str, dropped: &mut Vec<String>) -> T {
+fn lenient<T: Serialize + DeserializeOwned>(
+    default: T,
+    file: Option<&Value>,
+    section: &str,
+    dropped: &mut Vec<String>,
+) -> T {
     let Some(file) = file else { return default };
     let Value::Object(fields) = file else {
         dropped.push(section.to_string());
@@ -312,7 +317,8 @@ mod tests {
             let (_, needs_save, problem) = Config::load();
             assert!(!needs_save && problem.is_some());
             assert!(Config::default().save().is_err());
-            let leftovers: Vec<_> = std::fs::read_dir(config_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+            let leftovers: Vec<_> =
+                std::fs::read_dir(config_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
             assert_eq!(leftovers, vec![std::ffi::OsString::from("settings.json")]);
         });
     }

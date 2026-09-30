@@ -135,20 +135,13 @@ impl DiskScanApp {
                     {
                         start_at = Some(home.clone());
                     }
-                    if ui
-                        .add_enabled(can_reload, egui::Button::new("⟳"))
-                        .named(&tr("TOOLBAR_RESCAN"))
-                        .clicked()
-                    {
+                    if ui.add_enabled(can_reload, egui::Button::new("⟳")).named(&tr("TOOLBAR_RESCAN")).clicked() {
                         rescan = true;
                     }
 
                     // The path field follows navigation, except while being typed in.
                     if !path_input_was_focused {
-                        let current = current_path
-                            .as_ref()
-                            .map(|p| show_path(p))
-                            .unwrap_or_default();
+                        let current = current_path.as_ref().map(|p| show_path(p)).unwrap_or_default();
                         if path_input != current {
                             path_input = current;
                         }
@@ -184,7 +177,8 @@ impl DiskScanApp {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 2.0;
                                     let last = crumbs.len().saturating_sub(1);
-                                    let root_first = crumbs.first().is_some_and(|c| c.as_ref().is_some_and(|(l, _)| l == "/"));
+                                    let root_first =
+                                        crumbs.first().is_some_and(|c| c.as_ref().is_some_and(|(l, _)| l == "/"));
                                     for (i, crumb) in crumbs.iter().enumerate() {
                                         if i > 0 && !(i == 1 && root_first) {
                                             ui.weak("/");
@@ -193,8 +187,12 @@ impl DiskScanApp {
                                             ui.weak("…");
                                             continue;
                                         };
-                                        let btn = egui::Button::new(if i == last { egui::RichText::new(label).strong() } else { egui::RichText::new(label) })
-                                            .frame(false);
+                                        let btn = egui::Button::new(if i == last {
+                                            egui::RichText::new(label).strong()
+                                        } else {
+                                            egui::RichText::new(label)
+                                        })
+                                        .frame(false);
                                         if ui.add(btn).on_hover_text(short_path(path)).clicked() && i != last {
                                             crumb_click = Some(path.clone());
                                         }
@@ -203,7 +201,11 @@ impl DiskScanApp {
                             });
                         // A clickable label: no button padding.
                         let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
-                        if pencil.on_hover_cursor(egui::CursorIcon::PointingHand).named(&tr("TOOLBAR_PATH_EDIT_TOOLTIP")).clicked() {
+                        if pencil
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .named(&tr("TOOLBAR_PATH_EDIT_TOOLTIP"))
+                            .clicked()
+                        {
                             start_path_edit = true;
                         }
                     }
@@ -211,16 +213,18 @@ impl DiskScanApp {
                 // Right to left: settings, filters, then empty trash and the view
                 // buttons.
                 |ui| {
-                    if ui
-                        .add(egui::Button::new("⚙").selected(settings_open))
-                        .named(&tr("SETTINGS_TITLE"))
-                        .clicked()
-                    {
+                    if ui.add(egui::Button::new("⚙").selected(settings_open)).named(&tr("SETTINGS_TITLE")).clicked() {
                         settings_toggled = true;
                     }
                     // Lit while the panel is open or a filter is active.
-                    if icon_toolbar_button(ui, filters_open || filter_active, true, &if filter_active { tr("TOOLBAR_FILTERS_ACTIVE") } else { tr("FILTER_TITLE") }, draw_filter_icon)
-                        .clicked()
+                    if icon_toolbar_button(
+                        ui,
+                        filters_open || filter_active,
+                        true,
+                        &if filter_active { tr("TOOLBAR_FILTERS_ACTIVE") } else { tr("FILTER_TITLE") },
+                        draw_filter_icon,
+                    )
+                    .clicked()
                     {
                         filters_toggled = true;
                     }
@@ -229,13 +233,11 @@ impl DiskScanApp {
                     if ui.button("🗑").named(&tr("TOOLBAR_EMPTY_TRASH")).clicked() {
                         empty_bin = true;
                     }
-                    if icon_toolbar_button(ui, summary_on, true, &tr("TOOLBAR_SUMMARY_VIEW"), draw_table_icon)
-                        .clicked()
+                    if icon_toolbar_button(ui, summary_on, true, &tr("TOOLBAR_SUMMARY_VIEW"), draw_table_icon).clicked()
                     {
                         set_summary = Some(true);
                     }
-                    if icon_toolbar_button(ui, !summary_on, true, &tr("TOOLBAR_CHART_VIEW"), draw_chart_icon)
-                        .clicked()
+                    if icon_toolbar_button(ui, !summary_on, true, &tr("TOOLBAR_CHART_VIEW"), draw_chart_icon).clicked()
                     {
                         set_summary = Some(false);
                     }
@@ -371,14 +373,23 @@ impl DiskScanApp {
                     // outline with the reason on hover. True when Enter was pressed.
                     let mut invalid_fields = 0;
                     let error_color = ui.visuals().error_fg_color;
-                    let mut field = |ui: &mut egui::Ui, value: &mut String, hint: &str, check: &dyn Fn(&str) -> Result<(), String>| -> bool {
+                    let mut field = |ui: &mut egui::Ui,
+                                     value: &mut String,
+                                     hint: &str,
+                                     check: &dyn Fn(&str) -> Result<(), String>|
+                     -> bool {
                         let size = Vec2::new(130.0, ui.spacing().interact_size.y);
                         let mut r = ui.add_sized(size, egui::TextEdit::singleline(value).hint_text(hint));
                         if value.trim().is_empty() {
                             // empty: no limit
                         } else if let Err(e) = check(value) {
                             invalid_fields += 1;
-                            ui.painter().rect_stroke(r.rect, 2.0, egui::Stroke::new(1.5, error_color), egui::StrokeKind::Outside);
+                            ui.painter().rect_stroke(
+                                r.rect,
+                                2.0,
+                                egui::Stroke::new(1.5, error_color),
+                                egui::StrokeKind::Outside,
+                            );
                             r = r.on_hover_text(e);
                         }
                         r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -391,7 +402,11 @@ impl DiskScanApp {
                     // The Aa toggle first; the name field fills the room left.
                     let r = ui
                         .horizontal(|ui| {
-                            let case_tip = if f.case_sensitive { tr("FILTER_CASE_SENSITIVE") } else { tr("FILTER_CASE_INSENSITIVE") };
+                            let case_tip = if f.case_sensitive {
+                                tr("FILTER_CASE_SENSITIVE")
+                            } else {
+                                tr("FILTER_CASE_INSENSITIVE")
+                            };
                             if ui
                                 .add(egui::Button::new("Aa").selected(f.case_sensitive))
                                 .on_hover_text(case_tip)
@@ -442,7 +457,13 @@ impl DiskScanApp {
                         if ui.add_enabled(dirty && valid, egui::Button::new(tr("FILTER_APPLY"))).clicked() {
                             submitted = true;
                         }
-                        if ui.add_enabled(self.filter.is_some() || self.filter_form != FilterForm::default(), egui::Button::new(tr("FILTER_CLEAR"))).clicked() {
+                        if ui
+                            .add_enabled(
+                                self.filter.is_some() || self.filter_form != FilterForm::default(),
+                                egui::Button::new(tr("FILTER_CLEAR")),
+                            )
+                            .clicked()
+                        {
                             clear = true;
                         }
                     });
@@ -529,10 +550,7 @@ impl DiskScanApp {
                         );
                         ui.checkbox(&mut s.unlimited_slices, tr("SETTINGS_UNLIMITED_SLICES"))
                             .on_hover_text(tr("SETTINGS_UNLIMITED_SLICES_HOVER"));
-                        ui.add(
-                            egui::Slider::new(&mut s.hub_radius_frac, Settings::HUB)
-                                .text(tr("SETTINGS_HUB_SIZE")),
-                        );
+                        ui.add(egui::Slider::new(&mut s.hub_radius_frac, Settings::HUB).text(tr("SETTINGS_HUB_SIZE")));
 
                         ui.separator();
                         ui.label(tr("SETTINGS_COLORS"));
@@ -549,13 +567,9 @@ impl DiskScanApp {
                             egui::Slider::new(&mut s.ring_val_floor, Settings::RING_VAL_FLOOR)
                                 .text(tr("SETTINGS_BRIGHT_FLOOR")),
                         );
+                        ui.add(egui::Slider::new(&mut s.other_sat, Settings::OTHER_SAT).text(tr("SETTINGS_OTHER_SAT")));
                         ui.add(
-                            egui::Slider::new(&mut s.other_sat, Settings::OTHER_SAT)
-                                .text(tr("SETTINGS_OTHER_SAT")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.other_val, Settings::OTHER_VAL)
-                                .text(tr("SETTINGS_OTHER_BRIGHT")),
+                            egui::Slider::new(&mut s.other_val, Settings::OTHER_VAL).text(tr("SETTINGS_OTHER_BRIGHT")),
                         );
                         ui.add(
                             egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
@@ -568,10 +582,7 @@ impl DiskScanApp {
                             egui::Slider::new(&mut s.stroke_width, Settings::STROKE_WIDTH)
                                 .text(tr("SETTINGS_BORDER_THICKNESS")),
                         );
-                        ui.add(
-                            egui::Slider::new(&mut s.stroke_alpha, 0..=255)
-                                .text(tr("SETTINGS_BORDER_DARKNESS")),
-                        );
+                        ui.add(egui::Slider::new(&mut s.stroke_alpha, 0..=255).text(tr("SETTINGS_BORDER_DARKNESS")));
                         ui.add(
                             egui::Slider::new(&mut s.tess_px_per_step, Settings::TESS)
                                 .text(tr("SETTINGS_CURVE_SMOOTH")),
@@ -613,15 +624,13 @@ impl DiskScanApp {
                             .find(|(c, _)| *c == current)
                             .map(|(_, n)| n.clone())
                             .unwrap_or_else(|| current.clone());
-                        egui::ComboBox::from_id_salt("lang_combo")
-                            .selected_text(current_name)
-                            .show_ui(ui, |ui| {
-                                for (code, name) in &langs {
-                                    if ui.selectable_label(*code == current, name).clicked() {
-                                        set_language(code);
-                                    }
+                        egui::ComboBox::from_id_salt("lang_combo").selected_text(current_name).show_ui(ui, |ui| {
+                            for (code, name) in &langs {
+                                if ui.selectable_label(*code == current, name).clicked() {
+                                    set_language(code);
                                 }
-                            });
+                            }
+                        });
                     });
                 });
         }
@@ -729,7 +738,8 @@ impl DiskScanApp {
     /// Table view while scanning: the progress bar, the category bar and the
     /// contents table so far, refreshed at most every 250 ms.
     fn live_table_ui(&mut self, ui: &mut egui::Ui) {
-        if self.partial_gen != self.live_seen && self.live_refreshed.elapsed() >= std::time::Duration::from_millis(250) {
+        if self.partial_gen != self.live_seen && self.live_refreshed.elapsed() >= std::time::Duration::from_millis(250)
+        {
             self.live_gen += 1;
             self.live_seen = self.partial_gen;
             self.live_refreshed = Instant::now();
@@ -765,8 +775,7 @@ impl DiskScanApp {
         let status_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
         let content_height = (avail.y - status_strip_height).max(50.0);
 
-        let (response, painter) =
-            ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::drag());
+        let (response, painter) = ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::drag());
         let side = response.rect.width().min(response.rect.height());
         let (center, max_radius) = self.chart_view(&ctx, &response);
         let hub_radius = max_radius * self.settings.hub_radius_frac;
@@ -860,7 +869,13 @@ impl DiskScanApp {
         let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height.max(80.0)), egui::Sense::hover());
         if rows.is_empty() || total == 0 {
-            ui.painter().text(rect.left_top(), egui::Align2::LEFT_TOP, tr("CAT_NO_FILES"), egui::FontId::default(), ui.visuals().weak_text_color());
+            ui.painter().text(
+                rect.left_top(),
+                egui::Align2::LEFT_TOP,
+                tr("CAT_NO_FILES"),
+                egui::FontId::default(),
+                ui.visuals().weak_text_color(),
+            );
         } else {
             let painter = ui.painter_at(rect);
             let dark = ui.visuals().dark_mode;
@@ -903,7 +918,10 @@ impl DiskScanApp {
             for (i, row) in rows.iter().enumerate() {
                 let (y0, y1) = spans[i];
                 let seg = egui::Rect::from_min_max(Pos2::new(rect.left(), y0), Pos2::new(rect.left() + bar_w, y1));
-                let label_rect = egui::Rect::from_min_size(Pos2::new(label_x - 6.0, label_y[i]), Vec2::new(rect.right() - label_x + 6.0, label_h));
+                let label_rect = egui::Rect::from_min_size(
+                    Pos2::new(label_x - 6.0, label_y[i]),
+                    Vec2::new(rect.right() - label_x + 6.0, label_h),
+                );
                 let picked = self.category == Some(row.cat);
                 let dimmed = self.category.is_some() && !picked;
 
@@ -913,9 +931,17 @@ impl DiskScanApp {
                 let hovered = hit.hovered();
 
                 if picked {
-                    painter.rect_filled(label_rect, egui::CornerRadius::same(4), ui.visuals().selection.bg_fill.gamma_multiply(0.5));
+                    painter.rect_filled(
+                        label_rect,
+                        egui::CornerRadius::same(4),
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.5),
+                    );
                 } else if hovered {
-                    painter.rect_filled(label_rect, egui::CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
+                    painter.rect_filled(
+                        label_rect,
+                        egui::CornerRadius::same(4),
+                        ui.visuals().widgets.hovered.weak_bg_fill,
+                    );
                 }
                 let r = 4u8;
                 let radius = egui::CornerRadius {
@@ -927,7 +953,12 @@ impl DiskScanApp {
                 let color = self.cats.color(row.cat, dark);
                 painter.rect_filled(seg, radius, if dimmed { color.gamma_multiply(0.3) } else { color });
                 if hovered || picked {
-                    painter.rect_stroke(seg, radius, egui::Stroke::new(1.5, ui.visuals().strong_text_color()), egui::StrokeKind::Outside);
+                    painter.rect_stroke(
+                        seg,
+                        radius,
+                        egui::Stroke::new(1.5, ui.visuals().strong_text_color()),
+                        egui::StrokeKind::Outside,
+                    );
                 }
 
                 // A short leader from the segment to a label that had to move.
@@ -940,7 +971,13 @@ impl DiskScanApp {
                     painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
                     painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
                 }
-                painter.text(Pos2::new(label_x, label_y[i] + 2.0), egui::Align2::LEFT_TOP, self.cats.label(row.cat), font.clone(), ink);
+                painter.text(
+                    Pos2::new(label_x, label_y[i] + 2.0),
+                    egui::Align2::LEFT_TOP,
+                    self.cats.label(row.cat),
+                    font.clone(),
+                    ink,
+                );
                 let pct = row.size as f64 * 100.0 / total as f64;
                 painter.text(
                     Pos2::new(label_x, label_y[i] + 2.0 + line_h),
@@ -952,12 +989,23 @@ impl DiskScanApp {
 
                 let hit = hit.on_hover_ui(|ui| {
                     ui.strong(self.cats.label(row.cat));
-                    ui.label(format!("{} · {pct:.1}% · {} {}", human_size(row.size), format_count(row.files), tr("CAT_FILES")));
+                    ui.label(format!(
+                        "{} · {pct:.1}% · {} {}",
+                        human_size(row.size),
+                        format_count(row.files),
+                        tr("CAT_FILES")
+                    ));
                     let exts: Vec<String> = row
                         .exts
                         .iter()
                         .take(6)
-                        .map(|(e, sz, _)| format!("{} {}", if e.is_empty() { tr("EXT_NO_EXTENSION") } else { format!(".{e}") }, human_size(*sz)))
+                        .map(|(e, sz, _)| {
+                            format!(
+                                "{} {}",
+                                if e.is_empty() { tr("EXT_NO_EXTENSION") } else { format!(".{e}") },
+                                human_size(*sz)
+                            )
+                        })
                         .collect();
                     ui.weak(exts.join("  ·  "));
                     ui.weak(tr(if picked { "CAT_CLICK_AGAIN" } else { "CAT_CLICK" }));
@@ -977,7 +1025,15 @@ impl DiskScanApp {
     }
 
     /// Draws one slice of the chart in its color.
-    fn draw_segment(&self, painter: &egui::Painter, seg: &Segment, center: Pos2, hub_radius: f32, ring_thickness: f32, free_color: Color32) {
+    fn draw_segment(
+        &self,
+        painter: &egui::Painter,
+        seg: &Segment,
+        center: Pos2,
+        hub_radius: f32,
+        ring_thickness: f32,
+        free_color: Color32,
+    ) {
         let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
         let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
         let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
@@ -1033,11 +1089,8 @@ impl DiskScanApp {
                     }
                     if ang >= seg.start_angle && ang <= seg.end_angle {
                         // "Other" and free space have no node of their own.
-                        let real_node = if seg.is_other || seg.is_free {
-                            None
-                        } else {
-                            Some(get_node(view_node, &seg.idx_path))
-                        };
+                        let real_node =
+                            if seg.is_other || seg.is_free { None } else { Some(get_node(view_node, &seg.idx_path)) };
                         new_hover = Some(HoverInfo {
                             path: if seg.is_free {
                                 PathBuf::from(&seg.name) // "Free space"
@@ -1069,20 +1122,18 @@ impl DiskScanApp {
 
         // Slices the arrow keys move between (all but free space), and the
         // highlighted slice's outline.
-        self.chart_segs = segs
-            .iter()
-            .filter(|s| !s.is_free)
-            .map(|s| (s.idx_path.clone(), s.start_angle))
-            .collect();
+        self.chart_segs = segs.iter().filter(|s| !s.is_free).map(|s| (s.idx_path.clone(), s.start_angle)).collect();
         if let Some(rel) = self.selected_rel()
-            && let Some(seg) = segs.iter().find(|s| !s.is_free && s.idx_path == *rel) {
+            && let Some(seg) = segs.iter().find(|s| !s.is_free && s.idx_path == *rel)
+        {
             let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
             let stroke = egui::Stroke::new(1.5, ui.visuals().strong_text_color().gamma_multiply(0.85));
             draw_arc_outline(painter, center, radii, (seg.start_angle, seg.end_angle), stroke);
         }
 
         if response.clicked()
-            && let Some(p) = pointer {
+            && let Some(p) = pointer
+        {
             let dist = (p - center).length();
             if dist <= hub_radius {
                 if self.view_stack.len() > 1 {
@@ -1126,7 +1177,11 @@ impl DiskScanApp {
                 ui.close();
             }
             if ui.button(tr("MENU_OPEN")).clicked() {
-                let dir = if target.is_dir() { target.clone() } else { target.parent().map(Path::to_path_buf).unwrap_or(target.clone()) };
+                let dir = if target.is_dir() {
+                    target.clone()
+                } else {
+                    target.parent().map(Path::to_path_buf).unwrap_or(target.clone())
+                };
                 let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
                 ui.close();
             }
@@ -1178,10 +1233,9 @@ impl DiskScanApp {
 
             // Keyed by path: egui remembers an area's size per id, and one id for
             // every item would keep the box as wide as the widest seen.
-            egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path))
-                .pivot(align)
-                .fixed_pos(p + offset)
-                .show(&ctx, |ui| {
+            egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path)).pivot(align).fixed_pos(p + offset).show(
+                &ctx,
+                |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if let Some(draw_icon) = icon {
@@ -1212,7 +1266,8 @@ impl DiskScanApp {
                             &mut self.group_cache,
                         );
                     });
-                });
+                },
+            );
         }
     }
 
@@ -1225,9 +1280,13 @@ impl DiskScanApp {
             .fixed_pos(area.right_top() + Vec2::new(-8.0, 8.0))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    for (order, glyph, tip) in [(ChartOrder::Size, "9", "CHART_ORDER_SIZE"), (ChartOrder::Name, "A", "CHART_ORDER_NAME")] {
-                        if icon_toolbar_button(ui, self.chart_order == order, true, &tr(tip), |p, r, c| draw_sort_order_icon(p, r, c, glyph))
-                            .clicked()
+                    for (order, glyph, tip) in
+                        [(ChartOrder::Size, "9", "CHART_ORDER_SIZE"), (ChartOrder::Name, "A", "CHART_ORDER_NAME")]
+                    {
+                        if icon_toolbar_button(ui, self.chart_order == order, true, &tr(tip), |p, r, c| {
+                            draw_sort_order_icon(p, r, c, glyph)
+                        })
+                        .clicked()
                         {
                             self.chart_order = order;
                         }
@@ -1297,7 +1356,8 @@ mod category_bar_tests {
     fn picking_a_category_refilters_after_the_frame() {
         let mut app = DiskScanApp::default();
         app.summary_view = true;
-        let files = |d: &str| (0..30).map(|i| test_node(&format!("/t/{d}/f{i}.xyz"), 10, false, vec![])).collect::<Vec<_>>();
+        let files =
+            |d: &str| (0..30).map(|i| test_node(&format!("/t/{d}/f{i}.xyz"), 10, false, vec![])).collect::<Vec<_>>();
         let mut kids = vec![test_node("/t/a.mkv", 5000, false, vec![]), test_node("/t/b.eml", 50, false, vec![])];
         kids.extend((0..20).map(|i| test_node(&format!("/t/d{i}"), 300, true, files(&format!("d{i}")))));
         app.full_root = Some(Arc::new(test_node("/t", 11050, true, kids)));

@@ -344,7 +344,9 @@ pub(crate) fn natural_key(name: &str) -> Vec<u8> {
                     'þ' => key.extend_from_slice(b"th"),
                     _ => {
                         use unicode_normalization::UnicodeNormalization;
-                        for base in std::iter::once(l).nfd().filter(|b| !unicode_normalization::char::is_combining_mark(*b)) {
+                        for base in
+                            std::iter::once(l).nfd().filter(|b| !unicode_normalization::char::is_combining_mark(*b))
+                        {
                             key.extend_from_slice(base.encode_utf8(&mut buf).as_bytes());
                         }
                     }
@@ -406,11 +408,7 @@ pub(crate) fn io_reason(e: &std::io::Error) -> String {
 
 /// Birth (creation) time in Unix seconds; 0 if unavailable.
 pub(crate) fn birth_secs(m: &std::fs::Metadata) -> i64 {
-    m.created()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    m.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// Everything a scan's worker threads share.
@@ -593,10 +591,8 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         }
     };
 
-    let children: Vec<Node> = entries
-        .par_iter()
-        .map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx))
-        .collect();
+    let children: Vec<Node> =
+        entries.par_iter().map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx)).collect();
 
     let mut children = children;
     children.sort_by_key(|c| std::cmp::Reverse(c.size));
@@ -681,7 +677,12 @@ pub(crate) struct EntryCount {
 /// Counts the entries under `path` that the scan will visit, from folder
 /// listings alone (no per-file stat), so it finishes well ahead of the scan
 /// and gives the progress bar its total.
-pub(crate) fn count_entries(path: &Path, root_dev: u64, found: &std::sync::atomic::AtomicU64, stop: &(dyn Fn() -> bool + Sync)) {
+pub(crate) fn count_entries(
+    path: &Path,
+    root_dev: u64,
+    found: &std::sync::atomic::AtomicU64,
+    stop: &(dyn Fn() -> bool + Sync),
+) {
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
     if stop() {
@@ -855,13 +856,20 @@ mod tests {
 
     #[test]
     fn natural_name_order() {
-        let mut names = vec!["file10", "File2", "file1", ".dotfile", "Beta", "alpha", "b", "Ärger", "a007", "a7", "a07x", "Zed"];
+        let mut names =
+            vec!["file10", "File2", "file1", ".dotfile", "Beta", "alpha", "b", "Ärger", "a007", "a7", "a07x", "Zed"];
         names.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(names, vec![".dotfile", "a007", "a7", "a07x", "alpha", "Ärger", "b", "Beta", "file1", "File2", "file10", "Zed"]);
+        assert_eq!(
+            names,
+            vec![".dotfile", "a007", "a7", "a07x", "alpha", "Ärger", "b", "Beta", "file1", "File2", "file10", "Zed"]
+        );
         assert_eq!(natural_cmp("abc", "abc"), std::cmp::Ordering::Equal);
         let mut accented = vec!["Zed", "émile", "Árbol", "abc", "Ñandú", "emile", "Øre", "nube", "Straße", "strasse"];
         accented.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(accented, vec!["abc", "Árbol", "emile", "émile", "Ñandú", "nube", "Øre", "Straße", "strasse", "Zed"]);
+        assert_eq!(
+            accented,
+            vec!["abc", "Árbol", "emile", "émile", "Ñandú", "nube", "Øre", "Straße", "strasse", "Zed"]
+        );
         assert_eq!(natural_cmp("x9", "x10"), std::cmp::Ordering::Less);
     }
 }

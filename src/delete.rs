@@ -294,7 +294,9 @@ impl DiskScanApp {
                             ui.label(match (&link, *is_dir) {
                                 // Removing a link never touches its target.
                                 (Some(target), _) => trf("DELETE_CONFIRM_LINK", &[&show_path(target)]),
-                                (None, true) => trf("DELETE_CONFIRM_DIR", &[&human_size(*size), &format_count(*file_count)]),
+                                (None, true) => {
+                                    trf("DELETE_CONFIRM_DIR", &[&human_size(*size), &format_count(*file_count)])
+                                }
                                 (None, false) => trf("DELETE_CONFIRM_FILE", &[&human_size(*size)]),
                             });
                         }
@@ -525,7 +527,8 @@ mod tests {
         let locked = test_node("/nonexistent-qa/locked", 0, true, vec![]);
         let other = test_node("/nonexistent-qa/other", 0, true, vec![]);
         app.root = Some(Arc::new(test_node("/nonexistent-qa", 0, true, vec![locked, other])));
-        app.unreadable = vec![PathBuf::from("/nonexistent-qa/locked/secret"), PathBuf::from("/nonexistent-qa/elsewhere")];
+        app.unreadable =
+            vec![PathBuf::from("/nonexistent-qa/locked/secret"), PathBuf::from("/nonexistent-qa/elsewhere")];
         app.ask_delete(vec![PathBuf::from("/nonexistent-qa/locked")]);
         assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 1, .. })));
         app.removal.confirm = None;
@@ -589,8 +592,12 @@ mod tests {
 
         // Categories, filter, clone.
         let cats = CategoryModel::defaults();
-        assert_eq!(category_breakdown(&tree, &cats).iter().find(|r| r.cat == cats.of_name("f.bin")).map(|r| r.files), Some(files));
-        let filter = CompiledFilter::compile(&FilterForm { name: "*.bin".into(), ..Default::default() }).unwrap().unwrap();
+        assert_eq!(
+            category_breakdown(&tree, &cats).iter().find(|r| r.cat == cats.of_name("f.bin")).map(|r| r.files),
+            Some(files)
+        );
+        let filter =
+            CompiledFilter::compile(&FilterForm { name: "*.bin".into(), ..Default::default() }).unwrap().unwrap();
         assert_eq!(filter_tree(&tree, &filter).map(|t| t.file_count), Some(files));
         let mut copy = tree.clone();
 

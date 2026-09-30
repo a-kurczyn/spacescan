@@ -122,12 +122,8 @@ fn layout_ring(
     if ring >= settings.max_render_depth {
         return;
     }
-    let visible_children: Vec<(usize, &Node)> = node
-        .children
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| !hidden.contains(&c.path))
-        .collect();
+    let visible_children: Vec<(usize, &Node)> =
+        node.children.iter().enumerate().filter(|(_, c)| !hidden.contains(&c.path)).collect();
 
     // Free space takes its share of the drive's capacity; the content found
     // so far fills the rest of the ring (also while a scan is running).
@@ -293,8 +289,7 @@ pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Setti
         // A pale tint of the same hue.
         return hsv_to_rgb(top_branch_hue, settings.other_sat, settings.other_val);
     }
-    let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff)
-        .max(settings.ring_val_floor);
+    let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff).max(settings.ring_val_floor);
     hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
 }
 
@@ -312,12 +307,8 @@ pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f
     );
     let name_galley = painter.layout_job(name_job);
 
-    let size_job = egui::text::LayoutJob::simple(
-        human_size(size),
-        egui::FontId::proportional(18.0),
-        Color32::WHITE,
-        wrap_width,
-    );
+    let size_job =
+        egui::text::LayoutJob::simple(human_size(size), egui::FontId::proportional(18.0), Color32::WHITE, wrap_width);
     let size_galley = painter.layout_job(size_job);
 
     let gap = 4.0;
@@ -327,10 +318,7 @@ pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f
     let name_pos = Pos2::new(center.x - name_galley.size().x / 2.0, top);
     painter.galley(name_pos, name_galley.clone(), Color32::WHITE);
 
-    let size_pos = Pos2::new(
-        center.x - size_galley.size().x / 2.0,
-        top + name_galley.size().y + gap,
-    );
+    let size_pos = Pos2::new(center.x - size_galley.size().x / 2.0, top + name_galley.size().y + gap);
     painter.galley(size_pos, size_galley.clone(), Color32::WHITE);
 }
 
@@ -358,13 +346,26 @@ fn slice_outline(center: Pos2, (r0, r1): (f32, f32), (a0, a1): (f32, f32), steps
 }
 
 /// Draws the outline of one slice.
-pub(crate) fn draw_arc_outline(painter: &egui::Painter, center: Pos2, radii: (f32, f32), angles: (f32, f32), stroke: egui::Stroke) {
+pub(crate) fn draw_arc_outline(
+    painter: &egui::Painter,
+    center: Pos2,
+    radii: (f32, f32),
+    angles: (f32, f32),
+    stroke: egui::Stroke,
+) {
     let steps = (((angles.1 - angles.0).abs() * radii.1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
     painter.add(egui::Shape::closed_line(slice_outline(center, radii, angles, steps), stroke));
 }
 
 /// Draws one slice, filled with `color` and with a thin dark border.
-pub(crate) fn draw_arc_mesh(painter: &egui::Painter, center: Pos2, radii: (f32, f32), angles: (f32, f32), color: Color32, settings: &Settings) {
+pub(crate) fn draw_arc_mesh(
+    painter: &egui::Painter,
+    center: Pos2,
+    radii: (f32, f32),
+    angles: (f32, f32),
+    color: Color32,
+    settings: &Settings,
+) {
     let ((r0, r1), (a0, a1)) = (radii, angles);
     let span = (a1 - a0).abs();
     // One segment every few pixels of the outer arc, so curves stay smooth.
@@ -377,16 +378,8 @@ pub(crate) fn draw_arc_mesh(painter: &egui::Painter, center: Pos2, radii: (f32, 
     for i in 0..=steps {
         let t = a0 + (a1 - a0) * (i as f32 / steps as f32);
         let dir = arc_dir(t);
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos: center + dir * r0,
-            uv: egui::epaint::WHITE_UV,
-            color,
-        });
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos: center + dir * r1,
-            uv: egui::epaint::WHITE_UV,
-            color,
-        });
+        mesh.vertices.push(egui::epaint::Vertex { pos: center + dir * r0, uv: egui::epaint::WHITE_UV, color });
+        mesh.vertices.push(egui::epaint::Vertex { pos: center + dir * r1, uv: egui::epaint::WHITE_UV, color });
     }
     for i in 0..steps as u32 {
         let i0 = base + i * 2;

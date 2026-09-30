@@ -45,7 +45,8 @@ impl Lang {
     pub(crate) fn load(code: &str) -> Lang {
         let mut map = parse_kv_file(DEFAULT_LANG);
         if code != "en"
-            && let Ok(text) = std::fs::read_to_string(lang_dir().join(format!("{code}.lang"))) {
+            && let Ok(text) = std::fs::read_to_string(lang_dir().join(format!("{code}.lang")))
+        {
             map.extend(parse_kv_file(&text));
         }
         Lang { code: code.to_string(), map }

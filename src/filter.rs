@@ -36,10 +36,18 @@ impl CompiledFilter {
     /// Ok(None) when every field is empty (nothing to filter).
     pub(crate) fn compile(f: &FilterForm) -> Result<Option<Self>, String> {
         let size = |s: &str, what: &str| -> Result<Option<u64>, String> {
-            if s.trim().is_empty() { Ok(None) } else { parse_size(s).map(Some).map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e])) }
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                parse_size(s).map(Some).map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e]))
+            }
         };
         let date = |s: &str, what: &str, end_of_day: bool| -> Result<Option<i64>, String> {
-            if s.trim().is_empty() { Ok(None) } else { parse_date(s, end_of_day).map(Some).map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e])) }
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                parse_date(s, end_of_day).map(Some).map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e]))
+            }
         };
         let c = CompiledFilter {
             names: split_name_patterns(&f.name)
@@ -56,32 +64,39 @@ impl CompiledFilter {
             max_modified: date(&f.max_modified, &tr("FILTER_ERR_MODIFIED_TO"), true)?,
         };
         let empty = c.names.is_empty()
-            && c.min_size.is_none() && c.max_size.is_none()
-            && c.min_created.is_none() && c.max_created.is_none()
-            && c.min_modified.is_none() && c.max_modified.is_none();
+            && c.min_size.is_none()
+            && c.max_size.is_none()
+            && c.min_created.is_none()
+            && c.max_created.is_none()
+            && c.min_modified.is_none()
+            && c.max_modified.is_none();
         Ok(if empty { None } else { Some(c) })
     }
 
     /// True if file `n` passes every filled-in field.
     pub(crate) fn matches_file(&self, n: &Node) -> bool {
-        let in_range = |v: i64, lo: Option<i64>, hi: Option<i64>| lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v <= hi);
+        let in_range =
+            |v: i64, lo: Option<i64>, hi: Option<i64>| lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v <= hi);
         if self.min_size.is_some_and(|m| n.size < m) || self.max_size.is_some_and(|m| n.size > m) {
             return false;
         }
         // A file whose date is unknown fails any limit on that date.
         if (self.min_modified.is_some() || self.max_modified.is_some())
-            && (n.mtime == NO_TIME || !in_range(n.mtime, self.min_modified, self.max_modified)) {
+            && (n.mtime == NO_TIME || !in_range(n.mtime, self.min_modified, self.max_modified))
+        {
             return false;
         }
         if (self.min_created.is_some() || self.max_created.is_some())
-            && (n.btime == 0 || !in_range(n.btime, self.min_created, self.max_created)) {
+            && (n.btime == 0 || !in_range(n.btime, self.min_created, self.max_created))
+        {
             return false;
         }
         if !self.names.is_empty() {
             let name = if self.case_sensitive { n.name.clone() } else { n.name.to_lowercase() };
-            let hit = self.names.iter().any(|p| {
-                if p.contains(['*', '?']) { glob_match(p, &name) } else { name.contains(p.as_str()) }
-            });
+            let hit = self
+                .names
+                .iter()
+                .any(|p| if p.contains(['*', '?']) { glob_match(p, &name) } else { name.contains(p.as_str()) });
             if !hit {
                 return false;
             }
@@ -115,16 +130,26 @@ pub(crate) fn split_name_patterns(s: &str) -> Vec<String> {
                 started = true;
             }
             c if quoted => cur.push(c),
-            '[' | '{' => { depth += 1; cur.push(ch); }
-            ']' | '}' => { depth -= 1; cur.push(ch); }
+            '[' | '{' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ']' | '}' => {
+                depth -= 1;
+                cur.push(ch);
+            }
             c if depth <= 0 && (c.is_whitespace() || c == ',' || c == ';') => {
-                if started || !cur.is_empty() { out.push(std::mem::take(&mut cur)); }
+                if started || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
                 started = false;
             }
             c => cur.push(c),
         }
     }
-    if started || !cur.is_empty() { out.push(cur); }
+    if started || !cur.is_empty() {
+        out.push(cur);
+    }
     out
 }
 
@@ -135,11 +160,7 @@ pub(crate) fn expand_alternatives(p: &str) -> Vec<String> {
     let close_ch = if p.as_bytes()[open] == b'[' { ']' } else { '}' };
     let Some(close) = p[open..].find(close_ch).map(|i| open + i) else { return vec![p.to_string()] };
     let (head, inner, tail) = (&p[..open], &p[open + 1..close], &p[close + 1..]);
-    inner
-        .split(',')
-        .map(str::trim)
-        .flat_map(|alt| expand_alternatives(&format!("{head}{alt}{tail}")))
-        .collect()
+    inner.split(',').map(str::trim).flat_map(|alt| expand_alternatives(&format!("{head}{alt}{tail}"))).collect()
 }
 
 /// Whole-string wildcard match: `*` = any run of characters, `?` = one.
@@ -193,11 +214,7 @@ pub(crate) fn parse_date(s: &str, end_of_day: bool) -> Result<i64, String> {
         let d = NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| trf("ERR_DATE_FORMAT", &[s]))?;
         if end_of_day { d.and_hms_opt(23, 59, 59).unwrap() } else { d.and_hms_opt(0, 0, 0).unwrap() }
     };
-    Local
-        .from_local_datetime(&dt)
-        .earliest()
-        .map(|d| d.timestamp())
-        .ok_or_else(|| trf("ERR_DATE_TZ", &[s]))
+    Local.from_local_datetime(&dt).earliest().map(|d| d.timestamp()).ok_or_else(|| trf("ERR_DATE_TZ", &[s]))
 }
 
 /// Copy of `n` keeping only files that match `f`, with folder sizes and file

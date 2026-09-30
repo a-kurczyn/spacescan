@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Instant;
 
@@ -31,7 +31,6 @@ use scan::*;
 use table::{Graft, TableState};
 use theme::*;
 use widgets::*;
-
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -131,7 +130,8 @@ impl Settings {
         self.hub_radius_frac = self.hub_radius_frac.clamp(*Self::HUB.start(), *Self::HUB.end());
         self.ring_sat = self.ring_sat.clamp(*Self::RING_SAT.start(), *Self::RING_SAT.end());
         self.ring_val_base = self.ring_val_base.clamp(*Self::RING_VAL_BASE.start(), *Self::RING_VAL_BASE.end());
-        self.ring_val_falloff = self.ring_val_falloff.clamp(*Self::RING_VAL_FALLOFF.start(), *Self::RING_VAL_FALLOFF.end());
+        self.ring_val_falloff =
+            self.ring_val_falloff.clamp(*Self::RING_VAL_FALLOFF.start(), *Self::RING_VAL_FALLOFF.end());
         self.ring_val_floor = self.ring_val_floor.clamp(*Self::RING_VAL_FLOOR.start(), *Self::RING_VAL_FLOOR.end());
         self.other_sat = self.other_sat.clamp(*Self::OTHER_SAT.start(), *Self::OTHER_SAT.end());
         self.other_val = self.other_val.clamp(*Self::OTHER_VAL.start(), *Self::OTHER_VAL.end());
@@ -139,7 +139,8 @@ impl Settings {
         self.stroke_width = self.stroke_width.clamp(*Self::STROKE_WIDTH.start(), *Self::STROKE_WIDTH.end());
         self.tess_px_per_step = self.tess_px_per_step.clamp(*Self::TESS.start(), *Self::TESS.end());
         self.max_log_lines = self.max_log_lines.clamp(*Self::LOG_LINES.start(), *Self::LOG_LINES.end());
-        self.progress_interval_pow2 = self.progress_interval_pow2.clamp(*Self::PROGRESS_POW2.start(), *Self::PROGRESS_POW2.end());
+        self.progress_interval_pow2 =
+            self.progress_interval_pow2.clamp(*Self::PROGRESS_POW2.start(), *Self::PROGRESS_POW2.end());
         self
     }
 }
@@ -500,7 +501,9 @@ impl DiskScanApp {
         let new_root = match self.category {
             Some(cat) => {
                 let cats = self.cats.clone();
-                Arc::new(filter_tree_by(&base, &|n: &Node| cats.of_name(&n.name) == cat).unwrap_or_else(|| empty(&full)))
+                Arc::new(
+                    filter_tree_by(&base, &|n: &Node| cats.of_name(&n.name) == cat).unwrap_or_else(|| empty(&full)),
+                )
             }
             None => base.clone(),
         };
@@ -636,20 +639,15 @@ impl DiskScanApp {
         let view = self.view_stack.last().unwrap().clone();
         let segs = &self.chart_segs;
         let first_where = |pred: &dyn Fn(&Vec<usize>) -> bool| {
-            segs.iter()
-                .filter(|(p, _)| pred(p))
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(p, _)| p.clone())
+            segs.iter().filter(|(p, _)| pred(p)).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(p, _)| p.clone())
         };
         let new_rel = match self.selected_rel().cloned() {
             None => first_where(&|p| p.len() == 1),
             Some(cur) => match dir {
                 NavDir::Prev | NavDir::Next => {
                     let parent = &cur[..cur.len() - 1];
-                    let mut sibs: Vec<&(Vec<usize>, f32)> = segs
-                        .iter()
-                        .filter(|(p, _)| p.len() == cur.len() && p[..p.len() - 1] == *parent)
-                        .collect();
+                    let mut sibs: Vec<&(Vec<usize>, f32)> =
+                        segs.iter().filter(|(p, _)| p.len() == cur.len() && p[..p.len() - 1] == *parent).collect();
                     sibs.sort_by(|a, b| a.1.total_cmp(&b.1));
                     let n = sibs.len();
                     (n > 0).then(|| match sibs.iter().position(|(p, _)| *p == cur) {
@@ -829,8 +827,10 @@ impl eframe::App for DiskScanApp {
 
         // Chart view, after a scan: stats of the highlighted slice (else the
         // folder viewed) in the top-left corner.
-        if !self.scanning && !self.summary_view
-            && let Some(root) = &self.root {
+        if !self.scanning
+            && !self.summary_view
+            && let Some(root) = &self.root
+        {
             let view_node = self.current_view_node(root);
             let selected = self.selected_rel().and_then(|rel| try_get_node(view_node, rel));
             egui::Area::new("folder_stats_overlay".into())
@@ -856,7 +856,13 @@ impl eframe::App for DiskScanApp {
         }
         // Not while the right-click menu is open (Esc still closes it).
         let menu_open = egui::Popup::is_any_open(&ctx);
-        if self.root.is_some() && !self.scanning && !self.summary_view && !self.typing && !self.delete_dialog_open() && !menu_open {
+        if self.root.is_some()
+            && !self.scanning
+            && !self.summary_view
+            && !self.typing
+            && !self.delete_dialog_open()
+            && !menu_open
+        {
             if let Some(d) = ctx.input(arrow_nav) {
                 self.move_selection(d);
             }
@@ -883,7 +889,8 @@ impl eframe::App for DiskScanApp {
                 self.rescan_current();
             }
             if (typed.contains('D') || typed.contains('T'))
-                && let Some(target) = self.selected_slice_path() {
+                && let Some(target) = self.selected_slice_path()
+            {
                 if typed.contains('D') {
                     self.ask_delete(vec![target]);
                 } else {

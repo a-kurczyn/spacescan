@@ -26,8 +26,7 @@ pub(crate) fn read_kde_colors() -> Option<KdeColors> {
     let content = std::fs::read_to_string(home_dir().join(".config/kdeglobals")).ok()?;
 
     let mut section = String::new();
-    let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) =
-        (None, None, None, None, None);
+    let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) = (None, None, None, None, None);
 
     for line in content.lines() {
         let line = line.trim();
