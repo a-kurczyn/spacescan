@@ -1,19 +1,11 @@
-//! Translations: every user-facing string comes from a lang/*.lang file.
+//! Translations. Every user-facing string is a `KEY=value` line in a
+//! language file: English (lang/en.lang) is built in, other languages are
+//! `<code>.lang` files in ~/.config/spacemap/lang/. Values may contain `%s`
+//! placeholders, filled in order by `trf`.
 
 use super::*;
 
-// ---------------- Localization ----------------
-//
-// Every user-facing string lives in a `KEY=value` text file (lang/en.lang,
-// bundled into the binary as the guaranteed fallback) instead of as Rust
-// string literals, so a translation is just a text file: copy en.lang,
-// translate the right-hand side, drop it in ~/.config/spacemap/lang/ as
-// <code>.lang — no rebuild. A key missing from a translation falls back
-// to English automatically. Where a template needs a runtime value, it
-// contains a literal `%s` (printf-style, filled in order — see `Lang::t`);
-// a translation can move `%s` elsewhere in the sentence but shouldn't
-// remove, duplicate or relabel it.
-
+/// The built-in English strings, used for any key a translation lacks.
 pub(crate) static DEFAULT_LANG: &str = include_str!("../lang/en.lang");
 
 pub(crate) fn config_dir() -> PathBuf {
@@ -24,9 +16,8 @@ pub(crate) fn lang_dir() -> PathBuf {
     config_dir().join("lang")
 }
 
-/// Parses `KEY=value` text: blank lines and lines starting with `#` are
-/// skipped. `\n` and `\\` in a value are unescaped, so a translation can
-/// still contain a literal newline (e.g. a multi-line tooltip).
+/// Parses `KEY=value` lines, skipping blank lines and `#` comments.
+/// `\n` in a value is a newline and `\\` a backslash.
 pub(crate) fn parse_kv_file(text: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for line in text.lines() {
@@ -42,16 +33,15 @@ pub(crate) fn parse_kv_file(text: &str) -> HashMap<String, String> {
     map
 }
 
+/// A loaded language: its code and its strings.
 pub(crate) struct Lang {
     pub(crate) code: String,
     pub(crate) map: HashMap<String, String>,
 }
 
 impl Lang {
-    /// Loads `code` with English merged in underneath it, so an
-    /// incomplete translation still shows English for whatever key it's
-    /// missing rather than a blank. "en" itself is just the bundled
-    /// default, with nothing to merge.
+    /// Loads language `code` on top of English, so keys it lacks stay
+    /// English.
     pub(crate) fn load(code: &str) -> Lang {
         let mut map = parse_kv_file(DEFAULT_LANG);
         if code != "en" {
@@ -62,15 +52,12 @@ impl Lang {
         Lang { code: code.to_string(), map }
     }
 
-    /// Raw lookup; the key itself if even the English default doesn't
-    /// have it, so a missing translation reads as an obviously-wrong key
-    /// rather than silently vanishing.
+    /// The string for `key`, or the key itself if there is none.
     pub(crate) fn get<'a>(&'a self, key: &'a str) -> &'a str {
         self.map.get(key).map(|s| s.as_str()).unwrap_or(key)
     }
 
-    /// Like `get`, but every `%s` in the template is replaced in order by
-    /// one of `args`.
+    /// The string for `key` with each `%s` replaced by the next of `args`.
     pub(crate) fn t(&self, key: &str, args: &[&str]) -> String {
         let mut out = String::new();
         let mut rest = self.get(key);
@@ -85,14 +72,15 @@ impl Lang {
     }
 }
 
+/// The active language.
 pub(crate) static LANG: LazyLock<RwLock<Lang>> = LazyLock::new(|| RwLock::new(Lang::load(&config::language_setting())));
 
-/// A plain translated string with no placeholders.
+/// The translated string for `key`.
 pub(crate) fn tr(key: &str) -> String {
     LANG.read().unwrap().get(key).to_string()
 }
 
-/// A translated string with `%s` placeholders filled in order.
+/// The translated string for `key` with its `%s` placeholders filled in.
 pub(crate) fn trf(key: &str, args: &[&str]) -> String {
     LANG.read().unwrap().t(key, args)
 }
@@ -101,17 +89,13 @@ pub(crate) fn current_lang_code() -> String {
     LANG.read().unwrap().code.clone()
 }
 
-/// Switches the active language for every `tr`/`trf` call from the next
-/// frame on (egui redraws continuously, so nothing else needs to react to
-/// this explicitly) and remembers the choice for next launch.
+/// Makes `code` the active language; the UI shows it from the next frame.
 pub(crate) fn set_language(code: &str) {
     *LANG.write().unwrap() = Lang::load(code);
 }
 
-/// Every `<code>.lang` file in the user's lang directory, plus the bundled
-/// "en" — (code, display name for the dropdown). Scanned fresh each time
-/// the settings panel is open, so a file dropped in while spacemap is
-/// running shows up without a restart.
+/// (code, display name) of English and of every `<code>.lang` file in the
+/// language folder. The display name is the file's `# name:` first line.
 pub(crate) fn available_languages() -> Vec<(String, String)> {
     let mut out = vec![("en".to_string(), "English".to_string())];
     if let Ok(rd) = std::fs::read_dir(lang_dir()) {
@@ -135,7 +119,6 @@ pub(crate) fn available_languages() -> Vec<(String, String)> {
     }
     out
 }
-
 
 pub(crate) fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))

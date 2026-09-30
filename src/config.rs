@@ -1,8 +1,6 @@
-//! Everything spacemap remembers between launches — language, chart
-//! settings and the Summary table's layout — in one JSON file,
-//! ~/.config/spacemap/settings.json. The app compares its state against the
-//! last saved copy once per frame and rewrites the file when it changes
-//! (see `DiskScanApp::save_config_if_changed`).
+//! Settings remembered between launches (language, chart settings, the
+//! Summary table's layout), saved in ~/.config/spacemap/settings.json
+//! whenever they change.
 
 use super::*;
 use serde::de::DeserializeOwned;
@@ -10,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use table::TableCol;
 
+/// Everything in settings.json.
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default)]
 pub(crate) struct Config {
@@ -52,8 +51,7 @@ fn settings_file() -> PathBuf {
     config_dir().join("settings.json")
 }
 
-/// Settings files bigger than this aren't read (a mistake, or a symlink to
-/// something like /dev/zero).
+/// Settings files bigger than this aren't read (e.g. a link to /dev/zero).
 const MAX_SETTINGS_BYTES: u64 = 1 << 20;
 
 /// Why settings.json wasn't read.
@@ -64,9 +62,8 @@ enum Unreadable {
 }
 
 impl Unreadable {
-    /// The Issues-log line. Not built inside `read_settings`: that also runs
-    /// while the translations themselves are loading (`language_setting`),
-    /// where looking one up would deadlock.
+    /// The line for the Issues log. (Kept out of `read_settings`, which also
+    /// runs while translations load, when looking one up would deadlock.)
     fn message(&self) -> String {
         let why = match self {
             Unreadable::NotAFile => tr("ERR_SETTINGS_NOT_FILE"),
@@ -130,12 +127,10 @@ fn lenient<T: Serialize + DeserializeOwned>(default: T, file: Option<&Value>, se
 }
 
 impl Config {
-    /// The saved configuration, or defaults, plus whether the file needs
-    /// (re)writing — it's missing (first launch), or some values had to be
-    /// corrected or dropped — and a problem for the Issues log, if any.
-    /// Values that can't be used fall back one by one (the rest is kept);
-    /// the original file is copied to settings.json.bad first. A file that
-    /// isn't JSON at all is moved there instead.
+    /// The saved settings (defaults where missing), whether the file needs
+    /// writing, and a problem for the Issues log, if any. An unusable value
+    /// falls back to its default and the rest is kept; the original file is
+    /// first copied to settings.json.bad (moved there if it isn't JSON).
     pub(crate) fn load() -> (Config, bool, Option<String>) {
         let path = settings_file();
         let bad = path.with_extension("json.bad");

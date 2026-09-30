@@ -1,15 +1,9 @@
-//! Colors from the desktop's (KDE) color scheme, plus structural styling.
+//! Look and feel: colors from the KDE color scheme when there is one,
+//! corner rounding and spacing, and fallback fonts for CJK names.
 
 use super::*;
 
-// ---------------- Theming ----------------
-//
-// Colors are never hardcoded: they're read from the user's actual desktop
-// color scheme (KDE Plasma's kdeglobals) so the app matches whatever theme
-// and accent color the user picked in System Settings, light or dark,
-// rather than imposing a fixed palette. Only *structural* polish (corner
-// rounding, spacing) is applied on top — that's theme-agnostic by nature.
-
+/// The colors spacemap takes from KDE's color scheme.
 pub(crate) struct KdeColors {
     pub(crate) window_bg: Color32,
     pub(crate) view_bg: Color32,
@@ -18,6 +12,7 @@ pub(crate) struct KdeColors {
     pub(crate) button_bg: Color32,
 }
 
+/// "r,g,b" as a color.
 pub(crate) fn parse_rgb(s: &str) -> Option<Color32> {
     let mut parts = s.trim().split(',');
     let r: u8 = parts.next()?.trim().parse().ok()?;
@@ -26,10 +21,9 @@ pub(crate) fn parse_rgb(s: &str) -> Option<Color32> {
     Some(Color32::from_rgb(r, g, b))
 }
 
+/// The colors from ~/.config/kdeglobals, if it's there.
 pub(crate) fn read_kde_colors() -> Option<KdeColors> {
-    let home = std::env::var_os("HOME")?;
-    let path = PathBuf::from(home).join(".config/kdeglobals");
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = std::fs::read_to_string(home_dir().join(".config/kdeglobals")).ok()?;
 
     let mut section = String::new();
     let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) =
@@ -64,8 +58,7 @@ pub(crate) fn read_kde_colors() -> Option<KdeColors> {
     })
 }
 
-/// Structural-only style refinements — corner rounding and spacing — that
-/// read as "designed" regardless of which color scheme is active.
+/// Corner rounding and spacing, the same for every color scheme.
 pub(crate) fn apply_structural_style(ctx: &egui::Context) {
     let radius = egui::CornerRadius::from(6u8);
     ctx.all_styles_mut(|style| {
@@ -82,20 +75,18 @@ pub(crate) fn apply_structural_style(ctx: &egui::Context) {
     });
 }
 
+/// Applies the style, and KDE's colors when available (else egui's own).
 pub(crate) fn apply_theme(ctx: &egui::Context) {
     apply_structural_style(ctx);
     let Some(kde) = read_kde_colors() else {
-        return; // not on KDE (or couldn't read it): keep egui's own default
+        return;
     };
     let mut visuals = egui::Visuals::dark();
     visuals.override_text_color = Some(kde.text);
     visuals.panel_fill = kde.view_bg;
     visuals.window_fill = kde.window_bg;
-    // Used as the empty "trough" for progress bars, sliders, text-edit
-    // backgrounds, etc. Needs to read as visibly *lighter* than the panel
-    // behind it on a dark theme — darker (as `gamma_multiply(0.85)` gave)
-    // was nearly invisible, leaving no visible container/boundary for
-    // things like the scan progress bar to fill up against.
+    // The empty part of progress bars, sliders and text fields: lighter
+    // than the panel so it stands out.
     visuals.extreme_bg_color = gamma_lighten(kde.view_bg, 0.55);
     visuals.faint_bg_color = kde.window_bg.gamma_multiply(1.1);
     visuals.hyperlink_color = kde.accent;
@@ -122,13 +113,10 @@ fn system_font(pattern: &str) -> Option<(PathBuf, u32)> {
     file.is_file().then_some((file, index))
 }
 
-/// egui's built-in fonts have no Chinese/Japanese/Korean glyphs, so such
-/// names drew as boxes. This adds system fonts that have them (found via
-/// fontconfig) as the last fallbacks: the compact Droid Sans Fallback
-/// (~4 MB) for Chinese/Japanese, and — only when `korean`, since the fonts
-/// with Hangul are usually full CJK collections (30 MB+, all kept in
-/// memory) — a Korean face. Korean is switched on once a scan meets a
-/// Hangul name (see `ScanCtx::saw_hangul`).
+/// Adds system fonts with Chinese and Japanese glyphs (which egui's fonts
+/// lack) as fallbacks, and a Korean one when `korean`. Korean fonts are
+/// large (30 MB+ in memory), so they're loaded only once a scan finds a
+/// Korean name.
 pub(crate) fn install_fallback_fonts(ctx: &egui::Context, korean: bool) {
     let mut fonts = egui::FontDefinitions::default();
     let mut add = |id: &str, font: Option<(PathBuf, u32)>| {

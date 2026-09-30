@@ -3,14 +3,11 @@
 
 use super::*;
 
-// ---------------- Filters ----------------
-
 /// The filter panel's fields exactly as typed. An empty field means "no limit".
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct FilterForm {
     pub(crate) name: String,
-    /// Off by default (name patterns match regardless of case) — the "Aa"
-    /// toggle next to the Name field flips this.
+    /// The "Aa" toggle: match names in exact case.
     pub(crate) case_sensitive: bool,
     pub(crate) min_size: String,
     pub(crate) max_size: String,
@@ -22,9 +19,9 @@ pub(crate) struct FilterForm {
 
 /// FilterForm parsed into something cheap to test every file against.
 pub(crate) struct CompiledFilter {
-    /// Name patterns, lowercased unless `case_sensitive` — a file matches
-    /// if any one does. Patterns with `*`/`?` must match the whole name,
-    /// others match as a substring.
+    /// Name patterns (lowercased unless `case_sensitive`); a file matches if
+    /// any one does. Patterns with `*` or `?` must match the whole name,
+    /// others anywhere in it.
     pub(crate) names: Vec<String>,
     pub(crate) case_sensitive: bool,
     pub(crate) min_size: Option<u64>,
@@ -65,19 +62,19 @@ impl CompiledFilter {
         Ok(if empty { None } else { Some(c) })
     }
 
+    /// True if file `n` passes every filled-in field.
     pub(crate) fn matches_file(&self, n: &Node) -> bool {
         let in_range = |v: i64, lo: Option<i64>, hi: Option<i64>| lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v <= hi);
         if self.min_size.is_some_and(|m| n.size < m) || self.max_size.is_some_and(|m| n.size > m) {
             return false;
         }
+        // A file whose date is unknown fails any limit on that date.
         if self.min_modified.is_some() || self.max_modified.is_some() {
-            // Unknown modification time can't satisfy a modified-date limit.
             if n.mtime == NO_TIME || !in_range(n.mtime, self.min_modified, self.max_modified) {
                 return false;
             }
         }
         if self.min_created.is_some() || self.max_created.is_some() {
-            // Unknown creation time can't satisfy a creation-date limit.
             if n.btime == 0 || !in_range(n.btime, self.min_created, self.max_created) {
                 return false;
             }
@@ -104,7 +101,7 @@ pub(crate) fn split_name_patterns(s: &str) -> Vec<String> {
     let mut cur = String::new();
     let mut depth = 0i32;
     let mut quoted = false;
-    // A pattern that's only "" still counts (it matches every name).
+    // Set once a pattern has begun, so a lone "" still counts as one.
     let mut started = false;
     let mut chars = s.chars();
     while let Some(ch) = chars.next() {

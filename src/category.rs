@@ -1,14 +1,12 @@
-//! File categories (Video, Audio, Documents, …): the colored bar beside
+//! File categories (Video, Audio, Documents, …) for the colored bar beside
 //! the contents table, which filters it to one category.
 //!
-//! Categories are data, not code: they come from
-//! ~/.config/spacemap/categories.json, which is written from the built-in
-//! defaults (src/categories.json) whenever it's missing. Each category has
-//! a name and file extensions. The name is a
-//! token looked up in the language files ("CAT_VIDEO"); one they don't
-//! have is shown as written ("Mail"); a file matching
-//! none of them is "Other", which is always there and never listed in the
-//! file. Colors are the app's: they follow the order of the list.
+//! The categories come from ~/.config/spacemap/categories.json, written from
+//! the built-in defaults (src/categories.json) when missing. Each category
+//! has a name and a list of file extensions. The name is a language-file
+//! token ("CAT_VIDEO"); one without a translation is shown as written. Files
+//! with an unlisted extension, or none, are "Other". Colors follow the
+//! order of the list.
 
 use super::*;
 use serde_json::Value;
@@ -181,9 +179,10 @@ pub(crate) fn ext_key(name: &str) -> String {
     Path::new(name).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
-/// (extension, size, file count) totals, added up by extension.
+/// Extension → (total size, file count).
 pub(crate) type ExtTotals = HashMap<String, (u64, u64)>;
 
+/// Adds `size` and `files` to extension `ext`'s totals.
 pub(crate) fn add_ext(totals: &mut ExtTotals, ext: String, size: u64, files: u64) {
     let e = totals.entry(ext).or_insert((0, 0));
     e.0 = e.0.saturating_add(size);
