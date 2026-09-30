@@ -1,12 +1,40 @@
 //! Translations. Every user-facing string is a `KEY=value` line in a
-//! language file: English (lang/en.lang) is built in, other languages are
-//! `<code>.lang` files in ~/.config/spacemap/lang/. Values may contain `%s`
-//! placeholders, filled in order by `trf`.
+//! language file (lang/<code>.lang, built into the binary). English is the
+//! base: a key missing from a language shows in English. A file
+//! ~/.config/spacemap/lang/<code>.lang overrides lines of a built-in
+//! language, or adds a new language. Values may contain `%s` placeholders,
+//! filled in order by `trf`.
 
 use super::*;
 
-/// The built-in English strings, used for any key a translation lacks.
-pub(crate) static DEFAULT_LANG: &str = include_str!("../lang/en.lang");
+/// The languages built into the binary: (code, file contents), in the order
+/// the settings list shows them. English comes first and is the base.
+const BUILT_IN: &[(&str, &str)] = &[
+    ("en", include_str!("../lang/en.lang")),
+    ("es", include_str!("../lang/es.lang")),
+    ("fr", include_str!("../lang/fr.lang")),
+    ("de", include_str!("../lang/de.lang")),
+    ("it", include_str!("../lang/it.lang")),
+    ("pt", include_str!("../lang/pt.lang")),
+    ("ru", include_str!("../lang/ru.lang")),
+    ("ja", include_str!("../lang/ja.lang")),
+    ("zh", include_str!("../lang/zh.lang")),
+    ("ko", include_str!("../lang/ko.lang")),
+];
+
+/// The built-in file for language `code`, if there is one.
+fn built_in(code: &str) -> Option<&'static str> {
+    BUILT_IN
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, text)| *text)
+}
+
+/// A language file's display name: its `# name:` first line.
+fn display_name(text: &str) -> Option<String> {
+    let name = text.lines().next()?.strip_prefix("# name:")?.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
 
 pub(crate) fn config_dir() -> PathBuf {
     home_dir().join(".config/spacemap")
@@ -40,13 +68,16 @@ pub(crate) struct Lang {
 }
 
 impl Lang {
-    /// Loads language `code` on top of English, so keys it lacks stay
-    /// English.
+    /// Loads language `code`: English, then the built-in file for `code`,
+    /// then the user's file for it, each overriding the one before.
     pub(crate) fn load(code: &str) -> Lang {
-        let mut map = parse_kv_file(DEFAULT_LANG);
+        let mut map = parse_kv_file(built_in("en").unwrap_or_default());
         if code != "en"
-            && let Ok(text) = std::fs::read_to_string(lang_dir().join(format!("{code}.lang")))
+            && let Some(text) = built_in(code)
         {
+            map.extend(parse_kv_file(text));
+        }
+        if let Ok(text) = std::fs::read_to_string(lang_dir().join(format!("{code}.lang"))) {
             map.extend(parse_kv_file(&text));
         }
         Lang {
@@ -105,10 +136,18 @@ pub(crate) fn set_language(code: &str) {
     *LANG.write().unwrap() = Lang::load(code);
 }
 
-/// (code, display name) of English and of every `<code>.lang` file in the
-/// language folder. The display name is the file's `# name:` first line.
+/// (code, display name) of the built-in languages, then of any other
+/// `<code>.lang` file in the user's language folder.
 pub(crate) fn available_languages() -> Vec<(String, String)> {
-    let mut out = vec![("en".to_string(), "English".to_string())];
+    let mut out: Vec<(String, String)> = BUILT_IN
+        .iter()
+        .map(|(code, text)| {
+            (
+                code.to_string(),
+                display_name(text).unwrap_or_else(|| code.to_string()),
+            )
+        })
+        .collect();
     if let Ok(rd) = std::fs::read_dir(lang_dir()) {
         for entry in rd.flatten() {
             let path = entry.path();
@@ -118,14 +157,12 @@ pub(crate) fn available_languages() -> Vec<(String, String)> {
             let Some(code) = path.file_stem().map(|s| s.to_string_lossy().to_string()) else {
                 continue;
             };
-            if code == "en" {
+            if built_in(&code).is_some() {
                 continue;
             }
             let name = std::fs::read_to_string(&path)
                 .ok()
-                .and_then(|text| text.lines().next().map(str::to_string))
-                .and_then(|first| first.strip_prefix("# name:").map(|s| s.trim().to_string()))
-                .filter(|s| !s.is_empty())
+                .and_then(|text| display_name(&text))
                 .unwrap_or_else(|| code.clone());
             out.push((code, name));
         }
@@ -137,4 +174,37 @@ pub(crate) fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every built-in language has a name and exactly English's keys, each
+    /// with as many `%s` placeholders as in English.
+    #[test]
+    fn built_in_languages_match_english() {
+        let en = parse_kv_file(built_in("en").unwrap());
+        for (code, text) in BUILT_IN {
+            assert!(
+                display_name(text).is_some(),
+                "{code}: no '# name:' first line"
+            );
+            let map = parse_kv_file(text);
+            let missing: Vec<&String> = en.keys().filter(|k| !map.contains_key(*k)).collect();
+            let extra: Vec<&String> = map.keys().filter(|k| !en.contains_key(*k)).collect();
+            assert!(
+                missing.is_empty() && extra.is_empty(),
+                "{code}: missing {missing:?}, extra {extra:?}"
+            );
+            for (key, value) in &map {
+                assert_eq!(
+                    value.matches("%s").count(),
+                    en[key].matches("%s").count(),
+                    "{code}: {key}"
+                );
+                assert!(!value.trim().is_empty(), "{code}: {key} is empty");
+            }
+        }
+    }
 }

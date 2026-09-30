@@ -1,0 +1,272 @@
+# name: 日本語
+#
+# spacemap language file (see en.lang for how these files work).
+
+# ---- Toolbar ----
+TOOLBAR_SUMMARY_VIEW=概要ビュー
+TOOLBAR_CHART_VIEW=グラフビュー
+CHART_ORDER_SIZE=大きい順
+CHART_ORDER_NAME=名前順 (A–Z)
+TOOLBAR_FILTERS_ACTIVE=フィルター (有効)
+TOOLBAR_EMPTY_TRASH=ゴミ箱を空にする
+TOOLBAR_PICK_FOLDER=スキャンするドライブ、マウントポイント、フォルダーを選択
+TOOLBAR_SCAN_ROOT=システムのルート (/) からスキャン
+TOOLBAR_SCAN_HOME=ホームフォルダーをスキャン (%s)
+TOOLBAR_RESCAN=このフォルダーを再スキャン
+TOOLBAR_PATH_HINT=パスを入力して Enter — 例: USB ドライブやネットワークのマウント
+TOOLBAR_PATH_EDIT_TOOLTIP=パスを入力
+DIALOG_PICK_FOLDER_TITLE=スキャンするドライブまたはフォルダーを選択
+
+# ---- Filter panel ----
+FILTER_TITLE=フィルター
+FILTER_CLOSE=フィルターを閉じる
+FILTER_NAME_LABEL=名前
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=スペースまたはカンマ区切りのパターン。どれか一つに一致すればファイルが対象になります。スペースやカンマを含めるには、パターンを "二重引用符" で囲むか、文字の前に \\ を書きます。\n* = 任意の文字列、? = 任意の1文字、[a,b,c] または {a,b,c} = いずれか。\n* も ? もない場合は名前のどこかに含まれていれば一致します。Aa ボタンがオンでない限り大文字と小文字は区別しません。
+FILTER_CASE_SENSITIVE=大文字と小文字を区別 — クリックで区別しない
+FILTER_CASE_INSENSITIVE=大文字と小文字を区別しない — クリックで区別する
+FILTER_COL_FROM_MIN=から / 最小
+FILTER_COL_TO_MAX=まで / 最大
+FILTER_ROW_SIZE=サイズ
+FILTER_ROW_CREATED=作成日
+FILTER_ROW_MODIFIED=更新日
+FILTER_HINT_SIZE_MIN=例: 100M
+FILTER_HINT_SIZE_MAX=例: 4.7G
+FILTER_HINT_DATE=YYYY-MM-DD
+FILTER_APPLY=適用
+FILTER_INVALID=赤枠の欄を修正すると適用できます (理由はマウスを重ねると表示)。
+FILTER_INVALID_KEEPS_PREVIOUS=赤枠の欄を修正してください (理由はマウスを重ねると表示)。それまで表には前回適用したフィルターの結果が表示されます。
+FILTER_CLEAR=クリア
+FILTER_SHOWING=%s / %s ファイルを表示中 (%s / %s)
+FILTER_APPLIES_ON_FINISH=スキャン完了時に適用されます。
+FILTER_LIVE_UNFILTERED=スキャン中のライブ表示はフィルターされません。
+FILTER_HELP=サイズは K/M/G/T (×1024)。日付はローカル時刻です。時刻は HH:MM を追加します。
+FILTER_ERR_MIN_SIZE=最小サイズ
+FILTER_ERR_MAX_SIZE=最大サイズ
+FILTER_ERR_CREATED_FROM=作成日 (開始)
+FILTER_ERR_CREATED_TO=作成日 (終了)
+FILTER_ERR_MODIFIED_FROM=更新日 (開始)
+FILTER_ERR_MODIFIED_TO=更新日 (終了)
+
+# ---- Validation error messages ----
+ERR_SIZE_FORMAT='%s' はサイズではありません (例: 500M, 1.5G)
+ERR_SIZE_UNIT=不明な単位 '%s' (K, M, G, T を使用)
+ERR_DATE_FORMAT='%s' は日付ではありません (YYYY-MM-DD を使用)
+ERR_DATE_TZ='%s' はローカルのタイムゾーンに存在しません
+ERR_FIELD_PREFIX=%s: %s
+
+# ---- Settings panel ----
+SETTINGS_TITLE=グラフの設定
+SETTINGS_CLOSE=設定を閉じる
+SETTINGS_DEPTH_GROUPING=深さとグループ化
+SETTINGS_DEPTH_LEVELS=表示する階層数
+SETTINGS_MIN_SLICE_ANGLE=スライスの最小角度 (°)
+SETTINGS_MAX_SLICES=リングごとの最大スライス数
+SETTINGS_UNLIMITED_SLICES=スライス数を無制限にする (「その他」にまとめない)
+SETTINGS_UNLIMITED_SLICES_HOVER=小さい項目を「(ほか N 項目)」にまとめず、いくつあってもすべて個別のスライスとして表示します。数千の項目があるフォルダーでは極細のスライスが数千個になります — Ctrl+ホイールで拡大するとクリックできます。
+SETTINGS_HUB_SIZE=中央の円の大きさ
+SETTINGS_COLORS=色
+SETTINGS_RING_SAT=リングの彩度
+SETTINGS_RING_BRIGHT_OUTER=リングの明るさ (外側)
+SETTINGS_BRIGHT_FALLOFF=リングごとの明るさの低下
+SETTINGS_BRIGHT_FLOOR=最低の明るさ
+SETTINGS_OTHER_SAT=「その他」の彩度
+SETTINGS_OTHER_BRIGHT=「その他」の明るさ
+SETTINGS_FREE_GAMMA=空き領域のガンマ (<1 で明るく)
+SETTINGS_LINE_RENDERING=線の描画
+SETTINGS_BORDER_THICKNESS=境界線の太さ
+SETTINGS_BORDER_DARKNESS=境界線の濃さ
+SETTINGS_CURVE_SMOOTH=曲線の滑らかさ (px/ステップ、小さいほど滑らか)
+SETTINGS_LOG=ログ
+SETTINGS_MAX_LOG_LINES=保存する問題の最大行数
+SETTINGS_SCANNING=スキャン
+SETTINGS_APPARENT_SIZE=見かけのサイズで数える
+SETTINGS_APPARENT_SIZE_HOVER=使用しているディスク容量ではなく、各ファイルの長さを数えます。オフ: du と同様に、スパースファイルは実際の使用量で、ハードリンクされたファイルは一度だけ数えます。使用量を報告しないネットワークや FUSE のドライブではオンにしてください。次回のスキャンから有効です。
+SETTINGS_PROGRESS_INTERVAL=進捗の報告間隔 (項目数、常に2のべき乗)
+SETTINGS_DEFAULTS=既定値に戻す
+SETTINGS_LANGUAGE=言語
+
+# ---- Log panel ----
+LOG_ISSUES_NONE=問題: なし
+LOG_ISSUES_COUNT=問題: %s
+LOG_CLEAR=クリア
+LOG_MORE_NOT_SHOWN=…ほかに表示していない問題が %s 件
+
+# ---- Central panel / empty state ----
+CENTRAL_EMPTY_STATE=開始点を選んでください: 🔍 (任意のドライブ、マウント、フォルダー)、/ (システムのルート)、🏠 (ホーム) — または上にパスを入力して Enter を押します。
+
+# ---- Scan status / errors ----
+STATUS_SCAN_ABORTED=スキャンを中止しました
+STATUS_SCANNING=スキャン中… (Esc で中止)
+STATUS_SCAN_COMPLETED=%s 秒でスキャン完了
+ERR_PATH_NOT_FOUND=パスが見つかりません: %s
+ERR_CANNOT_STAT=%s の情報を取得できません: %s
+ERR_NETWORK_URL='%s://' はネットワークのアドレスで、マウントされたパスではありません — 先にマウントし (例: ファイルマネージャーのネットワーク表示から)、マウント先の実際のローカルパスを入力してください (多くは /run/user/<uid>/gvfs/... の下)。
+ERR_NOT_A_DIRECTORY=フォルダーではありません (ファイルです): %s
+ERR_FOLDER_DIALOG_FAILED=フォルダー選択ダイアログを開けませんでした (xdg-desktop-portal は動いていますか?)
+SCAN_PROGRESS_ITEMS_SCANNED=%s 項目をスキャン済み
+SCAN_PROGRESS_OF_TOTAL=%s / %s 項目
+SCAN_PROGRESS_ITEMS=%s 項目
+SCAN_PROGRESS_CANCEL_HINT=%s · Esc で中止
+
+# ---- Filesystem I/O errors ----
+ERR_IO_NOT_FOUND=見つかりません (そのファイルやフォルダーはありません)
+ERR_IO_PERMISSION=そのフォルダーを読む、または開く権限がありません
+ERR_IO_OTHER=読み取れませんでした (%s)
+ERR_IO_LINE=%s — %s
+
+# ---- Sunburst aggregate buckets ----
+EXT_NO_EXTENSION=(拡張子なし)
+SEG_OTHER_ITEMS=(ほか %s 項目)
+SEG_FREE_SPACE=空き領域
+SEG_OTHER_FS=%s [別のファイルシステム]
+
+# ---- Summary view ----
+SUMMARY_CONTENTS=内容
+COL_SIZE=サイズ
+A11Y_SORTED_ASC=%s、昇順
+A11Y_SORTED_DESC=%s、降順
+A11Y_CHART=%s のグラフ、%s
+COL_FILES=ファイル数
+COL_MODIFIED=更新日時
+COL_MODIFIED_TIP=内容の最終変更 (mtime)
+COL_CHANGED=変更日時
+COL_CHANGED_TIP=内容またはメタデータの最終変更 — 権限、所有者、名前の変更 (ctime)
+COL_NAME=名前
+
+# ---- Top-left folder stats overlay ----
+STATS_SIZE=サイズ: %s
+STATS_FILES=ファイル数: %s
+STATS_PERMS=権限: %s
+
+# ---- Hover tooltip ----
+HOVER_AVAILABLE=空き:
+HOVER_SIZE=サイズ:
+HOVER_FILES=ファイル数:
+HOVER_PERMS=権限:
+HOVER_LINK=シンボリックリンク:
+HOVER_LINK_TARGET=→ %s (サイズには含まれません)
+HOVER_LINK_UNREADABLE=リンク先を読み取れません
+HOVER_MODIFIED=更新日時:
+HOVER_CHANGED=変更日時:
+HOVER_OWNER=所有者:
+HOVER_TYPE=種類:
+
+# ---- Context menu ----
+MENU_ZOOM=ズーム
+MENU_RESCAN=再スキャン
+MENU_OPEN=開く
+MENU_HIDE=隠す
+MENU_TRASH=ゴミ箱へ移動
+MENU_DELETE=完全に削除
+MENU_CANCEL=キャンセル
+
+# ---- Summary table keys / delete dialog ----
+DELETE_CONFIRM_TITLE=完全に削除しますか?
+DELETE_CONFIRM_FILE=ファイル、%s。元に戻せません。
+DELETE_CONFIRM_UNREADABLE=読み取れなかったフォルダーが %s 個含まれています: サイズは不明で、削除が途中で止まる可能性があります。
+DELETE_CONFIRM_LINK=%s へのシンボリックリンク。削除されるのはリンクだけで、リンク先は残ります。
+DELETE_CONFIRM_DIR=フォルダーとその中身すべて (%s、ファイル数: %s)。元に戻せません。
+DELETE_CONFIRM_YES=削除
+ERR_DELETE_FAILED=%s を削除できませんでした: %s
+ERR_DELETE_PARTIAL=%s は一部だけ削除された可能性があります。再スキャン (r) して残りを確認してください。
+ERR_OPEN_FAILED=%s を開けませんでした: %s
+TABLE_HELP_HINT=? でキーボードショートカット
+TABLE_TAG_DIRS_FIRST=フォルダーを先に
+TABLE_TAG_SCANNING=途中のサイズ · フォルダーを開く、削除、ゴミ箱はスキャン完了後
+TABLE_TAG_DOTFILES_HIDDEN=ドットファイル非表示 (%s)
+TABLE_TAG_MARKED=%s 件選択 (%s)
+TABLE_JUMP=移動先:
+COL_PERCENT=%
+COL_PERMS=権限
+DELETE_CONFIRM_MANY=%s 項目 (%s、ファイル数: %s)。元に戻せません。
+DELETE_CONFIRM_MORE=…ほか %s 件
+ERR_TRASH_FAILED=%s をゴミ箱へ移動できませんでした: %s
+ERR_TRASH_ROOT=ルートフォルダーはゴミ箱へ移動できません
+ERR_TRASH_IN_TRASH=%s はゴミ箱へ移動しません: ゴミ箱の中にある (またはゴミ箱を含む) ためです。代わりに「完全に削除」を使ってください。
+ERR_CONTAINS_MOUNT=%s の削除を拒否しました: マウントされたファイルシステムであるか、それを含んでいます (%s)。先にアンマウントしてください。
+ERR_OTHER_FS_INSIDE=%s で停止しました (別のファイルシステムにあります)
+TRASH_CONFIRM_TITLE=ゴミ箱を空にしますか?
+TRASH_CONFIRM_BODY=ゴミ箱 (すべてのドライブ) の %s 項目が完全に削除されます。元に戻せません。
+TRASH_CONFIRM_YES=ゴミ箱を空にする
+STATUS_TRASH_EMPTY=ゴミ箱はすでに空です
+STATUS_EMPTYING_TRASH=ゴミ箱を空にしています…
+STATUS_TRASH_EMPTIED=ゴミ箱を空にしました
+ERR_EMPTY_TRASH=ゴミ箱を空にできませんでした: %s
+ERR_SETTINGS_FILE=設定ファイルを読めませんでした (%s に移動し、既定値を使用): %s
+ERR_SETTINGS_SAVE=設定を保存できませんでした: %s
+ERR_SETTINGS_UNREADABLE=%s から設定を読み込みませんでした (%s)。既定値を使用し、ファイルは上書きしません。
+ERR_SETTINGS_NOT_FILE=通常のファイルではありません
+ERR_SETTINGS_TOO_BIG=1 MiB より大きい
+ERR_SETTINGS_FIELDS=無効な設定を無視しました (既定値を使用): %s。元のファイルは %s にコピーしました。
+
+# ---- Keyboard shortcuts overlay (?) ----
+HELP_TITLE=キーボードショートカット
+HELP_CLOSE=閉じる
+HELP_SECTION_MOVE=移動
+HELP_SECTION_SORT=並べ替えと列
+HELP_SECTION_ACT=操作
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=前 / 次の行
+HELP_KEYS_PAGE=PgUp PgDn
+HELP_PAGE=1画面上 / 下へ
+HELP_KEYS_HOMEEND=Home End
+HELP_HOMEEND=最初 / 最後の行
+HELP_KEYS_OPEN=➡
+HELP_OPEN=カーソル位置のフォルダーを開く
+HELP_KEYS_ENTER=Enter、ダブルクリック
+HELP_ENTER=フォルダーを開く、またはファイルを既定のアプリで開く
+HELP_KEYS_PARENT=⬅ Backspace
+HELP_PARENT=親フォルダー
+HELP_KEYS_JUMP=/
+HELP_JUMP=名前へ移動 (入力して Enter)
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=サイズ / 名前 / ファイル数 / 更新日時 / 変更日時 / 権限で並べ替え (もう一度で逆順)
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=サイズ / ファイル数 / 更新日時 / 変更日時 / 権限 / 割合 / バーの表示切替
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=最後に並べ替え・表示・非表示にした列を左 / 右へ移動
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=フォルダーをファイルより先に
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=ドットファイルの表示切替
+HELP_KEYS_MARK=Space、Ctrl+クリック
+HELP_MARK=行の選択 / 解除 (Space は次の行へも移動)
+HELP_KEYS_DELETE=D
+HELP_DELETE=完全に削除 (選択した行、またはカーソルの行) — 事前に確認
+HELP_KEYS_TRASH=T
+HELP_TRASH=ゴミ箱へ移動 (選択した行、またはカーソルの行)
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=このフォルダーを再スキャン
+HELP_KEYS_INFO=i
+HELP_INFO=カーソル行の詳細の表示切替
+HELP_KEYS_ESC=Esc
+HELP_ESC=選択を解除、または詳細を閉じる
+HELP_KEYS_HELP=?
+HELP_HELP=このヘルプ
+
+# ---- Categories (bar beside the contents table) ----
+SUMMARY_CATEGORIES=カテゴリー
+CAT_VIDEO=動画
+CAT_AUDIO=音声
+CAT_IMAGES=画像
+CAT_DOCUMENTS=文書
+CAT_ARCHIVES=アーカイブ
+CAT_APPLICATIONS=アプリケーション
+CAT_CODE=コード
+CAT_DATA=データ
+CAT_MAIL=メール
+CAT_OTHER=その他
+CAT_FILES=ファイル
+CAT_CLEAR=すべてのカテゴリーを表示
+CAT_NO_FILES=ここにはファイルがありません
+CAT_CLICK=クリックでこれらのファイルだけを表示
+CAT_CLICK_AGAIN=もう一度クリックですべてのファイルを表示
+ERR_CATEGORIES_FILE=カテゴリーファイル %s を使えません (%s)。組み込みのカテゴリーを使用します。
+ERR_CATEGORIES_PROBLEMS=カテゴリーファイル %s: スキップ %s
+ERR_CATEGORIES_SAVE=カテゴリーファイル %s を書き込めませんでした: %s
+ERR_CATEGORIES_NO_LIST="categories" リストが必要です
+ERR_CATEGORIES_NO_NAME=%s に名前がありません
+ERR_CATEGORIES_ENTRY=%s: "%s" の無効な項目: %s
+ERR_CATEGORIES_TWICE=%s はすでに「%s」にあります
+ERR_CATEGORIES_MANY=%s カテゴリー: %s を超えると色の区別が難しくなります

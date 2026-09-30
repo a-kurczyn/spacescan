@@ -7,13 +7,14 @@
 # different place in the sentence, but don't remove or duplicate it, and
 # don't translate it into something else.
 #
-# To add a new language: copy this file to <language-code>.lang (e.g.
-# es.lang, fr.lang) in ~/.config/spacemap/lang/, translate the right-hand
-# side of each line, and set the first line to "# name: <language name as
-# it should read in the dropdown>". It'll show up in Settings > Language
-# next time spacemap starts (or immediately, if the lang folder already
-# existed). Any key you leave untranslated or delete falls back to English
-# automatically, so a partial translation is fine.
+# The languages in lang/ are built into spacemap. To add a language,
+# copy this file to lang/<language-code>.lang (e.g. nl.lang), translate the
+# right-hand side of each line, set the first line to
+# "# name: <language name as it should read in the settings list>", and
+# add it to the list in src/lang.rs. Without rebuilding, the same file in
+# ~/.config/spacemap/lang/ also works, and a file there with the code of a
+# built-in language overrides just the lines it contains. Any key missing
+# from a language shows in English.
 
 # ---- Toolbar ----
 TOOLBAR_SUMMARY_VIEW=Summary view
@@ -28,7 +29,6 @@ TOOLBAR_SCAN_HOME=Scan your home folder (%s)
 TOOLBAR_RESCAN=Rescan this folder
 TOOLBAR_PATH_HINT=Type a path and press Enter — e.g. a USB drive or network mount
 TOOLBAR_PATH_EDIT_TOOLTIP=Type a path
-TOOLBAR_SETTINGS_TOOLTIP=Chart settings
 DIALOG_PICK_FOLDER_TITLE=Choose a drive or folder to scan
 
 # ---- Filter panel ----

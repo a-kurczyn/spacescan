@@ -1,0 +1,272 @@
+# name: Русский
+#
+# spacemap language file (see en.lang for how these files work).
+
+# ---- Toolbar ----
+TOOLBAR_SUMMARY_VIEW=Сводка
+TOOLBAR_CHART_VIEW=Диаграмма
+CHART_ORDER_SIZE=Сначала крупные
+CHART_ORDER_NAME=По имени (А–Я)
+TOOLBAR_FILTERS_ACTIVE=Фильтры (включены)
+TOOLBAR_EMPTY_TRASH=Очистить корзину
+TOOLBAR_PICK_FOLDER=Выбрать диск, точку монтирования или папку для анализа
+TOOLBAR_SCAN_ROOT=Анализировать от корня системы (/)
+TOOLBAR_SCAN_HOME=Анализировать домашнюю папку (%s)
+TOOLBAR_RESCAN=Проанализировать эту папку заново
+TOOLBAR_PATH_HINT=Введите путь и нажмите Enter — например, USB-накопитель или сетевой ресурс
+TOOLBAR_PATH_EDIT_TOOLTIP=Ввести путь
+DIALOG_PICK_FOLDER_TITLE=Выберите диск или папку для анализа
+
+# ---- Filter panel ----
+FILTER_TITLE=Фильтры
+FILTER_CLOSE=Закрыть фильтры
+FILTER_NAME_LABEL=Имя
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=Шаблоны через пробел или запятую; файл подходит, если подходит любой из них. Заключите шаблон в "кавычки" (или поставьте \\ перед символом), чтобы включить пробелы или запятые.\n* = любые символы, ? = один символ, [a,b,c] или {a,b,c} = варианты.\nБез * и ? совпадение ищется в любом месте имени. Регистр не учитывается, если не включена кнопка Aa.
+FILTER_CASE_SENSITIVE=С учётом регистра — нажмите, чтобы не учитывать
+FILTER_CASE_INSENSITIVE=Без учёта регистра — нажмите, чтобы учитывать
+FILTER_COL_FROM_MIN=от / мин.
+FILTER_COL_TO_MAX=до / макс.
+FILTER_ROW_SIZE=Размер
+FILTER_ROW_CREATED=Создан
+FILTER_ROW_MODIFIED=Изменён
+FILTER_HINT_SIZE_MIN=напр. 100M
+FILTER_HINT_SIZE_MAX=напр. 4.7G
+FILTER_HINT_DATE=ГГГГ-ММ-ДД
+FILTER_APPLY=Применить
+FILTER_INVALID=Исправьте поле с красной рамкой (причина — при наведении), чтобы применить.
+FILTER_INVALID_KEEPS_PREVIOUS=Исправьте поле с красной рамкой (причина — при наведении). До тех пор таблица показывает ранее применённый фильтр.
+FILTER_CLEAR=Сбросить
+FILTER_SHOWING=Показано файлов: %s из %s (%s из %s)
+FILTER_APPLIES_ON_FINISH=Применится по окончании анализа.
+FILTER_LIVE_UNFILTERED=Живой вид во время анализа не фильтруется.
+FILTER_HELP=Размеры в K/M/G/T (×1024). Даты по местному времени; добавьте ЧЧ:ММ для времени.
+FILTER_ERR_MIN_SIZE=Мин. размер
+FILTER_ERR_MAX_SIZE=Макс. размер
+FILTER_ERR_CREATED_FROM=Создан с
+FILTER_ERR_CREATED_TO=Создан по
+FILTER_ERR_MODIFIED_FROM=Изменён с
+FILTER_ERR_MODIFIED_TO=Изменён по
+
+# ---- Validation error messages ----
+ERR_SIZE_FORMAT='%s' — не размер (напр. 500M, 1.5G)
+ERR_SIZE_UNIT=неизвестная единица '%s' (используйте K, M, G или T)
+ERR_DATE_FORMAT='%s' — не дата (используйте ГГГГ-ММ-ДД)
+ERR_DATE_TZ='%s' не существует в местном часовом поясе
+ERR_FIELD_PREFIX=%s: %s
+
+# ---- Settings panel ----
+SETTINGS_TITLE=Настройки диаграммы
+SETTINGS_CLOSE=Закрыть настройки
+SETTINGS_DEPTH_GROUPING=Глубина и группировка
+SETTINGS_DEPTH_LEVELS=Показываемые уровни
+SETTINGS_MIN_SLICE_ANGLE=Мин. угол сектора (°)
+SETTINGS_MAX_SLICES=Макс. секторов в кольце
+SETTINGS_UNLIMITED_SLICES=Без ограничения секторов (без группы «прочее»)
+SETTINGS_UNLIMITED_SLICES_HOVER=Показывает каждый элемент отдельным сектором, сколько бы их ни было, вместо объединения мелких в «(ещё N элементов)». Папка с тысячами записей даст тысячи тончайших секторов — приближайте Ctrl+колесо мыши, чтобы по ним можно было щёлкнуть.
+SETTINGS_HUB_SIZE=Размер центра
+SETTINGS_COLORS=Цвета
+SETTINGS_RING_SAT=Насыщенность колец
+SETTINGS_RING_BRIGHT_OUTER=Яркость колец (внешних)
+SETTINGS_BRIGHT_FALLOFF=Снижение яркости на кольцо
+SETTINGS_BRIGHT_FLOOR=Минимальная яркость
+SETTINGS_OTHER_SAT=Насыщенность группы «прочее»
+SETTINGS_OTHER_BRIGHT=Яркость группы «прочее»
+SETTINGS_FREE_GAMMA=Гамма свободного места (<1 — светлее)
+SETTINGS_LINE_RENDERING=Отрисовка линий
+SETTINGS_BORDER_THICKNESS=Толщина границ
+SETTINGS_BORDER_DARKNESS=Тёмность границ
+SETTINGS_CURVE_SMOOTH=Гладкость кривых (пикс./шаг, меньше — глаже)
+SETTINGS_LOG=Журнал
+SETTINGS_MAX_LOG_LINES=Макс. хранимых строк проблем
+SETTINGS_SCANNING=Анализ
+SETTINGS_APPARENT_SIZE=Считать видимый размер
+SETTINGS_APPARENT_SIZE_HOVER=Считает длину каждого файла вместо занимаемого им места на диске. Выключено: разреженные файлы учитываются по реально занятому месту, а файлы с жёсткими ссылками — один раз, как в du. Включите для сетевых дисков или FUSE, которые не сообщают занятое место. Действует со следующего анализа.
+SETTINGS_PROGRESS_INTERVAL=Интервал отчёта о прогрессе (элементы, всегда степень двойки)
+SETTINGS_DEFAULTS=По умолчанию
+SETTINGS_LANGUAGE=Язык
+
+# ---- Log panel ----
+LOG_ISSUES_NONE=Проблемы: нет
+LOG_ISSUES_COUNT=Проблемы: %s
+LOG_CLEAR=Очистить
+LOG_MORE_NOT_SHOWN=… и ещё не показано проблем: %s
+
+# ---- Central panel / empty state ----
+CENTRAL_EMPTY_STATE=Выберите отправную точку: 🔍 (любой диск, точка монтирования или папка), / (корень системы) или 🏠 (домашняя папка) — или введите путь выше и нажмите Enter.
+
+# ---- Scan status / errors ----
+STATUS_SCAN_ABORTED=Анализ прерван
+STATUS_SCANNING=Анализ… (Esc — отмена)
+STATUS_SCAN_COMPLETED=Анализ завершён за %s с
+ERR_PATH_NOT_FOUND=Путь не найден: %s
+ERR_CANNOT_STAT=Не удалось получить сведения о %s: %s
+ERR_NETWORK_URL='%s://' — сетевой адрес, а не смонтированный путь. Сначала смонтируйте его (например, через раздел «Сеть» файлового менеджера), затем введите реальный локальный путь, куда он смонтирован (часто в /run/user/<uid>/gvfs/...).
+ERR_NOT_A_DIRECTORY=Это не папка (это файл): %s
+ERR_FOLDER_DIALOG_FAILED=Не удалось открыть окно выбора папки (запущен ли xdg-desktop-portal?)
+SCAN_PROGRESS_ITEMS_SCANNED=Проанализировано элементов: %s
+SCAN_PROGRESS_OF_TOTAL=%s из %s элементов
+SCAN_PROGRESS_ITEMS=Элементов: %s
+SCAN_PROGRESS_CANCEL_HINT=%s · Esc — отмена
+
+# ---- Filesystem I/O errors ----
+ERR_IO_NOT_FOUND=не найдено (нет такого файла или папки)
+ERR_IO_PERMISSION=нет прав на чтение этой папки или вход в неё
+ERR_IO_OTHER=не удалось прочитать (%s)
+ERR_IO_LINE=%s — %s
+
+# ---- Sunburst aggregate buckets ----
+EXT_NO_EXTENSION=(без расширения)
+SEG_OTHER_ITEMS=(ещё элементов: %s)
+SEG_FREE_SPACE=Свободное место
+SEG_OTHER_FS=%s [другая файловая система]
+
+# ---- Summary view ----
+SUMMARY_CONTENTS=Содержимое
+COL_SIZE=Размер
+A11Y_SORTED_ASC=%s, по возрастанию
+A11Y_SORTED_DESC=%s, по убыванию
+A11Y_CHART=Диаграмма для %s, %s
+COL_FILES=Файлы
+COL_MODIFIED=Изменён
+COL_MODIFIED_TIP=Последнее изменение содержимого (mtime)
+COL_CHANGED=Статус изменён
+COL_CHANGED_TIP=Последнее изменение содержимого или метаданных — права, владелец, переименование (ctime)
+COL_NAME=Имя
+
+# ---- Top-left folder stats overlay ----
+STATS_SIZE=Размер: %s
+STATS_FILES=Файлы: %s
+STATS_PERMS=Права: %s
+
+# ---- Hover tooltip ----
+HOVER_AVAILABLE=Доступно:
+HOVER_SIZE=Размер:
+HOVER_FILES=Файлы:
+HOVER_PERMS=Права:
+HOVER_LINK=Символическая ссылка:
+HOVER_LINK_TARGET=→ %s (не учитывается в размерах)
+HOVER_LINK_UNREADABLE=цель недоступна для чтения
+HOVER_MODIFIED=Изменён:
+HOVER_CHANGED=Статус изменён:
+HOVER_OWNER=Владелец:
+HOVER_TYPE=Тип:
+
+# ---- Context menu ----
+MENU_ZOOM=Приблизить
+MENU_RESCAN=Проанализировать заново
+MENU_OPEN=Открыть
+MENU_HIDE=Скрыть
+MENU_TRASH=Переместить в корзину
+MENU_DELETE=Удалить навсегда
+MENU_CANCEL=Отмена
+
+# ---- Summary table keys / delete dialog ----
+DELETE_CONFIRM_TITLE=Удалить навсегда?
+DELETE_CONFIRM_FILE=Файл, %s. Это действие нельзя отменить.
+DELETE_CONFIRM_UNREADABLE=Содержит нечитаемые папки (%s): их размер неизвестен, и удаление может остановиться на полпути.
+DELETE_CONFIRM_LINK=Символическая ссылка на %s. Удаляется только ссылка; её цель остаётся.
+DELETE_CONFIRM_DIR=Папка и всё её содержимое (%s, файлов: %s). Это действие нельзя отменить.
+DELETE_CONFIRM_YES=Удалить
+ERR_DELETE_FAILED=Не удалось удалить %s: %s
+ERR_DELETE_PARTIAL=%s, возможно, удалён частично; проанализируйте заново (r), чтобы увидеть, что осталось.
+ERR_OPEN_FAILED=Не удалось открыть %s: %s
+TABLE_HELP_HINT=нажмите ? для списка клавиш
+TABLE_TAG_DIRS_FIRST=папки сначала
+TABLE_TAG_SCANNING=промежуточные размеры · открытие папок, удаление и корзина ждут конца анализа
+TABLE_TAG_DOTFILES_HIDDEN=скрытые файлы не показаны (%s)
+TABLE_TAG_MARKED=отмечено: %s (%s)
+TABLE_JUMP=Перейти к:
+COL_PERCENT=%
+COL_PERMS=Права
+DELETE_CONFIRM_MANY=Элементов: %s (%s, файлов: %s). Это действие нельзя отменить.
+DELETE_CONFIRM_MORE=… и ещё %s
+ERR_TRASH_FAILED=Не удалось переместить %s в корзину: %s
+ERR_TRASH_ROOT=корневую папку нельзя переместить в корзину
+ERR_TRASH_IN_TRASH=%s не перемещается в корзину: он находится внутри корзины (или содержит её). Используйте «Удалить навсегда».
+ERR_CONTAINS_MOUNT=Удаление %s отклонено: это смонтированная файловая система или она внутри (%s). Сначала отмонтируйте её.
+ERR_OTHER_FS_INSIDE=остановлено на %s, который находится в другой файловой системе
+TRASH_CONFIRM_TITLE=Очистить корзину?
+TRASH_CONFIRM_BODY=Элементы в корзине (%s, на всех дисках) будут удалены навсегда. Это действие нельзя отменить.
+TRASH_CONFIRM_YES=Очистить корзину
+STATUS_TRASH_EMPTY=Корзина уже пуста
+STATUS_EMPTYING_TRASH=Очистка корзины…
+STATUS_TRASH_EMPTIED=Корзина очищена
+ERR_EMPTY_TRASH=Не удалось очистить корзину: %s
+ERR_SETTINGS_FILE=Не удалось прочитать файл настроек (перемещён в %s, используются значения по умолчанию): %s
+ERR_SETTINGS_SAVE=Не удалось сохранить настройки: %s
+ERR_SETTINGS_UNREADABLE=Настройки не загружены из %s (%s); используются значения по умолчанию, файл не перезаписывается.
+ERR_SETTINGS_NOT_FILE=не обычный файл
+ERR_SETTINGS_TOO_BIG=больше 1 МиБ
+ERR_SETTINGS_FIELDS=Недопустимые настройки пропущены (использованы значения по умолчанию): %s. Исходный файл скопирован в %s.
+
+# ---- Keyboard shortcuts overlay (?) ----
+HELP_TITLE=Клавиши
+HELP_CLOSE=Закрыть
+HELP_SECTION_MOVE=Перемещение
+HELP_SECTION_SORT=Сортировка и столбцы
+HELP_SECTION_ACT=Действия
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=Предыдущая / следующая строка
+HELP_KEYS_PAGE=PgUp PgDn
+HELP_PAGE=На экран вверх / вниз
+HELP_KEYS_HOMEEND=Home End
+HELP_HOMEEND=Первая / последняя строка
+HELP_KEYS_OPEN=➡
+HELP_OPEN=Открыть папку под курсором
+HELP_KEYS_ENTER=Enter, двойной щелчок
+HELP_ENTER=Открыть папку или файл в приложении по умолчанию
+HELP_KEYS_PARENT=⬅ Backspace
+HELP_PARENT=Родительская папка
+HELP_KEYS_JUMP=/
+HELP_JUMP=Перейти к имени (введите, затем Enter)
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=Сортировка по размеру / имени / файлам / изменению / статусу / правам (повторно — обратный порядок)
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=Показать / скрыть размер / файлы / изменён / статус / права / проценты / полосу
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=Сдвинуть влево / вправо последний отсортированный, показанный или скрытый столбец
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=Папки перед файлами
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=Показать / скрыть скрытые файлы
+HELP_KEYS_MARK=Пробел, Ctrl+щелчок
+HELP_MARK=Отметить / снять отметку (Пробел также сдвигает вниз)
+HELP_KEYS_DELETE=D
+HELP_DELETE=Удалить навсегда (отмеченные строки или строку под курсором) — с подтверждением
+HELP_KEYS_TRASH=T
+HELP_TRASH=В корзину (отмеченные строки или строку под курсором)
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=Проанализировать эту папку заново
+HELP_KEYS_INFO=i
+HELP_INFO=Показать / скрыть сведения о строке под курсором
+HELP_KEYS_ESC=Esc
+HELP_ESC=Снять отметки или закрыть сведения
+HELP_KEYS_HELP=?
+HELP_HELP=Эта справка
+
+# ---- Categories (bar beside the contents table) ----
+SUMMARY_CATEGORIES=Категории
+CAT_VIDEO=Видео
+CAT_AUDIO=Аудио
+CAT_IMAGES=Изображения
+CAT_DOCUMENTS=Документы
+CAT_ARCHIVES=Архивы
+CAT_APPLICATIONS=Приложения
+CAT_CODE=Код
+CAT_DATA=Данные
+CAT_MAIL=Почта
+CAT_OTHER=Прочее
+CAT_FILES=файлов
+CAT_CLEAR=Показать все категории
+CAT_NO_FILES=Здесь нет файлов
+CAT_CLICK=Щёлкните, чтобы показать только эти файлы
+CAT_CLICK_AGAIN=Щёлкните ещё раз, чтобы показать все файлы
+ERR_CATEGORIES_FILE=Не удалось использовать файл категорий %s (%s); используются встроенные категории.
+ERR_CATEGORIES_PROBLEMS=Файл категорий %s: пропущено %s
+ERR_CATEGORIES_SAVE=Не удалось записать файл категорий %s: %s
+ERR_CATEGORIES_NO_LIST=нужен список "categories"
+ERR_CATEGORIES_NO_NAME=у %s нет имени
+ERR_CATEGORIES_ENTRY=%s: недопустимая запись в "%s": %s
+ERR_CATEGORIES_TWICE=%s уже есть в «%s»
+ERR_CATEGORIES_MANY=категорий: %s; больше %s — цвета трудно различить

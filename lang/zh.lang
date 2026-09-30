@@ -1,0 +1,272 @@
+# name: 简体中文
+#
+# spacemap language file (see en.lang for how these files work).
+
+# ---- Toolbar ----
+TOOLBAR_SUMMARY_VIEW=摘要视图
+TOOLBAR_CHART_VIEW=图表视图
+CHART_ORDER_SIZE=从大到小
+CHART_ORDER_NAME=按名称 (A–Z)
+TOOLBAR_FILTERS_ACTIVE=筛选 (已启用)
+TOOLBAR_EMPTY_TRASH=清空回收站
+TOOLBAR_PICK_FOLDER=选择要扫描的驱动器、挂载点或文件夹
+TOOLBAR_SCAN_ROOT=从系统根目录 (/) 扫描
+TOOLBAR_SCAN_HOME=扫描您的主文件夹 (%s)
+TOOLBAR_RESCAN=重新扫描此文件夹
+TOOLBAR_PATH_HINT=输入路径并按 Enter — 例如 U 盘或网络挂载
+TOOLBAR_PATH_EDIT_TOOLTIP=输入路径
+DIALOG_PICK_FOLDER_TITLE=选择要扫描的驱动器或文件夹
+
+# ---- Filter panel ----
+FILTER_TITLE=筛选
+FILTER_CLOSE=关闭筛选
+FILTER_NAME_LABEL=名称
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=用空格或逗号分隔的模式；文件只要匹配其中任意一个即可。要包含空格或逗号，请把模式放在 "双引号" 中（或在字符前写 \\）。\n* = 任意字符，? = 单个字符，[a,b,c] 或 {a,b,c} = 任选其一。\n没有 * 或 ? 时，名称中任意位置包含即匹配。除非打开 Aa 按钮，否则不区分大小写。
+FILTER_CASE_SENSITIVE=区分大小写 — 点击以忽略大小写
+FILTER_CASE_INSENSITIVE=不区分大小写 — 点击以精确匹配大小写
+FILTER_COL_FROM_MIN=从 / 最小
+FILTER_COL_TO_MAX=到 / 最大
+FILTER_ROW_SIZE=大小
+FILTER_ROW_CREATED=创建时间
+FILTER_ROW_MODIFIED=修改时间
+FILTER_HINT_SIZE_MIN=例如 100M
+FILTER_HINT_SIZE_MAX=例如 4.7G
+FILTER_HINT_DATE=YYYY-MM-DD
+FILTER_APPLY=应用
+FILTER_INVALID=请修正红框中的字段（悬停查看原因）后再应用。
+FILTER_INVALID_KEEPS_PREVIOUS=请修正红框中的字段（悬停查看原因）。在此之前，表格仍显示之前应用的筛选结果。
+FILTER_CLEAR=清除
+FILTER_SHOWING=显示 %s / %s 个文件 (%s / %s)
+FILTER_APPLIES_ON_FINISH=扫描完成时应用。
+FILTER_LIVE_UNFILTERED=扫描过程中的实时视图不经筛选。
+FILTER_HELP=大小使用 K/M/G/T (×1024)。日期为本地时间；加上 HH:MM 可指定时间。
+FILTER_ERR_MIN_SIZE=最小大小
+FILTER_ERR_MAX_SIZE=最大大小
+FILTER_ERR_CREATED_FROM=创建时间起
+FILTER_ERR_CREATED_TO=创建时间止
+FILTER_ERR_MODIFIED_FROM=修改时间起
+FILTER_ERR_MODIFIED_TO=修改时间止
+
+# ---- Validation error messages ----
+ERR_SIZE_FORMAT='%s' 不是有效的大小（例如 500M、1.5G）
+ERR_SIZE_UNIT=未知单位 '%s'（请使用 K、M、G 或 T）
+ERR_DATE_FORMAT='%s' 不是有效的日期（请使用 YYYY-MM-DD）
+ERR_DATE_TZ='%s' 在本地时区中不存在
+ERR_FIELD_PREFIX=%s：%s
+
+# ---- Settings panel ----
+SETTINGS_TITLE=图表设置
+SETTINGS_CLOSE=关闭设置
+SETTINGS_DEPTH_GROUPING=深度与分组
+SETTINGS_DEPTH_LEVELS=显示的层级数
+SETTINGS_MIN_SLICE_ANGLE=扇区最小角度 (°)
+SETTINGS_MAX_SLICES=每环最多扇区数
+SETTINGS_UNLIMITED_SLICES=不限扇区数（不归入“其他”）
+SETTINGS_UNLIMITED_SLICES_HOVER=无论有多少项，都把每一项显示为单独的扇区，而不是把小项归入“（其他 N 项）”。包含数千项的文件夹会产生数千个极细的扇区 — 用 Ctrl+滚轮放大后才能点击。
+SETTINGS_HUB_SIZE=中心圆大小
+SETTINGS_COLORS=颜色
+SETTINGS_RING_SAT=圆环饱和度
+SETTINGS_RING_BRIGHT_OUTER=圆环亮度（外圈）
+SETTINGS_BRIGHT_FALLOFF=每环亮度递减
+SETTINGS_BRIGHT_FLOOR=最低亮度
+SETTINGS_OTHER_SAT=“其他”饱和度
+SETTINGS_OTHER_BRIGHT=“其他”亮度
+SETTINGS_FREE_GAMMA=可用空间伽马（<1 变亮）
+SETTINGS_LINE_RENDERING=线条绘制
+SETTINGS_BORDER_THICKNESS=边框粗细
+SETTINGS_BORDER_DARKNESS=边框深浅
+SETTINGS_CURVE_SMOOTH=曲线平滑度（像素/步，越小越平滑）
+SETTINGS_LOG=日志
+SETTINGS_MAX_LOG_LINES=保存的问题行数上限
+SETTINGS_SCANNING=扫描
+SETTINGS_APPARENT_SIZE=按表观大小计算
+SETTINGS_APPARENT_SIZE_HOVER=按每个文件的长度计算，而不是它占用的磁盘空间。关闭时：与 du 相同，稀疏文件按实际占用计算，硬链接文件只计算一次。对于不报告占用空间的网络或 FUSE 驱动器，请打开此项。下次扫描时生效。
+SETTINGS_PROGRESS_INTERVAL=进度报告间隔（项数，始终为 2 的幂）
+SETTINGS_DEFAULTS=恢复默认
+SETTINGS_LANGUAGE=语言
+
+# ---- Log panel ----
+LOG_ISSUES_NONE=问题：无
+LOG_ISSUES_COUNT=问题：%s
+LOG_CLEAR=清除
+LOG_MORE_NOT_SHOWN=…另有 %s 个问题未显示
+
+# ---- Central panel / empty state ----
+CENTRAL_EMPTY_STATE=选择起点：🔍（任意驱动器、挂载点或文件夹）、/（系统根目录）或 🏠（主文件夹）— 或在上方输入路径并按 Enter。
+
+# ---- Scan status / errors ----
+STATUS_SCAN_ABORTED=扫描已中止
+STATUS_SCANNING=正在扫描…（按 Esc 取消）
+STATUS_SCAN_COMPLETED=扫描完成，用时 %s 秒
+ERR_PATH_NOT_FOUND=找不到路径：%s
+ERR_CANNOT_STAT=无法读取 %s 的信息：%s
+ERR_NETWORK_URL='%s://' 是网络地址，不是已挂载的路径 — 请先挂载它（例如通过文件管理器的“网络”视图），再输入它实际挂载到的本地路径（通常在 /run/user/<uid>/gvfs/... 下）。
+ERR_NOT_A_DIRECTORY=不是文件夹（这是一个文件）：%s
+ERR_FOLDER_DIALOG_FAILED=无法打开文件夹对话框（xdg-desktop-portal 是否在运行？）
+SCAN_PROGRESS_ITEMS_SCANNED=已扫描 %s 项
+SCAN_PROGRESS_OF_TOTAL=%s / %s 项
+SCAN_PROGRESS_ITEMS=%s 项
+SCAN_PROGRESS_CANCEL_HINT=%s · 按 Esc 取消
+
+# ---- Filesystem I/O errors ----
+ERR_IO_NOT_FOUND=找不到（没有该文件或文件夹）
+ERR_IO_PERMISSION=没有读取或进入该文件夹的权限
+ERR_IO_OTHER=无法读取（%s）
+ERR_IO_LINE=%s — %s
+
+# ---- Sunburst aggregate buckets ----
+EXT_NO_EXTENSION=（无扩展名）
+SEG_OTHER_ITEMS=（其他 %s 项）
+SEG_FREE_SPACE=可用空间
+SEG_OTHER_FS=%s [其他文件系统]
+
+# ---- Summary view ----
+SUMMARY_CONTENTS=内容
+COL_SIZE=大小
+A11Y_SORTED_ASC=%s，升序
+A11Y_SORTED_DESC=%s，降序
+A11Y_CHART=%s 的图表，%s
+COL_FILES=文件数
+COL_MODIFIED=修改时间
+COL_MODIFIED_TIP=内容的最后修改时间 (mtime)
+COL_CHANGED=变更时间
+COL_CHANGED_TIP=内容或元数据的最后变更时间 — 权限、所有者、重命名 (ctime)
+COL_NAME=名称
+
+# ---- Top-left folder stats overlay ----
+STATS_SIZE=大小：%s
+STATS_FILES=文件数：%s
+STATS_PERMS=权限：%s
+
+# ---- Hover tooltip ----
+HOVER_AVAILABLE=可用：
+HOVER_SIZE=大小：
+HOVER_FILES=文件数：
+HOVER_PERMS=权限：
+HOVER_LINK=符号链接：
+HOVER_LINK_TARGET=→ %s（不计入大小）
+HOVER_LINK_UNREADABLE=无法读取链接目标
+HOVER_MODIFIED=修改时间：
+HOVER_CHANGED=变更时间：
+HOVER_OWNER=所有者：
+HOVER_TYPE=类型：
+
+# ---- Context menu ----
+MENU_ZOOM=放大
+MENU_RESCAN=重新扫描
+MENU_OPEN=打开
+MENU_HIDE=隐藏
+MENU_TRASH=移到回收站
+MENU_DELETE=永久删除
+MENU_CANCEL=取消
+
+# ---- Summary table keys / delete dialog ----
+DELETE_CONFIRM_TITLE=永久删除？
+DELETE_CONFIRM_FILE=文件，%s。此操作无法撤销。
+DELETE_CONFIRM_UNREADABLE=包含 %s 个无法读取的文件夹：它们的大小未知，删除可能会中途停止。
+DELETE_CONFIRM_LINK=指向 %s 的符号链接。只删除链接本身，目标保留。
+DELETE_CONFIRM_DIR=该文件夹及其全部内容（%s，文件数：%s）。此操作无法撤销。
+DELETE_CONFIRM_YES=删除
+ERR_DELETE_FAILED=无法删除 %s：%s
+ERR_DELETE_PARTIAL=%s 可能只被删除了一部分；请重新扫描 (r) 查看剩余内容。
+ERR_OPEN_FAILED=无法打开 %s：%s
+TABLE_HELP_HINT=按 ? 查看键盘快捷键
+TABLE_TAG_DIRS_FIRST=文件夹优先
+TABLE_TAG_SCANNING=当前大小 · 打开文件夹、删除和移到回收站需等待扫描完成
+TABLE_TAG_DOTFILES_HIDDEN=已隐藏点文件 (%s)
+TABLE_TAG_MARKED=已标记 %s 项 (%s)
+TABLE_JUMP=跳转到：
+COL_PERCENT=%
+COL_PERMS=权限
+DELETE_CONFIRM_MANY=%s 项（%s，文件数：%s）。此操作无法撤销。
+DELETE_CONFIRM_MORE=…还有 %s 项
+ERR_TRASH_FAILED=无法将 %s 移到回收站：%s
+ERR_TRASH_ROOT=根文件夹不能移到回收站
+ERR_TRASH_IN_TRASH=不将 %s 移到回收站：它位于回收站内（或包含回收站）。请改用“永久删除”。
+ERR_CONTAINS_MOUNT=拒绝删除 %s：它本身是或包含已挂载的文件系统 (%s)。请先卸载。
+ERR_OTHER_FS_INSIDE=在 %s 处停止，它位于另一个文件系统上
+TRASH_CONFIRM_TITLE=清空回收站？
+TRASH_CONFIRM_BODY=回收站（所有驱动器）中的 %s 项将被永久删除。此操作无法撤销。
+TRASH_CONFIRM_YES=清空回收站
+STATUS_TRASH_EMPTY=回收站已经是空的
+STATUS_EMPTYING_TRASH=正在清空回收站…
+STATUS_TRASH_EMPTIED=回收站已清空
+ERR_EMPTY_TRASH=无法清空回收站：%s
+ERR_SETTINGS_FILE=无法读取设置文件（已移到 %s，使用默认值）：%s
+ERR_SETTINGS_SAVE=无法保存设置：%s
+ERR_SETTINGS_UNREADABLE=未从 %s 加载设置 (%s)；使用默认值，且不会覆盖该文件。
+ERR_SETTINGS_NOT_FILE=不是普通文件
+ERR_SETTINGS_TOO_BIG=大于 1 MiB
+ERR_SETTINGS_FIELDS=已忽略无效设置（改用默认值）：%s。原文件已复制到 %s。
+
+# ---- Keyboard shortcuts overlay (?) ----
+HELP_TITLE=键盘快捷键
+HELP_CLOSE=关闭
+HELP_SECTION_MOVE=移动
+HELP_SECTION_SORT=排序与列
+HELP_SECTION_ACT=操作
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=上一行 / 下一行
+HELP_KEYS_PAGE=PgUp PgDn
+HELP_PAGE=向上 / 向下一屏
+HELP_KEYS_HOMEEND=Home End
+HELP_HOMEEND=第一行 / 最后一行
+HELP_KEYS_OPEN=➡
+HELP_OPEN=打开光标处的文件夹
+HELP_KEYS_ENTER=Enter、双击
+HELP_ENTER=打开文件夹，或用默认程序打开文件
+HELP_KEYS_PARENT=⬅ Backspace
+HELP_PARENT=上级文件夹
+HELP_KEYS_JUMP=/
+HELP_JUMP=跳转到名称（输入后按 Enter）
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=按大小 / 名称 / 文件数 / 修改时间 / 变更时间 / 权限排序（再按一次：反向）
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=显示 / 隐藏大小 / 文件数 / 修改时间 / 变更时间 / 权限 / 百分比 / 条形图
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=将最后排序、显示或隐藏的列左移 / 右移
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=文件夹排在文件前
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=显示 / 隐藏点文件
+HELP_KEYS_MARK=空格、Ctrl+单击
+HELP_MARK=标记 / 取消标记该行（空格同时下移一行）
+HELP_KEYS_DELETE=D
+HELP_DELETE=永久删除（已标记的行，或光标所在行）— 会先确认
+HELP_KEYS_TRASH=T
+HELP_TRASH=移到回收站（已标记的行，或光标所在行）
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=重新扫描此文件夹
+HELP_KEYS_INFO=i
+HELP_INFO=显示 / 隐藏光标所在行的详情
+HELP_KEYS_ESC=Esc
+HELP_ESC=清除标记，或关闭详情
+HELP_KEYS_HELP=?
+HELP_HELP=本帮助
+
+# ---- Categories (bar beside the contents table) ----
+SUMMARY_CATEGORIES=分类
+CAT_VIDEO=视频
+CAT_AUDIO=音频
+CAT_IMAGES=图片
+CAT_DOCUMENTS=文档
+CAT_ARCHIVES=压缩包
+CAT_APPLICATIONS=应用程序
+CAT_CODE=代码
+CAT_DATA=数据
+CAT_MAIL=邮件
+CAT_OTHER=其他
+CAT_FILES=个文件
+CAT_CLEAR=显示所有分类
+CAT_NO_FILES=这里没有文件
+CAT_CLICK=点击以只显示这些文件
+CAT_CLICK_AGAIN=再次点击以显示所有文件
+ERR_CATEGORIES_FILE=无法使用分类文件 %s (%s)；改用内置分类。
+ERR_CATEGORIES_PROBLEMS=分类文件 %s：已跳过 %s
+ERR_CATEGORIES_SAVE=无法写入分类文件 %s：%s
+ERR_CATEGORIES_NO_LIST=需要一个 "categories" 列表
+ERR_CATEGORIES_NO_NAME=%s 没有名称
+ERR_CATEGORIES_ENTRY=%s："%s" 中的条目无效：%s
+ERR_CATEGORIES_TWICE=%s 已在“%s”中
+ERR_CATEGORIES_MANY=%s 个分类：超过 %s 个后颜色难以区分

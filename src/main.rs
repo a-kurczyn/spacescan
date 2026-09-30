@@ -909,7 +909,10 @@ impl eframe::App for DiskScanApp {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
         let scan_backlog = self.poll_scan();
-        if !self.korean_font && self.saw_hangul.load(std::sync::atomic::Ordering::Relaxed) {
+        // The Korean font: once a Korean name is found, or for a Korean UI.
+        let korean_needed = self.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
+            || current_lang_code() == "ko";
+        if !self.korean_font && korean_needed {
             self.korean_font = true;
             install_fallback_fonts(&ctx, true);
         }

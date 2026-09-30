@@ -1,0 +1,272 @@
+# name: Italiano
+#
+# spacemap language file (see en.lang for how these files work).
+
+# ---- Toolbar ----
+TOOLBAR_SUMMARY_VIEW=Vista riepilogo
+TOOLBAR_CHART_VIEW=Vista grafico
+CHART_ORDER_SIZE=Prima i più grandi
+CHART_ORDER_NAME=Per nome (A–Z)
+TOOLBAR_FILTERS_ACTIVE=Filtri (attivi)
+TOOLBAR_EMPTY_TRASH=Svuota cestino
+TOOLBAR_PICK_FOLDER=Scegli un disco, un punto di montaggio o una cartella da analizzare
+TOOLBAR_SCAN_ROOT=Analizza dalla radice del sistema (/)
+TOOLBAR_SCAN_HOME=Analizza la tua cartella home (%s)
+TOOLBAR_RESCAN=Rianalizza questa cartella
+TOOLBAR_PATH_HINT=Digita un percorso e premi Invio — ad es. un'unità USB o un montaggio di rete
+TOOLBAR_PATH_EDIT_TOOLTIP=Digita un percorso
+DIALOG_PICK_FOLDER_TITLE=Scegli un disco o una cartella da analizzare
+
+# ---- Filter panel ----
+FILTER_TITLE=Filtri
+FILTER_CLOSE=Chiudi i filtri
+FILTER_NAME_LABEL=Nome
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=Modelli separati da spazi o virgole; un file corrisponde se ne corrisponde almeno uno. Metti un modello tra "virgolette" (o scrivi \\ prima di un carattere) per includere spazi o virgole.\n* = qualsiasi carattere, ? = un carattere, [a,b,c] o {a,b,c} = alternative.\nSenza * o ? corrisponde in qualsiasi punto del nome. Non distingue maiuscole e minuscole, a meno che il pulsante Aa sia attivo.
+FILTER_CASE_SENSITIVE=Distingue maiuscole/minuscole — clic per ignorarle
+FILTER_CASE_INSENSITIVE=Ignora maiuscole/minuscole — clic per rispettarle
+FILTER_COL_FROM_MIN=da / min
+FILTER_COL_TO_MAX=a / max
+FILTER_ROW_SIZE=Dimensione
+FILTER_ROW_CREATED=Creato
+FILTER_ROW_MODIFIED=Modificato
+FILTER_HINT_SIZE_MIN=ad es. 100M
+FILTER_HINT_SIZE_MAX=ad es. 4.7G
+FILTER_HINT_DATE=AAAA-MM-GG
+FILTER_APPLY=Applica
+FILTER_INVALID=Correggi il campo bordato di rosso (passaci sopra per il motivo) per applicare.
+FILTER_INVALID_KEEPS_PREVIOUS=Correggi il campo bordato di rosso (passaci sopra per il motivo). Fino ad allora la tabella mostra ancora il filtro applicato in precedenza.
+FILTER_CLEAR=Cancella
+FILTER_SHOWING=Mostrati %s file su %s (%s su %s)
+FILTER_APPLIES_ON_FINISH=Si applica al termine dell'analisi.
+FILTER_LIVE_UNFILTERED=La vista in tempo reale durante un'analisi non è filtrata.
+FILTER_HELP=Le dimensioni usano K/M/G/T (×1024). Le date sono locali; aggiungi HH:MM per un orario.
+FILTER_ERR_MIN_SIZE=Dimensione min.
+FILTER_ERR_MAX_SIZE=Dimensione max.
+FILTER_ERR_CREATED_FROM=Creato dal
+FILTER_ERR_CREATED_TO=Creato fino al
+FILTER_ERR_MODIFIED_FROM=Modificato dal
+FILTER_ERR_MODIFIED_TO=Modificato fino al
+
+# ---- Validation error messages ----
+ERR_SIZE_FORMAT='%s' non è una dimensione (ad es. 500M, 1.5G)
+ERR_SIZE_UNIT=unità sconosciuta '%s' (usa K, M, G o T)
+ERR_DATE_FORMAT='%s' non è una data (usa AAAA-MM-GG)
+ERR_DATE_TZ='%s' non esiste nel fuso orario locale
+ERR_FIELD_PREFIX=%s: %s
+
+# ---- Settings panel ----
+SETTINGS_TITLE=Impostazioni del grafico
+SETTINGS_CLOSE=Chiudi le impostazioni
+SETTINGS_DEPTH_GROUPING=Profondità e raggruppamento
+SETTINGS_DEPTH_LEVELS=Livelli di profondità mostrati
+SETTINGS_MIN_SLICE_ANGLE=Angolo minimo di uno spicchio (°)
+SETTINGS_MAX_SLICES=Spicchi massimi per anello
+SETTINGS_UNLIMITED_SLICES=Spicchi illimitati (senza gruppo "altri")
+SETTINGS_UNLIMITED_SLICES_HOVER=Mostra ogni elemento come spicchio a sé, quanti che siano, invece di raggruppare i piccoli in "(N altri elementi)". Una cartella con migliaia di voci produrrà migliaia di spicchi sottilissimi — usa Ctrl+rotellina per ingrandire e poterli cliccare.
+SETTINGS_HUB_SIZE=Dimensione del centro
+SETTINGS_COLORS=Colori
+SETTINGS_RING_SAT=Saturazione degli anelli
+SETTINGS_RING_BRIGHT_OUTER=Luminosità degli anelli (esterno)
+SETTINGS_BRIGHT_FALLOFF=Calo di luminosità per anello
+SETTINGS_BRIGHT_FLOOR=Luminosità minima
+SETTINGS_OTHER_SAT=Saturazione del gruppo "altri"
+SETTINGS_OTHER_BRIGHT=Luminosità del gruppo "altri"
+SETTINGS_FREE_GAMMA=Gamma dello spazio libero (<1 schiarisce)
+SETTINGS_LINE_RENDERING=Resa delle linee
+SETTINGS_BORDER_THICKNESS=Spessore dei bordi
+SETTINGS_BORDER_DARKNESS=Scurezza dei bordi
+SETTINGS_CURVE_SMOOTH=Morbidezza delle curve (px/passo, più basso = più morbido)
+SETTINGS_LOG=Registro
+SETTINGS_MAX_LOG_LINES=Righe di problemi conservate (max.)
+SETTINGS_SCANNING=Analisi
+SETTINGS_APPARENT_SIZE=Conta la dimensione apparente
+SETTINGS_APPARENT_SIZE_HOVER=Conta la lunghezza di ogni file invece dello spazio su disco che occupa. Disattivato: i file sparsi contano ciò che occupano davvero e i file con collegamenti fisici una volta sola, come du. Attivalo per unità di rete o FUSE che non riportano lo spazio occupato. Ha effetto dalla prossima analisi.
+SETTINGS_PROGRESS_INTERVAL=Intervallo di avanzamento (elementi, sempre una potenza di 2)
+SETTINGS_DEFAULTS=Valori predefiniti
+SETTINGS_LANGUAGE=Lingua
+
+# ---- Log panel ----
+LOG_ISSUES_NONE=Problemi: nessuno
+LOG_ISSUES_COUNT=Problemi: %s
+LOG_CLEAR=Cancella
+LOG_MORE_NOT_SHOWN=… e altri %s problemi non mostrati
+
+# ---- Central panel / empty state ----
+CENTRAL_EMPTY_STATE=Scegli un punto di partenza con 🔍 (qualsiasi disco, montaggio o cartella), / (radice del sistema) o 🏠 (home) — oppure digita un percorso qui sopra e premi Invio.
+
+# ---- Scan status / errors ----
+STATUS_SCAN_ABORTED=Analisi interrotta
+STATUS_SCANNING=Analisi in corso… (Esc per annullare)
+STATUS_SCAN_COMPLETED=Analisi completata in %s s
+ERR_PATH_NOT_FOUND=Percorso non trovato: %s
+ERR_CANNOT_STAT=Impossibile leggere le informazioni di %s: %s
+ERR_NETWORK_URL='%s://' è un indirizzo di rete, non un percorso montato — montalo prima (ad es. dalla vista Rete del tuo gestore di file), poi digita il percorso locale reale in cui è montato (spesso sotto /run/user/<uid>/gvfs/...).
+ERR_NOT_A_DIRECTORY=Non è una cartella (è un file): %s
+ERR_FOLDER_DIALOG_FAILED=Impossibile aprire la finestra delle cartelle (xdg-desktop-portal è in esecuzione?)
+SCAN_PROGRESS_ITEMS_SCANNED=%s elementi analizzati
+SCAN_PROGRESS_OF_TOTAL=%s elementi su %s
+SCAN_PROGRESS_ITEMS=%s elementi
+SCAN_PROGRESS_CANCEL_HINT=%s · Esc per annullare
+
+# ---- Filesystem I/O errors ----
+ERR_IO_NOT_FOUND=non trovato (nessun file o cartella con questo nome)
+ERR_IO_PERMISSION=nessun permesso di leggere o aprire quella cartella
+ERR_IO_OTHER=impossibile leggere (%s)
+ERR_IO_LINE=%s — %s
+
+# ---- Sunburst aggregate buckets ----
+EXT_NO_EXTENSION=(senza estensione)
+SEG_OTHER_ITEMS=(%s altri elementi)
+SEG_FREE_SPACE=Spazio libero
+SEG_OTHER_FS=%s [altro file system]
+
+# ---- Summary view ----
+SUMMARY_CONTENTS=Contenuto
+COL_SIZE=Dimensione
+A11Y_SORTED_ASC=%s, ordine crescente
+A11Y_SORTED_DESC=%s, ordine decrescente
+A11Y_CHART=Grafico di %s, %s
+COL_FILES=File
+COL_MODIFIED=Modificato
+COL_MODIFIED_TIP=Ultima modifica del contenuto (mtime)
+COL_CHANGED=Cambiato
+COL_CHANGED_TIP=Ultima modifica del contenuto o dei metadati — permessi, proprietario, rinomina (ctime)
+COL_NAME=Nome
+
+# ---- Top-left folder stats overlay ----
+STATS_SIZE=Dimensione: %s
+STATS_FILES=File: %s
+STATS_PERMS=Permessi: %s
+
+# ---- Hover tooltip ----
+HOVER_AVAILABLE=Disponibile:
+HOVER_SIZE=Dimensione:
+HOVER_FILES=File:
+HOVER_PERMS=Permessi:
+HOVER_LINK=Collegamento simbolico:
+HOVER_LINK_TARGET=→ %s (non conteggiato nelle dimensioni)
+HOVER_LINK_UNREADABLE=destinazione illeggibile
+HOVER_MODIFIED=Modificato:
+HOVER_CHANGED=Cambiato:
+HOVER_OWNER=Proprietario:
+HOVER_TYPE=Tipo:
+
+# ---- Context menu ----
+MENU_ZOOM=Ingrandisci
+MENU_RESCAN=Rianalizza
+MENU_OPEN=Apri
+MENU_HIDE=Nascondi
+MENU_TRASH=Sposta nel cestino
+MENU_DELETE=Elimina definitivamente
+MENU_CANCEL=Annulla
+
+# ---- Summary table keys / delete dialog ----
+DELETE_CONFIRM_TITLE=Eliminare definitivamente?
+DELETE_CONFIRM_FILE=File, %s. L'operazione non può essere annullata.
+DELETE_CONFIRM_UNREADABLE=Contiene %s cartelle che non è stato possibile leggere: la loro dimensione è sconosciuta e l'eliminazione potrebbe fermarsi a metà.
+DELETE_CONFIRM_LINK=Collegamento simbolico a %s. Viene rimosso solo il collegamento; la destinazione resta.
+DELETE_CONFIRM_DIR=La cartella e tutto il suo contenuto (%s, numero di file: %s). L'operazione non può essere annullata.
+DELETE_CONFIRM_YES=Elimina
+ERR_DELETE_FAILED=Impossibile eliminare %s: %s
+ERR_DELETE_PARTIAL=%s potrebbe essere stato eliminato in parte; rianalizzalo (r) per vedere cosa resta.
+ERR_OPEN_FAILED=Impossibile aprire %s: %s
+TABLE_HELP_HINT=premi ? per le scorciatoie da tastiera
+TABLE_TAG_DIRS_FIRST=prima le cartelle
+TABLE_TAG_SCANNING=dimensioni parziali · aprire cartelle, eliminare e cestinare attendono la fine dell'analisi
+TABLE_TAG_DOTFILES_HIDDEN=file nascosti celati (%s)
+TABLE_TAG_MARKED=%s selezionati (%s)
+TABLE_JUMP=Vai a:
+COL_PERCENT=%
+COL_PERMS=Permessi
+DELETE_CONFIRM_MANY=%s elementi (%s, numero di file: %s). L'operazione non può essere annullata.
+DELETE_CONFIRM_MORE=… e altri %s
+ERR_TRASH_FAILED=Impossibile spostare %s nel cestino: %s
+ERR_TRASH_ROOT=la cartella radice non può essere spostata nel cestino
+ERR_TRASH_IN_TRASH=%s non viene spostato nel cestino: si trova in un cestino (o ne contiene uno). Usa invece Elimina definitivamente.
+ERR_CONTAINS_MOUNT=Eliminazione rifiutata per %s: è o contiene un file system montato (%s). Smontalo prima.
+ERR_OTHER_FS_INSIDE=fermato a %s, che si trova su un altro file system
+TRASH_CONFIRM_TITLE=Svuotare il cestino?
+TRASH_CONFIRM_BODY=%s elementi nel cestino (su tutti i dischi) saranno eliminati definitivamente. L'operazione non può essere annullata.
+TRASH_CONFIRM_YES=Svuota cestino
+STATUS_TRASH_EMPTY=Il cestino è già vuoto
+STATUS_EMPTYING_TRASH=Svuotamento del cestino…
+STATUS_TRASH_EMPTIED=Cestino svuotato
+ERR_EMPTY_TRASH=Impossibile svuotare il cestino: %s
+ERR_SETTINGS_FILE=Impossibile leggere il file delle impostazioni (spostato in %s, valori predefiniti in uso): %s
+ERR_SETTINGS_SAVE=Impossibile salvare le impostazioni: %s
+ERR_SETTINGS_UNREADABLE=Impostazioni non caricate da %s (%s); valori predefiniti in uso, senza sovrascrivere il file.
+ERR_SETTINGS_NOT_FILE=non è un file normale
+ERR_SETTINGS_TOO_BIG=più grande di 1 MiB
+ERR_SETTINGS_FIELDS=Impostazioni non valide ignorate (usati i valori predefiniti): %s. Il file originale è stato copiato in %s.
+
+# ---- Keyboard shortcuts overlay (?) ----
+HELP_TITLE=Scorciatoie da tastiera
+HELP_CLOSE=Chiudi
+HELP_SECTION_MOVE=Spostarsi
+HELP_SECTION_SORT=Ordinamento e colonne
+HELP_SECTION_ACT=Azioni
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=Riga precedente / successiva
+HELP_KEYS_PAGE=Pag↑ Pag↓
+HELP_PAGE=Una schermata su / giù
+HELP_KEYS_HOMEEND=Home Fine
+HELP_HOMEEND=Prima / ultima riga
+HELP_KEYS_OPEN=➡
+HELP_OPEN=Apri la cartella sotto il cursore
+HELP_KEYS_ENTER=Invio, doppio clic
+HELP_ENTER=Apri una cartella, o un file con la sua applicazione predefinita
+HELP_KEYS_PARENT=⬅ Backspace
+HELP_PARENT=Cartella superiore
+HELP_KEYS_JUMP=/
+HELP_JUMP=Vai a un nome (digitalo, poi Invio)
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=Ordina per dimensione / nome / file / modificato / cambiato / permessi (di nuovo: inverti)
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=Mostra / nascondi dimensione / file / modificato / cambiato / permessi / percentuale / barra
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=Sposta a sinistra / destra l'ultima colonna ordinata, mostrata o nascosta
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=Cartelle prima dei file
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=Mostra / nascondi i file nascosti
+HELP_KEYS_MARK=Spazio, Ctrl+clic
+HELP_MARK=Seleziona / deseleziona la riga (Spazio scende anche di una riga)
+HELP_KEYS_DELETE=D
+HELP_DELETE=Elimina definitivamente (righe selezionate, o la riga del cursore) — chiede prima
+HELP_KEYS_TRASH=T
+HELP_TRASH=Sposta nel cestino (righe selezionate, o la riga del cursore)
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=Rianalizza questa cartella
+HELP_KEYS_INFO=i
+HELP_INFO=Mostra / nascondi i dettagli della riga del cursore
+HELP_KEYS_ESC=Esc
+HELP_ESC=Togli le selezioni, o chiudi i dettagli
+HELP_KEYS_HELP=?
+HELP_HELP=Questo aiuto
+
+# ---- Categories (bar beside the contents table) ----
+SUMMARY_CATEGORIES=Categorie
+CAT_VIDEO=Video
+CAT_AUDIO=Audio
+CAT_IMAGES=Immagini
+CAT_DOCUMENTS=Documenti
+CAT_ARCHIVES=Archivi
+CAT_APPLICATIONS=Applicazioni
+CAT_CODE=Codice
+CAT_DATA=Dati
+CAT_MAIL=Posta
+CAT_OTHER=Altri
+CAT_FILES=file
+CAT_CLEAR=Mostra tutte le categorie
+CAT_NO_FILES=Nessun file qui
+CAT_CLICK=Clic per mostrare solo questi file
+CAT_CLICK_AGAIN=Clic di nuovo per mostrare tutti i file
+ERR_CATEGORIES_FILE=Impossibile usare il file delle categorie %s (%s); in uso le categorie integrate.
+ERR_CATEGORIES_PROBLEMS=File delle categorie %s: saltato %s
+ERR_CATEGORIES_SAVE=Impossibile scrivere il file delle categorie %s: %s
+ERR_CATEGORIES_NO_LIST=serve un elenco "categories"
+ERR_CATEGORIES_NO_NAME=%s non ha un nome
+ERR_CATEGORIES_ENTRY=%s: voce non valida in "%s": %s
+ERR_CATEGORIES_TWICE=%s è già in "%s"
+ERR_CATEGORIES_MANY=%s categorie: oltre %s i loro colori sono difficili da distinguere

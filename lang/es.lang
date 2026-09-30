@@ -16,7 +16,6 @@ TOOLBAR_SCAN_HOME=Escanear tu carpeta personal (%s)
 TOOLBAR_RESCAN=Volver a escanear esta carpeta
 TOOLBAR_PATH_HINT=Escribe una ruta y presiona Intro — p. ej. una unidad USB o red
 TOOLBAR_PATH_EDIT_TOOLTIP=Escribir una ruta
-TOOLBAR_SETTINGS_TOOLTIP=Ajustes del gráfico
 DIALOG_PICK_FOLDER_TITLE=Elige una unidad o carpeta para escanear
 
 # ---- Panel de filtros ----

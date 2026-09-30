@@ -1,0 +1,272 @@
+# name: Deutsch
+#
+# spacemap language file (see en.lang for how these files work).
+
+# ---- Toolbar ----
+TOOLBAR_SUMMARY_VIEW=Übersicht
+TOOLBAR_CHART_VIEW=Diagramm
+CHART_ORDER_SIZE=Größte zuerst
+CHART_ORDER_NAME=Nach Name (A–Z)
+TOOLBAR_FILTERS_ACTIVE=Filter (aktiv)
+TOOLBAR_EMPTY_TRASH=Papierkorb leeren
+TOOLBAR_PICK_FOLDER=Laufwerk, Einhängepunkt oder Ordner zum Durchsuchen wählen
+TOOLBAR_SCAN_ROOT=Ab dem Systemstamm (/) durchsuchen
+TOOLBAR_SCAN_HOME=Persönlichen Ordner durchsuchen (%s)
+TOOLBAR_RESCAN=Diesen Ordner neu durchsuchen
+TOOLBAR_PATH_HINT=Pfad eingeben und Eingabe drücken — z. B. ein USB-Laufwerk oder eine Netzwerkfreigabe
+TOOLBAR_PATH_EDIT_TOOLTIP=Pfad eingeben
+DIALOG_PICK_FOLDER_TITLE=Laufwerk oder Ordner zum Durchsuchen wählen
+
+# ---- Filter panel ----
+FILTER_TITLE=Filter
+FILTER_CLOSE=Filter schließen
+FILTER_NAME_LABEL=Name
+FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
+FILTER_NAME_HOVER=Muster, getrennt durch Leerzeichen oder Kommas; eine Datei passt, wenn eines davon passt. Setzen Sie ein Muster in "Anführungszeichen" (oder schreiben Sie \\ vor ein Zeichen), um Leerzeichen oder Kommas einzuschließen.\n* = beliebige Zeichen, ? = ein Zeichen, [a,b,c] oder {a,b,c} = Alternativen.\nOhne * oder ? passt es an beliebiger Stelle im Namen. Groß-/Kleinschreibung wird ignoriert, außer der Aa-Schalter ist an.
+FILTER_CASE_SENSITIVE=Groß-/Kleinschreibung beachten — klicken, um sie zu ignorieren
+FILTER_CASE_INSENSITIVE=Groß-/Kleinschreibung ignorieren — klicken, um sie genau zu beachten
+FILTER_COL_FROM_MIN=von / min
+FILTER_COL_TO_MAX=bis / max
+FILTER_ROW_SIZE=Größe
+FILTER_ROW_CREATED=Erstellt
+FILTER_ROW_MODIFIED=Geändert
+FILTER_HINT_SIZE_MIN=z. B. 100M
+FILTER_HINT_SIZE_MAX=z. B. 4.7G
+FILTER_HINT_DATE=JJJJ-MM-TT
+FILTER_APPLY=Anwenden
+FILTER_INVALID=Korrigieren Sie das rot umrandete Feld (Grund beim Überfahren), um anzuwenden.
+FILTER_INVALID_KEEPS_PREVIOUS=Korrigieren Sie das rot umrandete Feld (Grund beim Überfahren). Bis dahin zeigt die Tabelle noch den zuvor angewendeten Filter.
+FILTER_CLEAR=Leeren
+FILTER_SHOWING=%s von %s Dateien angezeigt (%s von %s)
+FILTER_APPLIES_ON_FINISH=Wird am Ende des Durchsuchens angewendet.
+FILTER_LIVE_UNFILTERED=Die Live-Ansicht während des Durchsuchens ist ungefiltert.
+FILTER_HELP=Größen verwenden K/M/G/T (×1024). Datumsangaben sind lokal; mit HH:MM eine Uhrzeit angeben.
+FILTER_ERR_MIN_SIZE=Mindestgröße
+FILTER_ERR_MAX_SIZE=Höchstgröße
+FILTER_ERR_CREATED_FROM=Erstellt ab
+FILTER_ERR_CREATED_TO=Erstellt bis
+FILTER_ERR_MODIFIED_FROM=Geändert ab
+FILTER_ERR_MODIFIED_TO=Geändert bis
+
+# ---- Validation error messages ----
+ERR_SIZE_FORMAT='%s' ist keine Größe (z. B. 500M, 1.5G)
+ERR_SIZE_UNIT=unbekannte Einheit '%s' (K, M, G oder T verwenden)
+ERR_DATE_FORMAT='%s' ist kein Datum (JJJJ-MM-TT verwenden)
+ERR_DATE_TZ='%s' existiert in der lokalen Zeitzone nicht
+ERR_FIELD_PREFIX=%s: %s
+
+# ---- Settings panel ----
+SETTINGS_TITLE=Diagrammeinstellungen
+SETTINGS_CLOSE=Einstellungen schließen
+SETTINGS_DEPTH_GROUPING=Tiefe und Gruppierung
+SETTINGS_DEPTH_LEVELS=Angezeigte Ebenen
+SETTINGS_MIN_SLICE_ANGLE=Mindestwinkel eines Segments (°)
+SETTINGS_MAX_SLICES=Höchstens Segmente pro Ring
+SETTINGS_UNLIMITED_SLICES=Unbegrenzte Segmente (keine Gruppe „Sonstige“)
+SETTINGS_UNLIMITED_SLICES_HOVER=Zeigt jedes Element als eigenes Segment, egal wie viele es sind, statt kleine in „(N weitere Elemente)“ zu gruppieren. Ein Ordner mit Tausenden Einträgen ergibt Tausende hauchdünne Segmente — mit Strg+Mausrad hineinzoomen, um sie anklicken zu können.
+SETTINGS_HUB_SIZE=Größe der Mitte
+SETTINGS_COLORS=Farben
+SETTINGS_RING_SAT=Sättigung der Ringe
+SETTINGS_RING_BRIGHT_OUTER=Helligkeit der Ringe (außen)
+SETTINGS_BRIGHT_FALLOFF=Helligkeitsabnahme pro Ring
+SETTINGS_BRIGHT_FLOOR=Mindesthelligkeit
+SETTINGS_OTHER_SAT=Sättigung der Gruppe „Sonstige“
+SETTINGS_OTHER_BRIGHT=Helligkeit der Gruppe „Sonstige“
+SETTINGS_FREE_GAMMA=Gamma des freien Speichers (<1 hellt auf)
+SETTINGS_LINE_RENDERING=Liniendarstellung
+SETTINGS_BORDER_THICKNESS=Randstärke
+SETTINGS_BORDER_DARKNESS=Randdunkelheit
+SETTINGS_CURVE_SMOOTH=Kurvenglättung (px/Schritt, niedriger = glatter)
+SETTINGS_LOG=Protokoll
+SETTINGS_MAX_LOG_LINES=Gespeicherte Problemzeilen (max.)
+SETTINGS_SCANNING=Durchsuchen
+SETTINGS_APPARENT_SIZE=Scheinbare Größe zählen
+SETTINGS_APPARENT_SIZE_HOVER=Zählt die Länge jeder Datei statt des belegten Speicherplatzes. Aus: Sparse-Dateien zählen, was sie wirklich belegen, und Dateien mit harten Links nur einmal, wie du. Für Netzwerk- oder FUSE-Laufwerke einschalten, die keine Belegung melden. Gilt ab dem nächsten Durchsuchen.
+SETTINGS_PROGRESS_INTERVAL=Intervall der Fortschrittsanzeige (Elemente, immer eine Zweierpotenz)
+SETTINGS_DEFAULTS=Standardwerte
+SETTINGS_LANGUAGE=Sprache
+
+# ---- Log panel ----
+LOG_ISSUES_NONE=Probleme: keine
+LOG_ISSUES_COUNT=Probleme: %s
+LOG_CLEAR=Leeren
+LOG_MORE_NOT_SHOWN=… und %s weitere(s) Problem(e) nicht angezeigt
+
+# ---- Central panel / empty state ----
+CENTRAL_EMPTY_STATE=Wählen Sie einen Startpunkt mit 🔍 (beliebiges Laufwerk, Einhängepunkt oder Ordner), / (Systemstamm) oder 🏠 (persönlicher Ordner) — oder geben Sie oben einen Pfad ein und drücken Sie Eingabe.
+
+# ---- Scan status / errors ----
+STATUS_SCAN_ABORTED=Durchsuchen abgebrochen
+STATUS_SCANNING=Durchsuchen… (Esc zum Abbrechen)
+STATUS_SCAN_COMPLETED=Durchsuchen in %s s abgeschlossen
+ERR_PATH_NOT_FOUND=Pfad nicht gefunden: %s
+ERR_CANNOT_STAT=Informationen zu %s nicht lesbar: %s
+ERR_NETWORK_URL='%s://' ist eine Netzwerkadresse, kein eingehängter Pfad — hängen Sie sie zuerst ein (z. B. über die Netzwerkansicht Ihres Dateimanagers) und geben Sie dann den echten lokalen Pfad ein, unter dem sie eingehängt ist (oft unter /run/user/<uid>/gvfs/...).
+ERR_NOT_A_DIRECTORY=Kein Ordner (es ist eine Datei): %s
+ERR_FOLDER_DIALOG_FAILED=Der Ordnerdialog ließ sich nicht öffnen (läuft xdg-desktop-portal?)
+SCAN_PROGRESS_ITEMS_SCANNED=%s Elemente durchsucht
+SCAN_PROGRESS_OF_TOTAL=%s von %s Elementen
+SCAN_PROGRESS_ITEMS=%s Elemente
+SCAN_PROGRESS_CANCEL_HINT=%s · Esc zum Abbrechen
+
+# ---- Filesystem I/O errors ----
+ERR_IO_NOT_FOUND=nicht gefunden (keine solche Datei und kein solcher Ordner)
+ERR_IO_PERMISSION=keine Berechtigung, diesen Ordner zu lesen oder zu öffnen
+ERR_IO_OTHER=konnte nicht gelesen werden (%s)
+ERR_IO_LINE=%s — %s
+
+# ---- Sunburst aggregate buckets ----
+EXT_NO_EXTENSION=(ohne Endung)
+SEG_OTHER_ITEMS=(%s weitere Elemente)
+SEG_FREE_SPACE=Freier Speicher
+SEG_OTHER_FS=%s [anderes Dateisystem]
+
+# ---- Summary view ----
+SUMMARY_CONTENTS=Inhalt
+COL_SIZE=Größe
+A11Y_SORTED_ASC=%s, aufsteigend sortiert
+A11Y_SORTED_DESC=%s, absteigend sortiert
+A11Y_CHART=Diagramm von %s, %s
+COL_FILES=Dateien
+COL_MODIFIED=Geändert
+COL_MODIFIED_TIP=Letzte Änderung des Inhalts (mtime)
+COL_CHANGED=Status geändert
+COL_CHANGED_TIP=Letzte Änderung von Inhalt oder Metadaten — Rechte, Besitzer, Umbenennung (ctime)
+COL_NAME=Name
+
+# ---- Top-left folder stats overlay ----
+STATS_SIZE=Größe: %s
+STATS_FILES=Dateien: %s
+STATS_PERMS=Rechte: %s
+
+# ---- Hover tooltip ----
+HOVER_AVAILABLE=Verfügbar:
+HOVER_SIZE=Größe:
+HOVER_FILES=Dateien:
+HOVER_PERMS=Rechte:
+HOVER_LINK=Symbolischer Link:
+HOVER_LINK_TARGET=→ %s (nicht in Größen gezählt)
+HOVER_LINK_UNREADABLE=Ziel nicht lesbar
+HOVER_MODIFIED=Geändert:
+HOVER_CHANGED=Status geändert:
+HOVER_OWNER=Besitzer:
+HOVER_TYPE=Typ:
+
+# ---- Context menu ----
+MENU_ZOOM=Hineinzoomen
+MENU_RESCAN=Neu durchsuchen
+MENU_OPEN=Öffnen
+MENU_HIDE=Ausblenden
+MENU_TRASH=In den Papierkorb
+MENU_DELETE=Endgültig löschen
+MENU_CANCEL=Abbrechen
+
+# ---- Summary table keys / delete dialog ----
+DELETE_CONFIRM_TITLE=Endgültig löschen?
+DELETE_CONFIRM_FILE=Datei, %s. Das kann nicht rückgängig gemacht werden.
+DELETE_CONFIRM_UNREADABLE=Enthält %s Ordner, die nicht gelesen werden konnten: ihre Größe ist unbekannt, und das Löschen kann mittendrin abbrechen.
+DELETE_CONFIRM_LINK=Symbolischer Link auf %s. Nur der Link wird entfernt; sein Ziel bleibt.
+DELETE_CONFIRM_DIR=Der Ordner und sein gesamter Inhalt (%s, Anzahl Dateien: %s). Das kann nicht rückgängig gemacht werden.
+DELETE_CONFIRM_YES=Löschen
+ERR_DELETE_FAILED=%s konnte nicht gelöscht werden: %s
+ERR_DELETE_PARTIAL=%s wurde eventuell teilweise gelöscht; neu durchsuchen (r), um zu sehen, was übrig ist.
+ERR_OPEN_FAILED=%s konnte nicht geöffnet werden: %s
+TABLE_HELP_HINT=? drücken für Tastenkürzel
+TABLE_TAG_DIRS_FIRST=Ordner zuerst
+TABLE_TAG_SCANNING=vorläufige Größen · Ordner öffnen, Löschen und Papierkorb warten auf das Ende des Durchsuchens
+TABLE_TAG_DOTFILES_HIDDEN=versteckte Dateien ausgeblendet (%s)
+TABLE_TAG_MARKED=%s markiert (%s)
+TABLE_JUMP=Springen zu:
+COL_PERCENT=%
+COL_PERMS=Rechte
+DELETE_CONFIRM_MANY=%s Elemente (%s, Anzahl Dateien: %s). Das kann nicht rückgängig gemacht werden.
+DELETE_CONFIRM_MORE=… und %s weitere
+ERR_TRASH_FAILED=%s konnte nicht in den Papierkorb verschoben werden: %s
+ERR_TRASH_ROOT=der Stammordner kann nicht in den Papierkorb verschoben werden
+ERR_TRASH_IN_TRASH=%s wird nicht in den Papierkorb verschoben: es liegt in einem Papierkorb (oder enthält einen). Verwenden Sie stattdessen „Endgültig löschen“.
+ERR_CONTAINS_MOUNT=%s wird nicht gelöscht: es ist oder enthält ein eingehängtes Dateisystem (%s). Hängen Sie es zuerst aus.
+ERR_OTHER_FS_INSIDE=angehalten bei %s, das auf einem anderen Dateisystem liegt
+TRASH_CONFIRM_TITLE=Papierkorb leeren?
+TRASH_CONFIRM_BODY=%s Elemente im Papierkorb (auf allen Laufwerken) werden endgültig gelöscht. Das kann nicht rückgängig gemacht werden.
+TRASH_CONFIRM_YES=Papierkorb leeren
+STATUS_TRASH_EMPTY=Der Papierkorb ist bereits leer
+STATUS_EMPTYING_TRASH=Papierkorb wird geleert…
+STATUS_TRASH_EMPTIED=Papierkorb geleert
+ERR_EMPTY_TRASH=Der Papierkorb konnte nicht geleert werden: %s
+ERR_SETTINGS_FILE=Die Einstellungsdatei konnte nicht gelesen werden (nach %s verschoben, Standardwerte verwendet): %s
+ERR_SETTINGS_SAVE=Einstellungen konnten nicht gespeichert werden: %s
+ERR_SETTINGS_UNREADABLE=Einstellungen nicht aus %s geladen (%s); Standardwerte verwendet, Datei wird nicht überschrieben.
+ERR_SETTINGS_NOT_FILE=keine reguläre Datei
+ERR_SETTINGS_TOO_BIG=größer als 1 MiB
+ERR_SETTINGS_FIELDS=Ungültige Einstellungen ignoriert (Standardwerte verwendet): %s. Die Originaldatei wurde nach %s kopiert.
+
+# ---- Keyboard shortcuts overlay (?) ----
+HELP_TITLE=Tastenkürzel
+HELP_CLOSE=Schließen
+HELP_SECTION_MOVE=Bewegen
+HELP_SECTION_SORT=Sortierung und Spalten
+HELP_SECTION_ACT=Aktionen
+HELP_KEYS_UPDOWN=⬆ ⬇
+HELP_UPDOWN=Vorherige / nächste Zeile
+HELP_KEYS_PAGE=Bild↑ Bild↓
+HELP_PAGE=Eine Seite hoch / runter
+HELP_KEYS_HOMEEND=Pos1 Ende
+HELP_HOMEEND=Erste / letzte Zeile
+HELP_KEYS_OPEN=➡
+HELP_OPEN=Ordner unter dem Cursor öffnen
+HELP_KEYS_ENTER=Eingabe, Doppelklick
+HELP_ENTER=Ordner öffnen, oder Datei mit ihrem Standardprogramm
+HELP_KEYS_PARENT=⬅ Rücktaste
+HELP_PARENT=Übergeordneter Ordner
+HELP_KEYS_JUMP=/
+HELP_JUMP=Zu einem Namen springen (eingeben, dann Eingabe)
+HELP_KEYS_SORT=s n f m c p
+HELP_SORT=Sortieren nach Größe / Name / Dateien / geändert / Status geändert / Rechte (erneut: umkehren)
+HELP_KEYS_COLUMNS=S F M C P % G
+HELP_COLUMNS=Größe / Dateien / geändert / Status geändert / Rechte / Prozent / Balken ein- oder ausblenden
+HELP_KEYS_MOVE_COL=< >
+HELP_MOVE_COL=Zuletzt sortierte, ein- oder ausgeblendete Spalte nach links / rechts verschieben
+HELP_KEYS_DIRS_FIRST=t
+HELP_DIRS_FIRST=Ordner vor Dateien
+HELP_KEYS_DOTFILES=e
+HELP_DOTFILES=Versteckte Dateien ein- / ausblenden
+HELP_KEYS_MARK=Leertaste, Strg+Klick
+HELP_MARK=Zeile markieren / Markierung aufheben (Leertaste geht auch nach unten)
+HELP_KEYS_DELETE=D
+HELP_DELETE=Endgültig löschen (markierte Zeilen oder die Cursorzeile) — fragt vorher
+HELP_KEYS_TRASH=T
+HELP_TRASH=In den Papierkorb (markierte Zeilen oder die Cursorzeile)
+HELP_KEYS_RESCAN=r
+HELP_RESCAN=Diesen Ordner neu durchsuchen
+HELP_KEYS_INFO=i
+HELP_INFO=Details der Cursorzeile ein- / ausblenden
+HELP_KEYS_ESC=Esc
+HELP_ESC=Markierungen aufheben oder Details schließen
+HELP_KEYS_HELP=?
+HELP_HELP=Diese Hilfe
+
+# ---- Categories (bar beside the contents table) ----
+SUMMARY_CATEGORIES=Kategorien
+CAT_VIDEO=Video
+CAT_AUDIO=Audio
+CAT_IMAGES=Bilder
+CAT_DOCUMENTS=Dokumente
+CAT_ARCHIVES=Archive
+CAT_APPLICATIONS=Anwendungen
+CAT_CODE=Code
+CAT_DATA=Daten
+CAT_MAIL=E-Mail
+CAT_OTHER=Sonstige
+CAT_FILES=Dateien
+CAT_CLEAR=Alle Kategorien anzeigen
+CAT_NO_FILES=Hier sind keine Dateien
+CAT_CLICK=Klicken, um nur diese Dateien anzuzeigen
+CAT_CLICK_AGAIN=Erneut klicken, um alle Dateien anzuzeigen
+ERR_CATEGORIES_FILE=Die Kategoriedatei %s ist nicht verwendbar (%s); eingebaute Kategorien werden verwendet.
+ERR_CATEGORIES_PROBLEMS=Kategoriedatei %s: übersprungen %s
+ERR_CATEGORIES_SAVE=Die Kategoriedatei %s konnte nicht geschrieben werden: %s
+ERR_CATEGORIES_NO_LIST=sie braucht eine Liste "categories"
+ERR_CATEGORIES_NO_NAME=%s hat keinen Namen
+ERR_CATEGORIES_ENTRY=%s: ungültiger Eintrag in "%s": %s
+ERR_CATEGORIES_TWICE=%s ist bereits in „%s“
+ERR_CATEGORIES_MANY=%s Kategorien: über %s hinaus sind ihre Farben schwer zu unterscheiden
