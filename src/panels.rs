@@ -971,6 +971,22 @@ impl DiskScanApp {
         }
     }
 
+    /// Keys 1–9: picks the category at that position in the bar, or shows
+    /// all files again if it's already picked. 0: shows all files.
+    pub(crate) fn pick_category_key(&mut self, n: usize) {
+        let pick = match n {
+            0 => None,
+            _ => match self.cat_breakdown.get(n - 1) {
+                Some(row) if self.category != Some(row.cat) => Some(row.cat),
+                Some(_) => None,
+                None => return, // no category at that position
+            },
+        };
+        if pick != self.category {
+            self.category_pending = Some(pick);
+        }
+    }
+
     /// The category bar on the left, the contents table of `view_node` on
     /// the right. Drawn in the main area itself (not floating over it), so
     /// a side panel always clips it instead of being drawn over.
@@ -1044,13 +1060,9 @@ impl DiskScanApp {
             egui::Sense::hover(),
         );
         if rows.is_empty() || total == 0 {
-            ui.painter().text(
-                rect.left_top(),
-                egui::Align2::LEFT_TOP,
-                tr("CAT_NO_FILES"),
-                egui::FontId::default(),
-                ui.visuals().weak_text_color(),
-            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.weak(tr("CAT_NO_FILES"));
+            });
         } else {
             let painter = ui.painter_at(rect);
             let dark = ui.visuals().dark_mode;
@@ -1110,6 +1122,11 @@ impl DiskScanApp {
 
             // Room for leader lines to slope gently to labels that moved.
             let label_x = rect.left() + bar_w + 34.0;
+            // Each of the first nine labels starts with its key (1–9).
+            let key_w = painter
+                .layout_no_wrap("9 ".into(), font.clone(), Color32::WHITE)
+                .size()
+                .x;
             let n = rows.len();
             for (i, row) in rows.iter().enumerate() {
                 let (y0, y1) = spans[i];
@@ -1186,16 +1203,43 @@ impl DiskScanApp {
                     painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
                     painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
                 }
+                let key = (i < 9).then(|| (i + 1).to_string());
+                if let Some(key) = &key {
+                    painter.text(
+                        Pos2::new(label_x, label_y[i] + 2.0),
+                        egui::Align2::LEFT_TOP,
+                        key,
+                        font.clone(),
+                        ui.visuals().weak_text_color(),
+                    );
+                }
                 painter.text(
-                    Pos2::new(label_x, label_y[i] + 2.0),
+                    Pos2::new(label_x + key_w, label_y[i] + 2.0),
                     egui::Align2::LEFT_TOP,
                     self.cats.label(row.cat),
                     font.clone(),
                     ink,
                 );
                 let pct = row.size as f64 * 100.0 / total as f64;
+                // The name screen readers announce.
+                let spoken = trf(
+                    "A11Y_CATEGORY",
+                    &[
+                        &self.cats.label(row.cat),
+                        &format!("{pct:.1}%"),
+                        &human_size(row.size),
+                        &format_count(row.files),
+                    ],
+                );
+                let spoken = match &key {
+                    Some(key) => trf("A11Y_CATEGORY_KEY", &[&spoken, key]),
+                    None => spoken,
+                };
+                hit.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, &spoken)
+                });
                 painter.text(
-                    Pos2::new(label_x, label_y[i] + 2.0 + line_h),
+                    Pos2::new(label_x + key_w, label_y[i] + 2.0 + line_h),
                     egui::Align2::LEFT_TOP,
                     format!("{pct:.1}% · {}", human_size(row.size)),
                     font.clone(),
@@ -1698,5 +1742,37 @@ mod category_bar_tests {
             assert_eq!(app.root.as_ref().unwrap().children.len(), rows);
             frame(&mut app);
         }
+    }
+
+    /// Keys 1–9 pick by position in the bar; the same key again, or 0,
+    /// shows all files; a key past the last category does nothing.
+    #[test]
+    fn number_keys_pick_by_position() {
+        let mut app = DiskScanApp::default();
+        let (video, docs) = (app.cats.of_name("a.mkv"), app.cats.of_name("a.pdf"));
+        let row = |cat| CategoryRow {
+            cat,
+            size: 1,
+            files: 1,
+            exts: Vec::new(),
+        };
+        app.cat_breakdown = vec![row(docs), row(video)];
+        let mut press = |app: &mut DiskScanApp, n| {
+            app.pick_category_key(n);
+            if let Some(pick) = app.category_pending.take() {
+                app.category = pick;
+            }
+        };
+        press(&mut app, 1);
+        assert_eq!(app.category, Some(docs));
+        press(&mut app, 2);
+        assert_eq!(app.category, Some(video));
+        press(&mut app, 2);
+        assert_eq!(app.category, None);
+        press(&mut app, 1);
+        press(&mut app, 3);
+        assert_eq!(app.category, Some(docs));
+        press(&mut app, 0);
+        assert_eq!(app.category, None);
     }
 }

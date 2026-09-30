@@ -239,6 +239,7 @@ const HELP_ROWS: &[(&str, &[(&str, &str)])] = &[
     (
         "HELP_SECTION_ACT",
         &[
+            ("HELP_KEYS_CATEGORY", "HELP_CATEGORY"),
             ("HELP_KEYS_MARK", "HELP_MARK"),
             ("HELP_KEYS_DELETE", "HELP_DELETE"),
             ("HELP_KEYS_TRASH", "HELP_TRASH"),
@@ -973,6 +974,7 @@ impl DiskScanApp {
                 }
                 'i' if !self.scanning => self.table.show_info = !self.table.show_info,
                 'r' if !self.scanning => self.rescan_current(),
+                '0'..='9' => self.pick_category_key(ch as usize - '0' as usize),
                 '?' => self.table.show_help = true,
                 '/' => {
                     self.table.jump = Some(String::new());
