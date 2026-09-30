@@ -1,5 +1,5 @@
-// SpaceMap: a portable single-binary disk usage sunburst visualizer.
-// Clone of the "Scanner" Windows utility (sunburst chart of drive/folder usage).
+//! spacemap: a disk usage explorer for Linux, with a sunburst chart and an
+//! ncdu-style table.
 
 use eframe::egui;
 use egui::{Color32, Pos2, Vec2};
@@ -32,7 +32,6 @@ use table::{Graft, TableState};
 use theme::*;
 use widgets::*;
 
-// ---------------- App ----------------
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -78,22 +77,15 @@ struct SortState {
     ascending: bool,
 }
 
-/// Every tunable knob for the sunburst, in one place with safe ranges so
-/// nothing the user can dial in can crash the app (divide-by-zero,
-/// degenerate geometry, etc.) — see `Settings::default()` for the factory
-/// values and the range constants below for the bounds. Saved as part of
-/// settings.json (config.rs).
+/// Chart and scan settings (saved in settings.json). Each has an allowed
+/// range, below, so no value can break the chart.
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Settings {
     max_render_depth: usize,
     min_segment_angle_deg: f32,
     max_children_shown: usize,
-    /// Bypasses both `min_segment_angle_deg` and `max_children_shown`,
-    /// showing every child as its own slice with no "(N other items)"
-    /// bucket — a ring can end up with thousands of sliver-thin slices on
-    /// a folder with that many entries, relying on zoom (Ctrl+wheel) to
-    /// make them individually clickable rather than any aggregation.
+    /// Every child gets its own slice (no "other"), however thin.
     unlimited_slices: bool,
     hub_radius_frac: f32,
     ring_sat: f32,
@@ -107,20 +99,14 @@ struct Settings {
     stroke_alpha: u8,
     tess_px_per_step: f32,
     max_log_lines: usize,
-    /// Exponent, not the value itself: the "N items scanned" counter is
-    /// pushed to the UI every `1 << progress_interval_pow2` filesystem
-    /// entries. Stored as a power-of-two exponent (0..=16) so the slider
-    /// can only ever select a power of two — never an arbitrary interval
-    /// that could over- or under-report.
+    /// The "N items scanned" counter updates every 2^this entries.
     progress_interval_pow2: u32,
-    /// Count file lengths instead of disk space used (takes effect on the
-    /// next scan). Off by default: sparse files and hard links would
-    /// overstate usage.
+    /// Count file lengths instead of disk space used (from the next scan).
     apparent_size: bool,
 }
 
-/// Allowed ranges, shared by the settings sliders and `sanitized` (for
-/// values read from the settings file, which may have been hand-edited).
+/// Allowed ranges, for the settings sliders and for values read from the
+/// settings file.
 impl Settings {
     const DEPTH: RangeInclusive<usize> = 1..=12;
     const MIN_ANGLE: RangeInclusive<f32> = 0.1..=5.0;
@@ -177,15 +163,15 @@ impl Default for Settings {
             stroke_alpha: 90,
             tess_px_per_step: 3.0,
             max_log_lines: 500,
-            progress_interval_pow2: 9, // 1 << 9 == 512, the original hardcoded value
+            progress_interval_pow2: 9, // every 512 entries
             apparent_size: false,
         }
     }
 }
 
 struct DiskScanApp {
-    /// Last completed scan, unfiltered. `root` is what's displayed: this
-    /// same tree, or a filtered copy of it while a filter is applied.
+    /// The last completed scan, unfiltered. `root` is what's shown: this tree
+    /// or a filtered copy.
     full_root: Option<Arc<Node>>,
     show_filters: bool,
     /// Filter panel fields as currently typed / as last applied.
@@ -210,47 +196,43 @@ struct DiskScanApp {
     /// Category breakdown of the viewed folder, cached per (folder, tree_gen).
     cat_breakdown: Vec<CategoryRow>,
     cat_breakdown_for: Option<(PathBuf, u64)>,
-    /// Path bar shows clickable folder segments unless this is set, in
-    /// which case it's a text field for typing a path.
+    /// The path bar is a text field (else clickable folder names).
     path_editing: bool,
     path_edit_focus_pending: bool,
-    /// Pending result of the Search button's folder dialog, while it's open.
+    /// The folder dialog's result, while it's open.
     folder_pick_rx: Option<Receiver<Option<PathBuf>>>,
     root: Option<Arc<Node>>,
-    view_stack: Vec<Vec<usize>>, // stack of index-paths; last = current view root
+    /// Zoom history as child-index paths; the last is the folder shown.
+    view_stack: Vec<Vec<usize>>,
     scanning: bool,
     scan_rx: Option<Receiver<ScanMsg>>,
     scanned_count: u64,
     /// Counting pass for the current scan (folder scans only).
     entry_count: Option<Arc<EntryCount>>,
-    /// Highest progress fraction shown this scan, so the bar never moves
-    /// backwards while the counting pass is still raising the total.
+    /// Highest progress shown this scan, so the bar never moves backwards.
     progress_shown: f32,
     scan_start: Instant,
     hidden: HashSet<PathBuf>,
     hovered: Option<HoverInfo>,
-    /// Counts folders added to the live-preview tree (`partial_root`)
-    /// during a scan; the live table refreshes from it at most every
-    /// 250 ms (`live_gen`, bumped when `partial_gen` moved on).
+    /// Counts folders added to `partial_root` during a scan. The live table
+    /// refreshes from it at most every 250 ms, bumping `live_gen`.
     partial_gen: u64,
     live_gen: u64,
-    /// What the live table shows: a flat copy of the preview tree's top
-    /// level (no subtrees), taken at each refresh. The preview tree itself
-    /// keeps re-sorting its children as data arrives, so rows can't point
-    /// into it between refreshes.
+    /// What the live table shows: a copy of the live tree's top level, taken
+    /// at each refresh (the live tree keeps re-sorting as data arrives).
     live_view: Node,
     live_seen: u64,
     live_refreshed: Instant,
-    /// Counts changes to the displayed tree (every one goes through
-    /// rebuild_view_tree), so views derived from it know to recompute.
+    /// Counts changes to the displayed tree, so views derived from it know to
+    /// recompute.
     tree_gen: u64,
     /// Window width added for open side panels (see panels.rs).
     window_grown: panels::WindowGrown,
     /// Folders the last scan couldn't list (size unknown), for the delete
     /// dialog's warning.
     unreadable: Vec<PathBuf>,
-    /// Set by the scanner on meeting a Korean name; `korean_font` once the
-    /// font for it has been loaded (see install_fallback_fonts).
+    /// Set by the scanner on finding a Korean name; `korean_font` once the
+    /// font for it is loaded.
     saw_hangul: Arc<std::sync::atomic::AtomicBool>,
     korean_font: bool,
     /// Pending deletes and their confirmation (see delete.rs).
@@ -277,29 +259,23 @@ struct DiskScanApp {
     /// full tree when it finishes.
     graft: Option<Graft>,
     status: String,
-    /// (total_capacity, free_bytes) of the filesystem, when the current scan
-    /// target is a real mount point (so we can draw an "unused space" slice).
+    /// (capacity, free bytes) of the drive when the scanned folder is a mount
+    /// point, for the chart's free-space slice.
     free_space: Option<(u64, u64)>,
     log: Vec<String>,
     log_truncated: u64,
     cancel_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
-    /// Top-level children streamed in so far by the scan in progress, so the
-    /// sunburst can render (read-only) while scanning instead of just a
-    /// spinner.
+    /// The live tree of the scan in progress: every finished folder's totals.
     partial_root: Node,
     settings: Settings,
-    /// Configuration as last saved to settings.json (see config.rs); None
-    /// until the file is known to be up to date.
+    /// The settings as last saved; None until the file is up to date.
     saved_config: Option<Config>,
     show_settings: bool,
     path_input: String,
     path_input_focused: bool,
     contents_sort: SortState,
-    /// On-demand MIME sniffing for the single file currently hovered in the
-    /// tooltip — never done during the bulk scan (reading file content for
-    /// every file would meaningfully slow it down), only for one file at a
-    /// time on hover, and off the UI thread so a slow/spun-down drive can't
-    /// cause a hitch. `None` cached = looked up, but undetermined.
+    /// File types detected from content, for the hovered file only, on a
+    /// background thread. `None` = looked up, but unknown.
     mime_cache: std::collections::HashMap<PathBuf, Option<String>>,
     mime_inflight: HashSet<PathBuf>,
     mime_tx: Sender<(PathBuf, Option<String>)>,
@@ -370,8 +346,7 @@ impl Default for DiskScanApp {
             cat_base: None,
             cat_breakdown: Vec::new(),
             cat_breakdown_for: None,
-            // Starts sorted by size, descending — matches the order the
-            // sunburst itself already uses (largest slice first).
+            // Largest first, like the chart.
             contents_sort: SortState { column: SortColumn::Size, ascending: false },
             mime_cache: std::collections::HashMap::new(),
             mime_inflight: HashSet::new(),
@@ -413,21 +388,19 @@ impl DiskScanApp {
 
     fn start_scan(&mut self, path: PathBuf) {
         self.reload_categories();
-        // Scan the canonical path: no "./", "..", doubled slashes or
-        // relative roots in breadcrumbs, dialogs or the Issues log.
+        // The canonical path, so no "..", "./" or doubled slashes show up.
         let path = true_case(&std::fs::canonicalize(&path).unwrap_or(path));
         // Any new scan supersedes a pending folder rescan ("r").
         self.graft = None;
         self.scanning = true;
-        // A new live table: nothing cached from a previous scan's.
+        // A new live table.
         self.live_gen += 1;
         self.live_view = empty_node();
         self.live_exts.clear();
         self.cat_breakdown.clear();
         self.cat_breakdown_for = None;
-        // Not the previous scan's "completed in …" while this one runs.
         self.status = tr("STATUS_SCANNING");
-        // This scan re-reports whatever it can't read under `path`.
+        // This scan reports again whatever it can't read under `path`.
         self.unreadable.retain(|u| !u.starts_with(&path));
         self.scan_start = Instant::now();
         self.scanned_count = 0;
@@ -442,8 +415,7 @@ impl DiskScanApp {
         self.partial_root.name = file_name_of(&path);
         self.free_space = if is_real_mount_point(&path) { fs_space(&path) } else { None };
 
-        // Tell any still-running previous scan to stop wasting CPU/IO: its
-        // result would just be thrown away once superseded anyway.
+        // Stop any previous scan still running.
         if let Some(prev) = &self.cancel_flag {
             prev.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -456,8 +428,8 @@ impl DiskScanApp {
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
-        // Whole drives measure progress against the filesystem's used bytes
-        // (free_space); anything else needs a counted total instead.
+        // A whole drive's progress is measured against its used space; other
+        // folders need a counted total.
         let entry_count = self.free_space.is_none().then(|| Arc::new(EntryCount::default()));
         self.entry_count = entry_count.clone();
         std::thread::spawn(move || {
@@ -489,9 +461,6 @@ impl DiskScanApp {
                     }
                 });
             }
-            // scan_dir streams a SliceDone for every directory as it
-            // finishes (any depth), so the sunburst blossoms slice by slice
-            // throughout the scan — see SliceDone's doc comment.
             let ctx = ScanCtx {
                 root_dev,
                 progress: &tx,
@@ -510,9 +479,9 @@ impl DiskScanApp {
         });
     }
 
-    /// Recomputes the displayed tree from the last full scan and the applied
-    /// filter, keeping each view in the zoom history pointed at the same
-    /// folder (or its deepest surviving ancestor).
+    /// Rebuilds the displayed tree from the last scan, the filter and the
+    /// picked category, keeping each view in the zoom history on the same
+    /// folder (or its nearest remaining parent).
     fn rebuild_view_tree(&mut self) {
         self.tree_gen += 1;
         let Some(full) = self.full_root.clone() else { return };
@@ -557,10 +526,9 @@ impl DiskScanApp {
         }
     }
 
-    /// Ctrl+mouse wheel over the chart resizes it (egui reports Ctrl+wheel
-    /// as a zoom delta, not a scroll), keeping the point under the pointer
-    /// fixed; dragging pans it while it's bigger than its area. Returns the
-    /// chart's centre and outer radius for this frame.
+    /// Ctrl+wheel over the chart resizes it around the pointer; dragging pans
+    /// it while it's bigger than its area. Returns the chart's center and
+    /// outer radius for this frame.
     fn chart_view(&mut self, ctx: &egui::Context, chart: &egui::Response) -> (Pos2, f32) {
         let rect = chart.rect;
         if chart.contains_pointer() {
@@ -578,8 +546,7 @@ impl DiskScanApp {
             self.chart_offset += chart.drag_delta();
         }
         let max_radius = (rect.width().min(rect.height()) / 2.0 - 10.0) * self.chart_scale;
-        // Pan only as far as the chart overhangs its area, so it can't be
-        // dragged away; at 100% or less that's zero and it stays centred.
+        // Pan only as far as the chart overhangs its area.
         let limit = Vec2::new(
             (max_radius + 10.0 - rect.width() / 2.0).max(0.0),
             (max_radius + 10.0 - rect.height() / 2.0).max(0.0),
@@ -600,9 +567,8 @@ impl DiskScanApp {
         get_node(root, idx_path)
     }
 
-    /// User-requested abort (Esc while scanning). Falls back to whatever
-    /// was scanned previously, if anything — same cooperative cancellation
-    /// used when a new scan supersedes an old one.
+    /// Esc while scanning: stops the scan and goes back to the previous result,
+    /// if any.
     fn abort_scan(&mut self) {
         if let Some(cancel) = &self.cancel_flag {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -614,9 +580,8 @@ impl DiskScanApp {
         self.status = tr("STATUS_SCAN_ABORTED");
     }
 
-    /// A scan finished, failed or was cancelled: the live-preview tree (a
-    /// copy of every folder scanned) isn't needed any more, and the tree the
-    /// new result replaced has been freed — hand that memory back.
+    /// A scan finished, failed or was cancelled: frees the live tree and
+    /// returns the memory.
     fn scan_ended(&mut self) {
         self.partial_root = empty_node();
         after_tree_dropped();
@@ -630,16 +595,14 @@ impl DiskScanApp {
         }
     }
 
-    /// Kicks off a background MIME sniff for `path` if it hasn't already
-    /// been resolved (or isn't already in flight) — never on the UI thread,
-    /// so a slow/spun-down drive can't cause a hitch. Only meant to be
-    /// called for a single hovered *file*, never during the bulk scan.
+    /// Starts detecting `path`'s file type on a background thread, unless it's
+    /// known or already being detected. For the hovered file only.
     fn ensure_mime_lookup(&mut self, path: &Path) {
         if self.mime_cache.contains_key(path) || self.mime_inflight.contains(path) {
             return;
         }
         if self.mime_cache.len() > 500 {
-            self.mime_cache.clear(); // simple bound for a long-running session
+            self.mime_cache.clear(); // keeps the cache small
         }
         self.mime_inflight.insert(path.to_path_buf());
         let tx = self.mime_tx.clone();
@@ -650,9 +613,7 @@ impl DiskScanApp {
         });
     }
 
-    /// Pushes a message to the bottom "Issues" log — the one consistent
-    /// place scan/input problems are reported, respecting the same cap as
-    /// scan-time LogError messages.
+    /// Adds a line to the Issues log (up to its line limit).
     fn log_issue(&mut self, msg: String) {
         if self.log.len() < self.settings.max_log_lines {
             self.log.push(msg);
@@ -667,11 +628,10 @@ impl DiskScanApp {
         self.selection.as_ref().filter(|s| Some(&s.view) == self.view_stack.last()).map(|s| &s.rel)
     }
 
-    /// Moves the slice highlight: ⬆/⬇ = previous/next slice sharing the
-    /// same parent (clockwise chart order, wrapping), ➡ = first slice on the
-    /// next ring out, ⬅ = parent slice — or, from the inner ring, the parent
-    /// folder's chart with the folder just left highlighted. With nothing
-    /// highlighted yet, any arrow starts at the first inner-ring slice.
+    /// Moves the slice highlight: ⬆⬇ previous/next slice in the same ring
+    /// (wrapping), ➡ first slice one ring out, ⬅ the parent slice (from the
+    /// inner ring: the parent folder). With nothing highlighted, any arrow
+    /// starts at the first inner slice.
     fn move_selection(&mut self, dir: NavDir) {
         let view = self.view_stack.last().unwrap().clone();
         let segs = &self.chart_segs;
@@ -711,8 +671,8 @@ impl DiskScanApp {
         }
     }
 
-    /// Path of the highlighted slice — None for nothing highlighted, or the
-    /// "other" bucket (several items, not one).
+    /// Path of the highlighted slice; None if nothing or "other" is
+    /// highlighted.
     fn selected_slice_path(&self) -> Option<PathBuf> {
         let rel = self.selected_rel()?;
         if is_other_marker(rel) {
@@ -751,11 +711,8 @@ impl DiskScanApp {
         }
     }
 
-    /// "Other" isn't one navigable node, so instead of zooming into it,
-    /// this zooms into the folder that *owns* it (its idx_path minus the
-    /// trailing OTHER_MARKER — a no-op if that's the folder already being
-    /// viewed) and switches to Summary view, landing on a table of exactly
-    /// the items that were grouped away, whichever ring they were in.
+    /// Opening "other": shows the folder it belongs to in the Summary view,
+    /// where every item is listed.
     fn open_other_bucket(&mut self, ip: &[usize]) {
         let owner_rel = &ip[..ip.len() - 1];
         if !owner_rel.is_empty() {
@@ -767,21 +724,11 @@ impl DiskScanApp {
         self.selection = None;
     }
 
-    /// Returns true when it stopped because of the time budget, with results
-    /// still waiting.
+    /// Handles waiting scan messages, up to a time budget per frame. True if
+    /// messages are still waiting.
     fn poll_scan(&mut self) -> bool {
-        // Cap how much work one frame can do. A directory tree with a huge
-        // number of directories (not just files) can produce a very large
-        // burst of SliceDone messages; without a cap, draining "everything
-        // currently queued" in one frame could take long enough that the
-        // window stops responding to the compositor's ping and gets flagged
-        // as hung. Any leftover messages just get processed on the next
-        // frame(s) instead — request_repaint() during scanning means those
-        // follow immediately.
-        //
-        // The cap is a time budget, not a message count: grafting gets more
-        // expensive as the tree grows, so a fixed count that's fine early in
-        // a scan could still stall a frame for seconds late in a big one.
+        // A time budget keeps the window responsive during bursts of messages;
+        // the rest wait for the next frame.
         const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(30);
         let drain_start = Instant::now();
         let mut processed = 0u32;
@@ -863,10 +810,8 @@ impl eframe::App for DiskScanApp {
         if self.scanning && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.abort_scan();
         }
-        // While scanning, redraw ~4×/s for the live preview rather than as
-        // fast as possible: every frame costs the scan threads CPU (much more
-        // with a screen reader, which gets the whole UI tree each frame).
-        // Straight away only while scan results are still waiting.
+        // While scanning, redraw 4 times a second (each frame takes CPU from the
+        // scan), or at once while messages are waiting.
         if scan_backlog || !self.mime_inflight.is_empty() {
             ctx.request_repaint();
         } else if self.scanning {
@@ -882,12 +827,8 @@ impl eframe::App for DiskScanApp {
             self.chart_order_buttons(&ctx, area);
         }
 
-        // Folder stats (formerly the left sidebar) float in the chart's
-        // top-left corner — for the highlighted slice when there is one,
-        // otherwise for the folder being viewed. Not in Summary view, whose
-        // table already shows sizes and counts. Only once a
-        // scan has finished: while scanning, self.root still holds the
-        // previous result.
+        // Chart view, after a scan: stats of the highlighted slice (else the
+        // folder viewed) in the top-left corner.
         if !self.scanning && !self.summary_view {
             if let Some(root) = &self.root {
                 let view_node = self.current_view_node(root);
@@ -905,21 +846,16 @@ impl eframe::App for DiskScanApp {
             }
         }
 
-        // Keyboard navigation, the same in both views (see NavDir). Chart:
-        // the arrow keys move the slice highlight (see move_selection),
-        // Backspace goes to the parent folder, Enter opens the highlighted
-        // slice (like clicking it), Esc clears it, D / T delete it or move
-        // it to the trash, r rescans the folder being viewed. Summary view:
-        // the table's keys, see table.rs.
+        // Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
+        // Esc clears, D / T delete or trash, r rescans. The table's keys are in
+        // table.rs.
         self.save_config_if_changed();
         // The table also runs live during a scan (see live_table_ui).
         if self.summary_view && (self.root.is_some() || self.scanning) {
             self.table_keys(&ctx);
             self.table_overlays(&ctx, area);
         }
-        // Not while the chart's right-click menu is open: navigating would
-        // leave the menu acting on an item no longer on screen (Esc still
-        // closes the menu).
+        // Not while the right-click menu is open (Esc still closes it).
         let menu_open = egui::Popup::is_any_open(&ctx);
         if self.root.is_some() && !self.scanning && !self.summary_view && !self.typing && !self.delete_dialog_open() && !menu_open {
             if let Some(d) = ctx.input(arrow_nav) {
@@ -962,12 +898,9 @@ impl eframe::App for DiskScanApp {
     }
 }
 
-/// With no accessibility service in the session (the AT-SPI registry can't
-/// be started), the accessibility library's background thread panics on
-/// start-up (an unwrap inside accesskit_unix; no fixed release works with
-/// this egui yet). Nothing is lost — without the service no screen reader
-/// can connect — so that one panic is kept out of the terminal; every other
-/// panic is reported as usual.
+/// Hides one harmless panic: with no accessibility service running, the
+/// accessibility library's thread panics at start-up. Other panics are
+/// reported as usual.
 fn quiet_accessibility_panic() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
