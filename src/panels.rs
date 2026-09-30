@@ -1,6 +1,6 @@
-//! The window's panels, drawn in this order every frame by `ui` (main.rs):
-//! toolbar (top), filters and settings (right, when open), Issues log
-//! (bottom), and the main area — the chart, or the Summary view's tables.
+//! The window's panels: toolbar (top), filters and settings (right, when
+//! open), Issues log (bottom), and the main area with the chart or the
+//! Summary view.
 
 use super::*;
 
@@ -15,13 +15,11 @@ pub(crate) struct WindowGrown {
     settings: f32,
 }
 
-/// Opening a side panel widens the window by the panel's width so the main
-/// area keeps its size; closing it gives that width back. A maximized or
-/// fullscreen window can't grow, so it's left alone (the panel then takes
-/// its room from the main area).
+/// Widens the window by a side panel's width when it opens, and narrows it
+/// again when it closes, so the main area keeps its size. Maximized and
+/// fullscreen windows are left alone.
 fn resize_for_panel(ctx: &egui::Context, opening: bool, width: f32, grown: &mut f32) {
-    // The window's own size (viewport().inner_rect is unknown on Wayland,
-    // where windows can't read their position).
+    // The window's size (inner_rect is unknown on Wayland).
     let (size, fixed) = ctx.input(|i| {
         let v = i.viewport();
         (i.viewport_rect().size(), v.maximized == Some(true) || v.fullscreen == Some(true))
@@ -46,13 +44,8 @@ impl DiskScanApp {
     /// Top bar: starting points, path bar, view toggles.
     pub(crate) fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        // `Sides` measures the right-hand content first and gives the
-        // left-hand content whatever room remains — unlike a manual
-        // "reserve N pixels" guess, the nav buttons can never end up
-        // clipped regardless of window width, font, or theme. Both
-        // closures below only read pre-cloned local state and report what
-        // happened; every actual `self` mutation happens afterward, since
-        // Sides::show can't hand out two simultaneous `&mut self` closures.
+        // `Sides` lays out the right-hand buttons first and gives the rest to the
+        // left side. The closures only record clicks; `self` is changed after.
         let root_arc = self.root.clone();
         let cur_view_idx = self.view_stack.last().unwrap().clone();
         let can_reload = root_arc.is_some();
@@ -73,10 +66,8 @@ impl DiskScanApp {
         let mut set_summary: Option<bool> = None;
         let mut empty_bin = false;
         let mut rescan = false;
-        // What the user is looking at right now: the scan target while a scan
-        // runs (self.root still holds the *previous* result until it's
-        // done), otherwise the folder currently zoomed into. Drives both the
-        // path bar and which starting-point button reads as selected.
+        // The folder shown: the scan target while scanning, else the folder
+        // zoomed into.
         let current_path: Option<PathBuf> = if self.scanning {
             Some(self.partial_root.path.clone())
         } else {
@@ -91,10 +82,8 @@ impl DiskScanApp {
         let mut stop_path_edit = false;
         let editing_path = self.path_editing || current_path.is_none();
         let focus_path_edit = std::mem::take(&mut self.path_edit_focus_pending);
-        // Clickable segments of the current path: "/", "mnt", "DATA", ...
-        // Only the first and last few segments of a very deep path, with a
-        // "…" (None) between: one button per level would mean thousands
-        // (and copying every ancestor's path each frame).
+        // Clickable path segments ("/", "mnt", "DATA", …). A very deep path shows
+        // only its first and last few, with "…" (None) between.
         const HEAD: usize = 2;
         const TAIL: usize = 6;
         let crumbs: Vec<Option<(String, PathBuf)>> = current_path
@@ -124,9 +113,7 @@ impl DiskScanApp {
             egui::Sides::new().shrink_left().show(
                 ui,
                 |ui| {
-                    // Starting points: Search (any drive/mount/folder via the
-                    // system dialog), Root, Home. Root/Home read as selected
-                    // while they're the current scan target.
+                    // Starting points: folder dialog, root, home (lit while scanned).
                     if ui
                         .add_enabled(!picking_folder, egui::Button::new("🔍"))
                         .named(&tr("TOOLBAR_PICK_FOLDER"))
@@ -156,10 +143,7 @@ impl DiskScanApp {
                         rescan = true;
                     }
 
-                    // Keep the path bar synced to navigation (mount switches,
-                    // zooming into the chart) as long as the user isn't
-                    // currently typing in it — otherwise we'd clobber their
-                    // in-progress edit every frame.
+                    // The path field follows navigation, except while being typed in.
                     if !path_input_was_focused {
                         let current = current_path
                             .as_ref()
@@ -181,21 +165,18 @@ impl DiskScanApp {
                         }
                         path_input_focused = resp.has_focus();
                         if resp.lost_focus() {
-                            // Enter submits; Esc or clicking elsewhere just
-                            // goes back to the clickable segments.
+                            // Enter goes there; Esc or a click elsewhere goes back to the segments.
                             if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                 submit = Some(path_input.clone());
                             }
                             stop_path_edit = true;
                         }
                     } else {
-                        // Clickable path segments; the scroll area keeps the
-                        // deepest folders visible when the path is long.
+                        // The scroll area keeps the deepest folders visible.
                         let edit_w = 28.0;
                         egui::ScrollArea::horizontal()
                             .id_salt("path_crumbs")
-                            // Fill the whole width (not just the segments')
-                            // so ✏ lands at the far right of the path field.
+                            // Full width, so ✏ sits at the far right.
                             .auto_shrink([false, true])
                             .stick_to_right(true)
                             .max_width((ui.available_width() - edit_w).max(0.0))
@@ -220,24 +201,15 @@ impl DiskScanApp {
                                     }
                                 });
                             });
-                        // A plain clickable label, not a Button: even with
-                        // .frame(false) a Button still reserves its normal
-                        // left/right button_padding around the glyph for
-                        // its click target, which is exactly the padding
-                        // asked to go away — a Label has none.
+                        // A clickable label: no button padding.
                         let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
                         if pencil.on_hover_cursor(egui::CursorIcon::PointingHand).named(&tr("TOOLBAR_PATH_EDIT_TOOLTIP")).clicked() {
                             start_path_edit = true;
                         }
                     }
                 },
-                // Settings sit at the far right. (Navigation lives in the
-                // cross in the main area's top-right corner — see the end of
-                // this function.)
-                // Right-to-left layout: each item added sits to the left of
-                // the previous one. Far right: filters + settings; then,
-                // after a separator, empty trash and the Chart / Table view
-                // pair (the active view highlighted).
+                // Right to left: settings, filters, then empty trash and the view
+                // buttons.
                 |ui| {
                     if ui
                         .add(egui::Button::new("⚙").selected(settings_open))
@@ -246,8 +218,7 @@ impl DiskScanApp {
                     {
                         settings_toggled = true;
                     }
-                    // Lit while the panel is open, and while a filter is
-                    // applied (so a hidden, active filter isn't forgotten).
+                    // Lit while the panel is open or a filter is active.
                     if icon_toolbar_button(ui, filters_open || filter_active, true, &if filter_active { tr("TOOLBAR_FILTERS_ACTIVE") } else { tr("FILTER_TITLE") }, draw_filter_icon)
                         .clicked()
                     {
@@ -295,8 +266,8 @@ impl DiskScanApp {
             self.path_editing = false;
         }
         if let Some(p) = crumb_click {
-            // A folder inside the finished scan: just zoom to it. Anything
-            // else (a parent of the scanned folder, or mid-scan): scan it.
+            // A folder inside the finished scan is zoomed to; anything else is
+            // scanned.
             let in_tree = if self.scanning { None } else { self.root.as_ref().and_then(|r| index_path_to(r, &p)) };
             match in_tree {
                 Some(idx) => {
@@ -342,12 +313,7 @@ impl DiskScanApp {
         }
         if let Some(trimmed) = submit.as_deref().map(str::trim) {
             if let Some(scheme_end) = trimmed.find("://") {
-                // A URL like smb://host/share is a virtual URI (KIO/GVFS),
-                // not a real filesystem path — there's no directory to stat
-                // until it's actually mounted. Auto-mounting it ourselves
-                // would mean shelling out to `gio mount` and risking a hang
-                // waiting on a credentials prompt we have no way to
-                // surface, so just say clearly what's needed instead.
+                // A network URL (smb://…) isn't a path until it's mounted: explain.
                 let scheme = &trimmed[..scheme_end];
                 self.log_issue(trf("ERR_NETWORK_URL", &[scheme]));
             } else {
@@ -380,17 +346,13 @@ impl DiskScanApp {
 
     /// Filters panel (right side), while open.
     pub(crate) fn filter_panel_ui(&mut self, ui: &mut egui::Ui) {
-        // Filters: narrow what the chart/summary show to matching files.
-        // Applied on demand (Enter or Apply) since re-filtering a big scan
-        // isn't free; folders are re-totalled from the files that match.
+        // Applied with Enter or Apply; folders are re-totalled from the files
+        // that match.
         if self.show_filters {
             egui::Panel::right("filter_panel")
                 .resizable(true)
                 .default_size(FILTER_PANEL_WIDTH)
-                // Wide enough that the label column ("Created"/"Modified",
-                // or a longer translation of them) plus two date fields
-                // never get squeezed into clipping their "YYYY-MM-DD"-style
-                // hint text — that's what was showing up as "YYYY-...".
+                // Wide enough for a label and two date fields.
                 .min_size(300.0)
                 .max_size(600.0)
                 .show(ui, |ui| {
@@ -405,17 +367,8 @@ impl DiskScanApp {
                     ui.separator();
 
                     let mut submitted = false;
-                    // Returns true when Enter was pressed in the field.
-                    // add_sized (an exact allocated rect) rather than
-                    // desired_width (a hint the Grid negotiates around) —
-                    // desired_width let the Grid's own per-column width
-                    // inference end up giving the min/from column less
-                    // room than the to/max one despite both requesting the
-                    // same width, clipping "YYYY-MM-DD" down to "YYYY-...".
-                    // An exact size can't be negotiated down that way.
-                    // Each field is checked as it's typed: an invalid value
-                    // gets a red outline (and its reason on hover), and
-                    // Apply stays disabled until it's fixed.
+                    // A fixed-size field, checked as it's typed: an invalid value gets a red
+                    // outline with the reason on hover. True when Enter was pressed.
                     let mut invalid_fields = 0;
                     let error_color = ui.visuals().error_fg_color;
                     let mut field = |ui: &mut egui::Ui, value: &mut String, hint: &str, check: &dyn Fn(&str) -> Result<(), String>| -> bool {
@@ -435,17 +388,7 @@ impl DiskScanApp {
                     let f = &mut self.filter_form;
 
                     ui.label(tr("FILTER_NAME_LABEL"));
-                    // The Aa toggle is placed first (fixed size), so the
-                    // text field — added after, with the same passive
-                    // "fill everything left" INFINITY it always used — only
-                    // ever sees whatever room the toggle didn't already
-                    // claim. Deriving the field's width from a live
-                    // available_width() reading instead (subtracting the
-                    // toggle's width by hand) briefly latched onto a much
-                    // larger number during the same-frame relayout that
-                    // happens when another docked panel opens/closes, and
-                    // since this panel has no max_width, it grew to match
-                    // and stayed that way.
+                    // The Aa toggle first; the name field fills the room left.
                     let r = ui
                         .horizontal(|ui| {
                             let case_tip = if f.case_sensitive { tr("FILTER_CASE_SENSITIVE") } else { tr("FILTER_CASE_INSENSITIVE") };
@@ -507,8 +450,7 @@ impl DiskScanApp {
                         self.filter_form = FilterForm::default();
                         submitted = true;
                     } else if !valid {
-                        // Enter in a field with an invalid value applies
-                        // nothing (the outline says why).
+                        // Enter with an invalid field applies nothing.
                         submitted = false;
                     }
                     if submitted {
@@ -516,8 +458,7 @@ impl DiskScanApp {
                     }
 
                     if !valid {
-                        // Never let an invalid field look applied: say what
-                        // the table is really showing.
+                        // With an invalid field, say what the table is really showing.
                         ui.colored_label(
                             ui.visuals().error_fg_color,
                             tr(if self.filter.is_some() { "FILTER_INVALID_KEEPS_PREVIOUS" } else { "FILTER_INVALID" }),
@@ -553,8 +494,6 @@ impl DiskScanApp {
 
     /// Chart settings panel (right side), while open.
     pub(crate) fn settings_panel_ui(&mut self, ui: &mut egui::Ui) {
-        // Chart settings live in a docked panel on the right side of the main
-        // window (toggled by the ⚙ button) instead of a floating popup.
         if self.show_settings {
             egui::Panel::right("settings_panel")
                 .resizable(true)
@@ -712,10 +651,8 @@ impl DiskScanApp {
                     }
                 });
                 if !self.log.is_empty() {
-                    // One line per issue, newest first. A line too long for
-                    // the bar loses its middle ("…") rather than its end,
-                    // where the reason is; hovering shows it in full. Only
-                    // the visible lines are laid out.
+                    // One line per issue, newest first; long lines lose their middle ("…")
+                    // and show in full on hover.
                     let font = egui::TextStyle::Small.resolve(ui.style());
                     let row_h = ui.text_style_height(&egui::TextStyle::Small);
                     let n = self.log.len() + usize::from(self.log_truncated > 0);
@@ -750,8 +687,7 @@ impl DiskScanApp {
                 return;
             }
             if self.scanning {
-                // Each view stays itself during a scan: the chart grows
-                // live, and so does the table.
+                // Both views grow live during a scan.
                 if self.summary_view {
                     self.live_table_ui(ui);
                 } else {
@@ -771,15 +707,12 @@ impl DiskScanApp {
                 return;
             }
 
-            // Room above the chart for the path line of the top-left info
-            // (size/files/perms may overlap the chart's corner).
+            // Room above the chart for the top-left info's path line.
             ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 12.0);
             let avail = ui.available_size();
 
-            // Reserve a fixed-height strip below the chart for hover
-            // details, full width (so long paths never wrap) — fixed
-            // regardless of whether anything is currently hovered, so the
-            // chart's own size never jumps when hovering starts/stops.
+            // A fixed strip below the chart, the same as during a scan, so the chart
+            // keeps its size.
             let hover_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
             let content_height = (avail.y - hover_strip_height).max(50.0);
 
@@ -793,10 +726,8 @@ impl DiskScanApp {
         central.response.rect
     }
 
-    /// While scanning, in table view: the progress bar, then the contents
-    /// table of the folders scanned so far, re-sorted as they arrive (at
-    /// most every 250 ms, so huge scans stay smooth). The cursor stays on
-    /// its item and the view doesn't scroll on its own.
+    /// Table view while scanning: the progress bar, the category bar and the
+    /// contents table so far, refreshed at most every 250 ms.
     fn live_table_ui(&mut self, ui: &mut egui::Ui) {
         if self.partial_gen != self.live_seen && self.live_refreshed.elapsed() >= std::time::Duration::from_millis(250) {
             self.live_gen += 1;
@@ -812,13 +743,11 @@ impl DiskScanApp {
         ui.add_space(6.0);
         let avail = ui.available_height();
         let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
-        // table_ui needs &mut self and the folder shown at once: borrow the
-        // live rows out for the call.
+        // Moved out for the call, since table_ui also needs &mut self.
         let view = std::mem::replace(&mut self.live_view, empty_node());
         self.bar_and_table(ui, avail, heading_h, &view);
         self.live_view = view;
-        // Mid-scan, a picked category is only remembered: like the Filters
-        // panel's, it applies to the finished scan (see ScanMsg::Done).
+        // Mid-scan, a picked category applies when the scan finishes.
         if let Some(cat) = self.category_pending.take() {
             self.category = cat;
         }
@@ -827,26 +756,12 @@ impl DiskScanApp {
     /// While scanning: a read-only live preview of the chart.
     fn scan_preview_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        // Read-only live preview: draw whatever top-level children
-        // have streamed in so far, so the sunburst blossoms one
-        // petal at a time instead of staying blank until the whole
-        // drive finishes. No hover/click/context-menu here — the
-        // data is still changing underneath every frame.
-        // Room above the chart for the path line of the top-left
-        // info (size/files/perms may overlap the chart's corner),
-        // same as the finished view, so the chart doesn't jump when
-        // the scan completes.
+        // Same layout as the finished chart, so it doesn't jump when the scan
+        // ends. No hover, clicks or menu: the data keeps changing.
         ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 12.0);
         let avail = ui.available_size();
 
-        // Reserve the exact same bottom strip as the completed
-        // view (see hover_strip_height there) so the chart is
-        // sized identically in both states — otherwise the circle
-        // visibly jumps/shrinks the instant scanning finishes.
-        // The scan-progress readout lives in that strip instead of
-        // a fixed-position overlay: a floating box can't overlap
-        // the chart if the chart's own drawable area already
-        // excludes that space.
+        // The progress bar goes in the strip below the chart.
         let status_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
         let content_height = (avail.y - status_strip_height).max(50.0);
 
@@ -862,25 +777,9 @@ impl DiskScanApp {
         painter.circle_filled(center, hub_radius, bg);
         draw_hub_text(&painter, center, hub_radius, &self.partial_root.name, self.partial_root.size);
 
-        // Include free space once scanning has actually produced
-        // some content, not from frame one: statvfs answers
-        // instantly, but the first real directory can take a while
-        // to show up (e.g. a dormant HDD spinning up) — showing
-        // free space alone in the meantime looks like a stalled,
-        // near-empty chart. Once content exists, size against total
-        // capacity from then on so proportions stay stable for the
-        // rest of the blossom animation (no jump at completion).
+        // Free space is shown once the first folder has arrived.
         let has_content = !self.partial_root.children.is_empty();
-        let live_free_bytes = if has_content {
-            self.free_space.map(|(_, free)| free).unwrap_or(0)
-        } else {
-            0
-        };
-        let live_total_capacity = if has_content {
-            self.free_space.map(|(total, _)| total).unwrap_or(0)
-        } else {
-            0
-        };
+        let (live_total_capacity, live_free_bytes) = if has_content { self.free_space.unwrap_or((0, 0)) } else { (0, 0) };
         let mut segs = Vec::new();
         layout_sunburst(
             &self.partial_root,
@@ -896,18 +795,10 @@ impl DiskScanApp {
             &mut segs,
         );
         for seg in &segs {
-            let r0 = hub_radius + ring_thickness * seg.ring as f32;
-            let r1 = r0 + ring_thickness;
-            let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
-            let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
-            draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
+            self.draw_segment(&painter, seg, center, hub_radius, ring_thickness, free_color);
         }
 
-        // Rendered directly into the reserved strip below the chart (ui's
-        // cursor sits there now, since the painter above only consumed
-        // content_height, not the full avail) — structurally unable to
-        // overlap the chart. Matches the chart's own width (`side`),
-        // centered under it.
+        // Centered under the chart, as wide as it.
         ui.add_space(4.0);
         let left_inset = ((avail.x - side) / 2.0).max(0.0);
         ui.horizontal(|ui| {
@@ -1098,6 +989,14 @@ impl DiskScanApp {
         }
     }
 
+    /// Draws one slice of the chart in its color.
+    fn draw_segment(&self, painter: &egui::Painter, seg: &Segment, center: Pos2, hub_radius: f32, ring_thickness: f32, free_color: Color32) {
+        let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
+        let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
+        let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
+        draw_arc_mesh(painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
+    }
+
     /// The sunburst for the folder being viewed, with hover details,
     /// clicks and the right-click menu. `geom` is (center, hub radius,
     /// ring thickness).
@@ -1118,18 +1017,12 @@ impl DiskScanApp {
         let bg = ui.visuals().panel_fill;
         let free_color = gamma_lighten(bg, self.settings.free_space_gamma);
 
-        // hub (center circle) - click navigates up
+        // The hub; clicking it goes up a level.
         painter.circle_filled(center, hub_radius, bg);
         draw_hub_text(&painter, center, hub_radius, &view_node.name, view_node.size);
 
-        let (root_free_bytes, root_total_capacity) = if self.view_stack.len() == 1 {
-            (
-                self.free_space.map(|(_, free)| free).unwrap_or(0),
-                self.free_space.map(|(total, _)| total).unwrap_or(0),
-            )
-        } else {
-            (0, 0)
-        };
+        // Free space only on the scanned folder's own chart.
+        let (root_total_capacity, root_free_bytes) = if self.view_stack.len() == 1 { self.free_space.unwrap_or((0, 0)) } else { (0, 0) };
         let mut segs = Vec::new();
         layout_sunburst(
             view_node,
@@ -1147,17 +1040,13 @@ impl DiskScanApp {
 
         let pointer = ctx.input(|i| i.pointer.hover_pos());
         let mut new_hover: Option<HoverInfo> = None;
-        // Segment idx_paths are relative to view_node (layout_sunburst
-        // starts from it), not to the scan root.
+        // Relative to view_node, like the segments' idx_paths.
         let mut hover_idx_path: Option<Vec<usize>> = None;
         let mut hover_is_other = false;
 
         for seg in &segs {
-            let r0 = hub_radius + ring_thickness * seg.ring as f32;
-            let r1 = r0 + ring_thickness;
-            let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
-            let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
-            draw_arc_mesh(&painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
+            self.draw_segment(painter, seg, center, hub_radius, ring_thickness, free_color);
+            let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
 
             if let Some(p) = pointer {
                 let v = p - center;
@@ -1168,10 +1057,7 @@ impl DiskScanApp {
                         ang += std::f32::consts::TAU;
                     }
                     if ang >= seg.start_angle && ang <= seg.end_angle {
-                        // Only "real" segments (not the synthetic
-                        // "other"/"free space" buckets) correspond to
-                        // an actual Node — that's where mtime/ctime/
-                        // uid/gid/mime can come from.
+                        // "Other" and free space have no node of their own.
                         let real_node = if seg.is_other || seg.is_free {
                             None
                         } else {
@@ -1179,11 +1065,9 @@ impl DiskScanApp {
                         };
                         new_hover = Some(HoverInfo {
                             path: if seg.is_free {
-                                PathBuf::from(&seg.name) // "Free space" — not a real path under view_node
+                                PathBuf::from(&seg.name) // "Free space"
                             } else if seg.is_other {
-                                // An "other" bucket's idx_path is the folder
-                                // holding the grouped items (which may be
-                                // several rings out), not the viewed folder.
+                                // "Other": its idx_path leads to the folder holding the grouped items.
                                 get_node(view_node, &seg.idx_path).path.join(&seg.name)
                             } else {
                                 real_node.unwrap().path.clone()
@@ -1199,8 +1083,7 @@ impl DiskScanApp {
                             uid: real_node.map(|n| n.uid),
                             gid: real_node.map(|n| n.gid),
                         });
-                        // Free space isn't a real tree node: don't let it
-                        // be zoomed into or targeted by the context menu.
+                        // Free space can't be opened or used by the menu.
                         hover_idx_path = if seg.is_free { None } else { Some(seg.idx_path.clone()) };
                         hover_is_other = seg.is_other;
                     }
@@ -1209,11 +1092,8 @@ impl DiskScanApp {
         }
         self.hovered = new_hover;
 
-        // Slices the arrow keys can move between (real files/folders and
-        // "other" — see OTHER_MARKER for how it stays navigable despite
-        // not being a real tree node — but not the free-space slice),
-        // and the highlight: a thin light outline, leaving the slice's
-        // own colour untouched.
+        // Slices the arrow keys move between (all but free space), and the
+        // highlighted slice's outline.
         self.chart_segs = segs
             .iter()
             .filter(|s| !s.is_free)
@@ -1221,8 +1101,7 @@ impl DiskScanApp {
             .collect();
         if let Some(rel) = self.selected_rel() {
             if let Some(seg) = segs.iter().find(|s| !s.is_free && s.idx_path == *rel) {
-                let r0 = hub_radius + ring_thickness * seg.ring as f32;
-                let r1 = r0 + ring_thickness;
+                let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
                 let stroke = egui::Stroke::new(1.5, ui.visuals().strong_text_color().gamma_multiply(0.85));
                 draw_arc_outline(&painter, center, r0, r1, seg.start_angle, seg.end_angle, stroke);
             }
@@ -1250,11 +1129,8 @@ impl DiskScanApp {
             }
         }
 
-        // Right-click menu (egui's own: closes on a click elsewhere or
-        // Esc). Its target is fixed as a path when it opens, so it keeps
-        // meaning the same item even if the view changes underneath.
-        // Nothing for an "other" bucket: its idx_path is its *parent*
-        // folder's, so Trash/Delete there would hit that whole folder.
+        // Right-click menu. Its target is fixed as a path when it opens. None for
+        // "other", whose idx_path is its parent folder's.
         if response.secondary_clicked() {
             self.context_target = match (&hover_idx_path, hover_is_other) {
                 (Some(ip), false) => Some(get_node(view_node, ip).path.clone()),
@@ -1285,8 +1161,7 @@ impl DiskScanApp {
                 self.hidden.insert(target.clone());
                 ui.close();
             }
-            // Same as T / D: the chart updates in place, and a
-            // permanent delete asks first.
+            // Like T and D; a permanent delete asks first.
             if ui.button(tr("MENU_TRASH")).clicked() {
                 self.queue_trash(vec![target.clone()]);
                 ui.close();
@@ -1297,18 +1172,10 @@ impl DiskScanApp {
             }
         });
 
-        // Floating tooltip-style panel near the pointer, rather than a
-        // fixed strip of the layout: the reserved margin below the
-        // chart (hover_strip_height) stays purely as blank breathing
-        // room now, so the chart's size still doesn't jump between
-        // scanning and completed states, but hover details no longer
-        // permanently occupy that space — they only appear, floating,
-        // while actually hovering.
-        // Snapshot: ensure_mime_lookup below needs &mut self, which
-        // can't coexist with an active &self.hovered borrow.
+        // Hover details float next to the pointer. (A copy, since
+        // ensure_mime_lookup needs &mut self.)
         let hover_snapshot = self.hovered.clone();
-        // No hover card while the right-click menu is open (it would cover
-        // the menu and describe a different item).
+        // None while the right-click menu is open.
         let hover_snapshot = hover_snapshot.filter(|_| !egui::Popup::is_any_open(&ctx));
         if let (Some(h), Some(p)) = (&hover_snapshot, pointer) {
             if !h.is_dir {
@@ -1316,10 +1183,7 @@ impl DiskScanApp {
             }
             let mime = if h.is_dir { None } else { self.mime_cache.get(&h.path).cloned().flatten() };
 
-            // Flip which corner of the tooltip anchors to the pointer
-            // based on which quadrant of the chart it's in, so the
-            // popup opens away from the nearest edge instead of
-            // routinely spilling off-window.
+            // Opens away from the nearest window edge.
             let gap = 14.0;
             let (align, offset) = match (p.x > center.x, p.y > center.y) {
                 (false, false) => (egui::Align2::LEFT_TOP, Vec2::new(gap, gap)),
@@ -1329,8 +1193,7 @@ impl DiskScanApp {
             };
             let is_real_folder = h.is_dir && !h.is_other;
             let is_real_file = !h.is_dir && !h.is_free;
-            // None for the aggregate "other" bucket / free space:
-            // neither is really a file or a folder.
+            // No icon for "other" or free space.
             let icon: Option<fn(&egui::Painter, egui::Rect, Color32)> = if is_real_file {
                 Some(draw_file_icon)
             } else if is_real_folder {
@@ -1340,12 +1203,8 @@ impl DiskScanApp {
             };
             let path_str = short_path(&h.path);
 
-            // Keyed by path: egui's Area/Grid persist and only ever
-            // grow their sizing per Id across frames (to avoid jitter),
-            // so reusing one fixed Id for every hover target would let
-            // a wide value on one file (a huge file count, a long
-            // date) stick around and bloat the box for the next,
-            // shorter-named one too.
+            // Keyed by path: egui remembers an area's size per id, and one id for
+            // every item would keep the box as wide as the widest seen.
             egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path))
                 .pivot(align)
                 .fixed_pos(p + offset)
@@ -1357,11 +1216,7 @@ impl DiskScanApp {
                                     ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
                                 draw_icon(ui.painter(), icon_rect, ui.visuals().text_color());
                             }
-                            // No wrap by default, so the tooltip sizes
-                            // to fit the path on one line — only wraps
-                            // (at a generous width) once it's long
-                            // enough that "way big" is the honest
-                            // description.
+                            // One line, unless the path is very long.
                             let galley = ui.painter().layout_no_wrap(
                                 path_str.clone(),
                                 egui::FontId::monospace(12.0),
@@ -1411,19 +1266,8 @@ impl DiskScanApp {
     /// Scan progress bar, `width` wide, labelled with the count so far and
     /// how to cancel. Shared by the chart preview and the live table.
     pub(crate) fn scan_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
-        // Bytes-scanned-so-far vs. known total capacity is a cheap,
-        // filesystem-agnostic progress proxy (unlike file count,
-        // which has no reliable upfront total — see is_real_mount_point
-        // discussion; NTFS in particular fakes its inode totals).
-        // It's imperfect (many tiny files vs. one huge file skews
-        // it) but it's honest about what it measures and free to
-        // compute from data we already track.
-        //
-        // Any other folder has no such total, so a counting pass
-        // (count_entries) runs alongside the scan and progress is
-        // items scanned / items counted. Until counting finishes the
-        // total is a lower bound, so the fraction is held monotonic
-        // rather than letting the bar slide backwards as it grows.
+        // A whole drive: bytes scanned out of its used space. Any other folder:
+        // entries scanned out of the counting pass's total.
         let used_target = self.free_space.map(|(total, free)| total.saturating_sub(free));
         let (raw, label) = match used_target.filter(|&u| u > 0) {
             Some(u) => (
@@ -1442,11 +1286,8 @@ impl DiskScanApp {
                 } else {
                     trf("SCAN_PROGRESS_ITEMS", &[&format_count(self.scanned_count)])
                 };
-                // Until counting finishes the total is only a lower
-                // bound — and on a cold disk the count isn't reliably
-                // ahead of the scan, so any fraction from it can
-                // wildly overshoot (and the bar never moves back).
-                // Hold at 0 meanwhile; the label shows it's working.
+                // Until counting finishes the total is too low: the bar stays at 0
+                // meanwhile (the label shows progress).
                 (if counted { self.scanned_count as f64 / total as f64 } else { 0.0 }, label)
             }
         };

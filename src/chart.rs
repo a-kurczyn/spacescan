@@ -319,6 +319,12 @@ pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f
     painter.galley(size_pos, size_galley.clone(), Color32::WHITE);
 }
 
+/// Inner and outer radius of ring `ring`.
+pub(crate) fn ring_radii(ring: usize, hub_radius: f32, ring_thickness: f32) -> (f32, f32) {
+    let r0 = hub_radius + ring_thickness * ring as f32;
+    (r0, r0 + ring_thickness)
+}
+
 /// Unit vector at angle `t`: 0 points straight up, angles grow clockwise.
 pub(crate) fn arc_dir(t: f32) -> Vec2 {
     let (s, c) = t.sin_cos();

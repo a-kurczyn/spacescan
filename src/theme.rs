@@ -156,7 +156,7 @@ mod tests {
         let font = egui::FontId::proportional(14.0);
         let has = |c: char| ctx.fonts_mut(|f| f.has_glyph(&font, c));
         assert!(has('ü'));
-        // Only meaningful where a CJK font is installed (as on the dev box).
+        // Only checked where a CJK font is installed.
         if std::process::Command::new("fc-list").arg(":lang=ja").output().is_ok_and(|o| !o.stdout.is_empty()) {
             assert!(has('日') && has('本') && has('語'));
         }
