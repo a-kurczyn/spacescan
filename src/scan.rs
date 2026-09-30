@@ -808,6 +808,8 @@ pub(crate) fn format_count(n: u64) -> String {
 pub(crate) fn fs_space(path: &Path) -> Option<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
     let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `cpath` is a valid C string that outlives the call, and
+    // `stat` is a plain C struct that statvfs fills in.
     unsafe {
         let mut stat: libc::statvfs = std::mem::zeroed();
         if libc::statvfs(cpath.as_ptr(), &mut stat) != 0 {
@@ -1022,6 +1024,8 @@ mod memory {
 /// (glibc otherwise keeps it). Runs on a background thread.
 pub(crate) fn after_tree_dropped() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim has no preconditions; it only releases free
+    // heap memory.
     std::thread::spawn(|| unsafe {
         libc::malloc_trim(0);
     });

@@ -276,6 +276,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join(".config/spacemap")).unwrap();
         let old = std::env::var_os("HOME");
+        // SAFETY (for the set_var/remove_var calls): tests that change HOME
+        // hold LOCK, and no other test reads HOME: the app and translations
+        // skip the user's files under cfg(test).
         unsafe { std::env::set_var("HOME", &home) };
         f(&home);
         match old {

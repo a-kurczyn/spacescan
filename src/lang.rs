@@ -75,9 +75,16 @@ impl Lang {
     }
 }
 
-/// The active language.
-pub(crate) static LANG: LazyLock<RwLock<Lang>> =
-    LazyLock::new(|| RwLock::new(Lang::load(&config::language_setting())));
+/// The active language (English in tests, which don't read the user's
+/// settings).
+pub(crate) static LANG: LazyLock<RwLock<Lang>> = LazyLock::new(|| {
+    let code = if cfg!(test) {
+        "en".to_string()
+    } else {
+        config::language_setting()
+    };
+    RwLock::new(Lang::load(&code))
+});
 
 /// The translated string for `key`.
 pub(crate) fn tr(key: &str) -> String {

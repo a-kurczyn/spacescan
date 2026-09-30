@@ -52,7 +52,7 @@ impl DiskScanApp {
         // `Sides` lays out the right-hand buttons first and gives the rest to the
         // left side. The closures only record clicks; `self` is changed after.
         let root_arc = self.root.clone();
-        let cur_view_idx = self.view_stack.last().unwrap().clone();
+        let cur_view_idx = self.current_view().clone();
         let can_reload = root_arc.is_some();
         let mut path_input = self.path_input.clone();
         let path_input_was_focused = self.path_input_focused;
@@ -806,7 +806,7 @@ impl DiskScanApp {
             };
 
             if self.summary_view {
-                let view_node = get_node(&root, self.view_stack.last().unwrap());
+                let view_node = get_node(&root, self.current_view());
                 self.summary_ui(ui, view_node);
                 return;
             }
@@ -1257,7 +1257,7 @@ impl DiskScanApp {
     ) {
         let ctx = ui.ctx().clone();
         let (center, hub_radius, ring_thickness) = geom;
-        let view_node = get_node(root, self.view_stack.last().unwrap());
+        let view_node = get_node(root, self.current_view());
         // The chart is one painted area: give it a name for screen readers.
         let chart_name = trf(
             "A11Y_CHART",
@@ -1311,13 +1311,11 @@ impl DiskScanApp {
                             Some(get_node(view_node, &seg.idx_path))
                         };
                         new_hover = Some(HoverInfo {
-                            path: if seg.is_free {
-                                PathBuf::from(&seg.name) // "Free space"
-                            } else if seg.is_other {
+                            path: match real_node {
+                                Some(n) => n.path.clone(),
+                                None if seg.is_free => PathBuf::from(&seg.name), // "Free space"
                                 // "Other": its idx_path leads to the folder holding the grouped items.
-                                get_node(view_node, &seg.idx_path).path.join(&seg.name)
-                            } else {
-                                real_node.unwrap().path.clone()
+                                None => get_node(view_node, &seg.idx_path).path.join(&seg.name),
                             },
                             size: seg.size,
                             file_count: seg.file_count,
@@ -1379,7 +1377,7 @@ impl DiskScanApp {
                 } else {
                     let node = get_node(view_node, ip);
                     if node.is_dir {
-                        let mut vp = self.view_stack.last().unwrap().clone();
+                        let mut vp = self.current_view().clone();
                         vp.extend(ip.iter());
                         self.view_stack.push(vp);
                     }

@@ -388,16 +388,16 @@ impl Default for DiskScanApp {
             user_cache: std::collections::HashMap::new(),
             group_cache: std::collections::HashMap::new(),
         };
-        let (cfg, needs_save, problem) = Config::load();
-        app.settings = cfg.chart.clone();
-        app.apply_table_prefs(&cfg.table);
-        app.saved_config = (!needs_save).then_some(cfg);
-        if let Some(p) = problem {
-            app.log_issue(p);
-        }
-        // Tests build the app too: they keep the built-in categories and
-        // never write the user's categories.json.
+        // Tests build the app too: they keep the defaults and never read or
+        // write the user's settings or categories.
         if !cfg!(test) {
+            let (cfg, needs_save, problem) = Config::load();
+            app.settings = cfg.chart.clone();
+            app.apply_table_prefs(&cfg.table);
+            app.saved_config = (!needs_save).then_some(cfg);
+            if let Some(p) = problem {
+                app.log_issue(p);
+            }
             app.reload_categories();
         }
         app
@@ -405,6 +405,22 @@ impl Default for DiskScanApp {
 }
 
 impl DiskScanApp {
+    /// Child-index path of the folder shown: the last entry of the zoom
+    /// history, which always has at least one.
+    fn current_view(&self) -> &Vec<usize> {
+        self.view_stack
+            .last()
+            .expect("the zoom history is never empty")
+    }
+
+    /// Replaces the folder shown (the last entry of the zoom history).
+    fn set_current_view(&mut self, view: Vec<usize>) {
+        *self
+            .view_stack
+            .last_mut()
+            .expect("the zoom history is never empty") = view;
+    }
+
     /// Rereads categories.json (edits show up at the next scan). A changed
     /// list drops the picked category: positions may mean something else.
     fn reload_categories(&mut self) {
@@ -620,7 +636,7 @@ impl DiskScanApp {
     }
 
     fn current_view_node<'a>(&self, root: &'a Node) -> &'a Node {
-        let idx_path = self.view_stack.last().unwrap();
+        let idx_path = self.current_view();
         get_node(root, idx_path)
     }
 
@@ -696,7 +712,7 @@ impl DiskScanApp {
     /// inner ring: the parent folder). With nothing highlighted, any arrow
     /// starts at the first inner slice.
     fn move_selection(&mut self, dir: NavDir) {
-        let view = self.view_stack.last().unwrap().clone();
+        let view = self.current_view().clone();
         let segs = &self.chart_segs;
         let first_where = |pred: &dyn Fn(&Vec<usize>) -> bool| {
             segs.iter()
@@ -748,10 +764,10 @@ impl DiskScanApp {
     /// Backspace (and ⬅ from the inner ring): steps the chart out to the
     /// parent folder, highlighting the folder just left.
     fn chart_parent_folder(&mut self) {
-        let view = self.view_stack.last().unwrap().clone();
+        let view = self.current_view().clone();
         if let Some((&left, parent_view)) = view.split_last() {
             let parent_view = parent_view.to_vec();
-            *self.view_stack.last_mut().unwrap() = parent_view.clone();
+            self.set_current_view(parent_view.clone());
             self.selection = Some(ChartSel {
                 view: parent_view,
                 rel: vec![left],
@@ -772,7 +788,7 @@ impl DiskScanApp {
         let Some(root) = self.root.clone() else {
             return;
         };
-        let view = self.view_stack.last().unwrap().clone();
+        let view = self.current_view().clone();
         if try_get_node(get_node(&root, &view), &rel).is_some_and(|n| n.is_dir) {
             let mut vp = view;
             vp.extend(rel);
@@ -786,7 +802,7 @@ impl DiskScanApp {
     fn open_other_bucket(&mut self, ip: &[usize]) {
         let owner_rel = &ip[..ip.len() - 1];
         if !owner_rel.is_empty() {
-            let mut vp = self.view_stack.last().unwrap().clone();
+            let mut vp = self.current_view().clone();
             vp.extend(owner_rel.iter().copied());
             self.view_stack.push(vp);
         }
@@ -1025,6 +1041,7 @@ fn raise_open_file_limit() {
         rlim_cur: 0,
         rlim_max: 0,
     };
+    // SAFETY: both calls only read or write the local `lim`.
     unsafe {
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 && lim.rlim_cur < lim.rlim_max {
             lim.rlim_cur = lim.rlim_max;

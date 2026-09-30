@@ -123,7 +123,7 @@ impl CompiledFilter {
     }
 }
 
-/// Splits "*.iso, *.[mkv,mp4] backup" into patterns: whitespace, `,` and
+/// Splits `*.iso, *.[mkv,mp4] backup` into patterns: whitespace, `,` and
 /// `;` separate patterns, except inside `[...]`/`{...}` lists. Text in
 /// double quotes is kept as one piece, spaces and commas included
 /// (`"my file*"`), and `\` makes the next character literal (`my\ file`).

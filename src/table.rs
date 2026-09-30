@@ -321,7 +321,7 @@ impl DiskScanApp {
             view: if self.scanning {
                 vec![]
             } else {
-                self.view_stack.last().unwrap().clone()
+                self.current_view().clone()
             },
             live: self.scanning,
             sort: self.contents_sort,
@@ -1077,10 +1077,10 @@ impl DiskScanApp {
         let Some(root) = self.root.clone() else {
             return;
         };
-        let view = self.view_stack.last().unwrap().clone();
+        let view = self.current_view().clone();
         if let Some((_, parent_view)) = view.split_last() {
             let left = get_node(&root, &view).path.clone();
-            *self.view_stack.last_mut().unwrap() = parent_view.to_vec();
+            self.set_current_view(parent_view.to_vec());
             self.table.cursor = Some(left);
             self.table.scroll_pending = true;
         }
