@@ -86,8 +86,7 @@ struct OrderKey {
     sort: SortState,
     dirs_first: bool,
     show_dotfiles: bool,
-    /// Items hidden from the chart's right-click menu (only ever added to
-    /// until the next scan).
+    /// How many items are hidden (from the chart's right-click menu).
     hidden: usize,
 }
 
@@ -100,10 +99,9 @@ struct RowOrder {
     dotfile_size: u64,
 }
 
-/// Where `cursor` is in the rows `idx` (indices into `view`'s children):
-/// `pos` remembers the last answer, so it's only searched for by path when
-/// the rows changed under it — searching every frame made a 300k-row folder
-/// sluggish whenever the cursor sat far down the list.
+/// Where `cursor` is in the rows `idx` (indices into `view`'s children).
+/// `pos` is the last answer, checked first, so large folders aren't
+/// searched every frame.
 fn find_cursor(cursor: &Path, pos: &std::cell::Cell<Option<usize>>, view: &Node, idx: &[usize]) -> Option<usize> {
     let at = |i: usize| idx.get(i).is_some_and(|&k| view.children[k].path == cursor);
     if let Some(i) = pos.get().filter(|&i| at(i)) {
@@ -248,7 +246,6 @@ enum Cell {
 }
 
 impl DiskScanApp {
-    // ---------------- Preferences ----------------
 
     /// The table's layout, as saved in settings.json.
     pub(crate) fn table_prefs(&self) -> TablePrefs {
@@ -264,8 +261,7 @@ impl DiskScanApp {
     pub(crate) fn apply_table_prefs(&mut self, p: &TablePrefs) {
         self.contents_sort = SortState { column: p.sort, ascending: p.ascending };
         self.table.hidden_cols = p.hidden_columns.iter().copied().collect();
-        // Every column exactly once: unknown ones dropped, columns added
-        // since the order was saved appended.
+        // Every column exactly once: unknown ones dropped, missing ones appended.
         let mut order: Vec<TableCol> = Vec::new();
         for c in p.column_order.iter().copied().chain(TableCol::ALL) {
             if !order.contains(&c) {
@@ -276,11 +272,9 @@ impl DiskScanApp {
         self.table.dirs_first = p.dirs_first;
     }
 
-    // ---------------- Frame hooks ----------------
 
-    /// Start of every frame: in the table, keeps keyboard focus off buttons
-    /// — otherwise a header button that was clicked would also react to
-    /// Enter/Space.
+    /// Start of every frame: keeps keyboard focus off the table's buttons,
+    /// so a clicked header doesn't also react to Enter or Space.
     pub(crate) fn table_frame_start(&mut self, ctx: &egui::Context) {
         if self.summary_view && !self.typing && !self.delete_dialog_open() && !self.table.show_help {
             ctx.memory_mut(|m| {
@@ -291,7 +285,6 @@ impl DiskScanApp {
         }
     }
 
-    // ---------------- Drawing ----------------
 
     /// Draws the contents table of `view_node`, no taller than `max_height`.
     pub(crate) fn table_ui(&mut self, ui: &mut egui::Ui, view_node: &Node, max_height: f32) {
@@ -301,9 +294,7 @@ impl DiskScanApp {
             self.table.marks_for = Some(view_node.path.clone());
         }
 
-        // Filtering and sorting every entry each frame would make a huge
-        // folder sluggish, so the order is kept until something it depends
-        // on changes.
+        // The row order is recomputed only when something it depends on changes.
         let key = OrderKey {
             tree_gen: if self.scanning { self.live_gen } else { self.tree_gen },
             view: if self.scanning { vec![] } else { self.view_stack.last().unwrap().clone() },
@@ -320,8 +311,7 @@ impl DiskScanApp {
         let row = |i: usize| &view_node.children[order.idx[i]];
         let n_rows = order.idx.len();
         let shown_size = order.shown_size;
-        // Keep a cursor on screen: the first row whenever the current one
-        // isn't in this folder (just opened, deleted, filtered out...).
+        // The cursor goes to the first row when it isn't in this folder.
         let found = self.table.cursor.as_ref().and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
         let cursor_row = match found {
             Some(i) => Some(i),
@@ -365,8 +355,8 @@ impl DiskScanApp {
                     r.request_focus();
                 }
                 changed = r.changed();
-                // Enter keeps the cursor where the search put it; Esc or
-                // clicking away just closes the field.
+                // Enter keeps the cursor where the search put it; Esc or a click
+                // elsewhere closes the field.
                 close = r.lost_focus();
             });
             if changed && !query.is_empty() {
@@ -394,19 +384,16 @@ impl DiskScanApp {
         let table_h = (max_height - header_h).max(row_h * 3.0);
         self.table.page_rows = ((table_h / row_h) as usize).saturating_sub(1).max(1);
 
-        // Percentages and bars are shares of what's listed, so they add up
-        // to 100% even with dotfiles hidden (the heading says how much that
-        // leaves out).
+        // Percentages and bars are shares of the listed rows, so they add up
+        // to 100% even with dotfiles hidden.
         let total = shown_size.max(1);
         let bar_fill = ui.visuals().selection.bg_fill;
         let bar_frame = ui.visuals().weak_text_color();
         let dir_color = ui.visuals().hyperlink_color;
         let mark_color = ui.visuals().warn_fg_color;
-        // On the cursor row everything is drawn in the selection's text
-        // color: the accent colors above would vanish into its background.
+        // The cursor row is drawn in the selection's text color...
         let selected_fg = ui.visuals().selection.stroke.color;
-        // ...except the size bar, which keeps its fill on a track and border
-        // in the window background color instead.
+        // ...and its size bar gets a track in the window background color.
         let panel_bg = ui.visuals().panel_fill;
         let marked = &self.table.marked;
 
@@ -414,16 +401,16 @@ impl DiskScanApp {
         let mut double_clicked: Option<usize> = None;
         let mut ctrl_clicked: Option<usize> = None;
         let show_info = self.table.show_info;
-        // During a scan, a folder the scanner hasn't finished yet only has a
-        // name and running totals (its mode is still unset).
+        // During a scan, an unfinished folder has only a name and running totals
+        // (no mode yet).
         let live = self.scanning;
         let pending = |c: &Node| live && c.is_dir && c.mode == 0;
         let sort_before = self.contents_sort;
         let contents_sort = &mut self.contents_sort;
         let user_cache = &mut self.user_cache;
         let group_cache = &mut self.group_cache;
-        // Unfinished column widths are remembered per column set, so
-        // hiding one column doesn't hand its width to its neighbour.
+        // Column widths are remembered per set of visible columns, so hiding one
+        // doesn't give its width to a neighbor.
         let layout_key: Vec<&str> = cells
             .iter()
             .map(|c| match c {
@@ -433,11 +420,9 @@ impl DiskScanApp {
             })
             .collect();
         ui.scope(|ui| {
-            // Text in cells shouldn't be selectable: a click anywhere on a
-            // row should reach the row.
+            // Cell text isn't selectable, so a click reaches the row.
             ui.style_mut().interaction.selectable_labels = false;
-            // No lines between columns: the resize handles only show up
-            // while hovered or dragged.
+            // Column resize handles show only while hovered or dragged.
             ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
             if show_info {
                 ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
@@ -450,10 +435,7 @@ impl DiskScanApp {
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .min_scrolled_height(0.0)
                 .max_scroll_height(table_h)
-                // Jump straight to the cursor row (after a key, a sort, a
-                // jump): the default animation redrew the whole table for up
-                // to 0.3 s on every long jump — noticeable CPU with software
-                // rendering, and a keyboard-driven list should just jump.
+                // Scroll to the cursor row at once, without animation.
                 .animate_scrolling(false)
                 .auto_shrink([false, true]);
             for cell in &cells {
@@ -526,8 +508,7 @@ impl DiskScanApp {
                                 let (r, _) = ui.allocate_exact_size(Vec2::new(86.0, row_h * 0.55), egui::Sense::hover());
                                 let frac = c.size as f32 / total as f32;
                                 if selected {
-                                    // The fill is the highlight's own color,
-                                    // so give it a dark track to stand on.
+                                    // A dark track under the fill.
                                     ui.painter().rect_filled(r, egui::CornerRadius::ZERO, panel_bg);
                                 }
                                 if frac > 0.0 {
@@ -556,8 +537,7 @@ impl DiskScanApp {
                             Cell::Opt(TableCol::Files) => {
                                 ui.label(format_count(c.file_count));
                             }
-                            // A folder still being scanned (live table) has
-                            // no details yet: "…", not values that look real.
+                            // A folder still being scanned shows "…".
                             Cell::Opt(TableCol::Modified | TableCol::Changed | TableCol::Perms) if pending(c) => {
                                 ui.weak("…");
                             }
@@ -591,8 +571,7 @@ impl DiskScanApp {
                         });
                     }
                     let r = tr_row.response();
-                    // Ctrl+click marks like Space; each click toggles, so
-                    // a quick second one never opens the row.
+                    // Ctrl+click marks like Space (a second click unmarks, never opens).
                     if r.clicked() && r.ctx.input(|i| i.modifiers.command) {
                         ctrl_clicked = Some(i);
                     } else if r.double_clicked() {
@@ -604,8 +583,7 @@ impl DiskScanApp {
             });
         });
 
-        // A header click is a sort like the keys: that column becomes the
-        // one `<`/`>` move.
+        // A clicked header's column becomes the one `<`/`>` move.
         if self.contents_sort != sort_before {
             self.table.active_col = self.contents_sort.column.table_col();
         }
@@ -633,15 +611,12 @@ impl DiskScanApp {
             })
             .collect();
         let cs = key.sort;
-        // Folders-first sorts group 0 (folders) before 1; the index breaks
-        // ties, so equal values keep a stable, repeatable order however
-        // they're sorted. Keys are precomputed into compact arrays and sorted
-        // there, rather than comparing nodes in place — several times faster
-        // on huge folders.
+        // Sort keys are built once into compact arrays, then sorted (much faster
+        // on huge folders than comparing nodes). Folders-first puts group 0
+        // (folders) before 1; the index breaks ties, so the order is stable.
         let group = |c: &Node| u8::from(key.dirs_first && !c.is_dir);
         if cs.column == SortColumn::Name {
-            // Natural, case-insensitive order, as in file managers: keys
-            // built once per name, then compared as bytes.
+            // Natural, case-insensitive order (see natural_key).
             let mut keyed: Vec<(u8, Vec<u8>, &str, u32)> = idx
                 .par_iter()
                 .map(|&i| (group(&children[i]), natural_key(&children[i].name), children[i].name.as_str(), i as u32))
@@ -773,13 +748,12 @@ impl DiskScanApp {
         }
     }
 
-    // ---------------- Keys ----------------
 
     /// Table keys, once per frame after drawing.
     pub(crate) fn table_keys(&mut self, ctx: &egui::Context) {
         if self.table.show_help {
-            // "?" again closes the help. Checked here, before the overlay is
-            // drawn, so the press that opened it can't also close it.
+            // "?" closes the help. Checked before the overlay is drawn, so the press
+            // that opened it doesn't also close it.
             if ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "?"))) {
                 self.table.show_help = false;
             }
@@ -805,9 +779,8 @@ impl DiskScanApp {
             .into_iter()
             .filter(|k| plain && i.key_pressed(*k))
             .collect();
-            // Letters and symbols come from text input, so they follow the
-            // keyboard layout (e.g. "?" and "/" on a Spanish keyboard) and
-            // Shift gives the uppercase commands.
+            // Letters and symbols come from text input, so they follow the keyboard
+            // layout, and Shift gives the uppercase commands.
             let typed: String = i
                 .events
                 .iter()
@@ -884,11 +857,9 @@ impl DiskScanApp {
         }
     }
 
-    // ---------------- Actions ----------------
 
-    /// The table's rows: the folder shown and its children's indices in
-    /// display order — None when the last computed order doesn't belong to
-    /// what's shown now (the tree changed since it was drawn).
+    /// The folder shown and its children's indices in display order; None if
+    /// the tree changed since the rows were computed.
     fn listed(&self) -> Option<(&Node, &[usize])> {
         let order = self.table.order.as_ref()?;
         if self.scanning {
@@ -949,7 +920,7 @@ impl DiskScanApp {
 
     fn open_dir(&mut self, path: &Path) {
         if self.scanning {
-            return; // see live_table_ui: navigation waits for the scan
+            return; // opening folders waits for the scan to finish
         }
         let Some(root) = self.root.clone() else { return };
         if let Some(vp) = index_path_to(&root, path) {
@@ -986,7 +957,7 @@ impl DiskScanApp {
             return;
         }
         match std::process::Command::new("xdg-open").arg(&path).spawn() {
-            // Reap it off the UI thread so it doesn't linger as a zombie.
+            // Waited for on another thread, so it doesn't become a zombie.
             Ok(mut child) => {
                 std::thread::spawn(move || {
                     let _ = child.wait();
