@@ -113,6 +113,12 @@ impl CategoryModel {
                 continue;
             };
             let at = format!("\"{}\"", tr(&name));
+            // Other is built in: a category of that name would look like a
+            // second one.
+            if name == "CAT_OTHER" || tr(&name).to_lowercase() == tr("CAT_OTHER").to_lowercase() {
+                problems.push(trf("ERR_CATEGORIES_OTHER", &[&at]));
+                continue;
+            }
             let idx = model.names.len();
             model.names.push(name);
 
@@ -336,6 +342,16 @@ mod tests {
         assert_eq!(m.color(m.of_name("a.mkv"), true), rgb(PALETTE[1].0));
         // .eml twice, a nameless entry, a non-string extension.
         assert_eq!(problems.len(), 3, "{problems:?}");
+    }
+
+    /// A category named like the built-in Other is skipped, with a problem.
+    #[test]
+    fn a_category_named_other_is_skipped() {
+        let text = r#"{"categories": [{"name": "other", "extensions": ["x"]}, {"name": "CAT_VIDEO", "extensions": ["mkv"]}]}"#;
+        let (m, problems) = CategoryModel::parse(text).unwrap();
+        assert_eq!(problems.len(), 1);
+        assert_eq!(m.of_name("a.x"), m.other());
+        assert_eq!(named(&m, "a.mkv"), "Video");
     }
 
     #[test]

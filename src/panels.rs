@@ -991,15 +991,22 @@ impl DiskScanApp {
     /// the right. Drawn in the main area itself (not floating over it), so
     /// a side panel always clips it instead of being drawn over.
     fn bar_and_table(&mut self, ui: &mut egui::Ui, avail: f32, heading_h: f32, view_node: &Node) {
-        let cat_w = 210.0;
-        let table_w = (ui.available_width() - cat_w - 16.0).max(320.0);
+        let full_w = ui.available_width();
+        // Narrow windows get the bar alone, without labels.
+        let compact = full_w < 560.0;
+        let cat_w = if compact {
+            40.0
+        } else {
+            (full_w * 0.3).clamp(150.0, 210.0)
+        };
+        let table_w = (full_w - cat_w - 16.0).max(200.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
                 Vec2::new(cat_w, avail),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.set_width(cat_w);
-                    self.category_bar_ui(ui, avail - heading_h);
+                    self.category_bar_ui(ui, avail - heading_h, compact);
                 },
             );
             ui.separator();
@@ -1018,11 +1025,15 @@ impl DiskScanApp {
     /// in the viewed folder, labelled beside it. Clicking a segment (or its
     /// label) shows only that category's files everywhere; clicking it
     /// again, or ✕, shows everything.
-    fn category_bar_ui(&mut self, ui: &mut egui::Ui, height: f32) {
+    /// `compact`: a narrow panel, with the bar alone (no heading or labels;
+    /// tooltips and keys still work).
+    fn category_bar_ui(&mut self, ui: &mut egui::Ui, height: f32, compact: bool) {
         let mut clicked: Option<Category> = None;
         let mut clear = false;
         ui.horizontal(|ui| {
-            ui.heading(tr("SUMMARY_CATEGORIES"));
+            if !compact {
+                ui.heading(tr("SUMMARY_CATEGORIES"));
+            }
             if self.category.is_some()
                 && ui
                     .small_button("×")
@@ -1034,10 +1045,12 @@ impl DiskScanApp {
         });
         let mut height = height;
         let line_h = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
-        if self.scanning && self.category.is_some() {
+        // Notes under the heading (not in the narrow panel).
+        if !compact && self.scanning && self.category.is_some() {
             ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
             height -= line_h;
-        } else if let Some(cat) = self.category
+        } else if !compact
+            && let Some(cat) = self.category
             && !self.cat_breakdown.iter().any(|r| r.cat == cat)
         {
             // The picked category has no files in this folder.
@@ -1088,11 +1101,27 @@ impl DiskScanApp {
                 .map(|h| if *h < min_h { min_h } else { h * scale })
                 .collect();
 
-            // Labels at their segment's middle, pushed apart so they never
-            // overlap (then pulled back up if they ran off the bottom).
+            // Labels: two lines each if they all fit, else one line; if even
+            // that doesn't fit, only the largest categories are labelled (the
+            // rest keep their tooltips and keys).
             let font = egui::FontId::default();
             let line_h = ui.text_style_height(&egui::TextStyle::Body);
-            let label_h = line_h * 2.0 + 4.0;
+            let n = rows.len();
+            let two_lines = (line_h * 2.0 + 4.0) * n as f32 <= rect.height();
+            let label_h = if two_lines {
+                line_h * 2.0 + 4.0
+            } else {
+                line_h + 4.0
+            };
+            let room = (rect.height() / label_h).floor() as usize;
+            let mut by_size: Vec<usize> = (0..n).collect();
+            by_size.sort_by_key(|&i| std::cmp::Reverse(rows[i].size));
+            let mut labelled = vec![false; n];
+            if !compact {
+                for &i in by_size.iter().take(room) {
+                    labelled[i] = true;
+                }
+            }
             let mut y = rect.top();
             let mut spans = Vec::with_capacity(rows.len());
             for h in &heights {
@@ -1103,31 +1132,34 @@ impl DiskScanApp {
                 .iter()
                 .map(|(a, b)| (a + b) / 2.0 - label_h / 2.0)
                 .collect();
-            for i in 0..label_y.len() {
-                let min = if i == 0 {
+            // Each label at its segment's middle, pushed apart so they never
+            // overlap (then pulled back up if they ran off the bottom).
+            let shown: Vec<usize> = (0..n).filter(|&i| labelled[i]).collect();
+            for k in 0..shown.len() {
+                let min = if k == 0 {
                     rect.top()
                 } else {
-                    label_y[i - 1] + label_h
+                    label_y[shown[k - 1]] + label_h
                 };
-                label_y[i] = label_y[i].max(min);
+                label_y[shown[k]] = label_y[shown[k]].max(min);
             }
-            for i in (0..label_y.len()).rev() {
-                let max = if i + 1 == label_y.len() {
+            for k in (0..shown.len()).rev() {
+                let max = if k + 1 == shown.len() {
                     rect.bottom() - label_h
                 } else {
-                    label_y[i + 1] - label_h
+                    label_y[shown[k + 1]] - label_h
                 };
-                label_y[i] = label_y[i].min(max).max(rect.top());
+                label_y[shown[k]] = label_y[shown[k]].min(max).max(rect.top());
             }
 
             // Room for leader lines to slope gently to labels that moved.
             let label_x = rect.left() + bar_w + 34.0;
+            let name_w = (rect.right() - label_x - 4.0).max(0.0);
             // Each of the first nine labels starts with its key (1–9).
             let key_w = painter
                 .layout_no_wrap("9 ".into(), font.clone(), Color32::WHITE)
                 .size()
                 .x;
-            let n = rows.len();
             for (i, row) in rows.iter().enumerate() {
                 let (y0, y1) = spans[i];
                 let seg = egui::Rect::from_min_max(
@@ -1142,20 +1174,23 @@ impl DiskScanApp {
                 let dimmed = self.category.is_some() && !picked;
 
                 let id = ui.id().with(("cat", i));
-                let hit = ui.interact(
+                let mut hit = ui.interact(
                     seg.expand2(Vec2::new(0.0, gap / 2.0)),
                     id,
                     egui::Sense::click(),
-                ) | ui.interact(label_rect, id.with("label"), egui::Sense::click());
+                );
+                if labelled[i] {
+                    hit |= ui.interact(label_rect, id.with("label"), egui::Sense::click());
+                }
                 let hovered = hit.hovered();
 
-                if picked {
+                if picked && labelled[i] {
                     painter.rect_filled(
                         label_rect,
                         egui::CornerRadius::same(4),
                         ui.visuals().selection.bg_fill.gamma_multiply(0.5),
                     );
-                } else if hovered {
+                } else if hovered && labelled[i] {
                     painter.rect_filled(
                         label_rect,
                         egui::CornerRadius::same(4),
@@ -1196,7 +1231,7 @@ impl DiskScanApp {
                     ui.visuals().strong_text_color()
                 };
                 let name_mid = label_y[i] + 2.0 + line_h / 2.0;
-                if (mid - name_mid).abs() > 2.0 {
+                if labelled[i] && (mid - name_mid).abs() > 2.0 {
                     let stroke =
                         egui::Stroke::new(1.0, ui.visuals().weak_text_color().gamma_multiply(0.6));
                     let elbow = Pos2::new(seg.right() + 8.0, mid);
@@ -1204,7 +1239,7 @@ impl DiskScanApp {
                     painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
                 }
                 let key = (i < 9).then(|| (i + 1).to_string());
-                if let Some(key) = &key {
+                if let Some(key) = key.as_ref().filter(|_| labelled[i]) {
                     painter.text(
                         Pos2::new(label_x, label_y[i] + 2.0),
                         egui::Align2::LEFT_TOP,
@@ -1213,13 +1248,20 @@ impl DiskScanApp {
                         ui.visuals().weak_text_color(),
                     );
                 }
-                painter.text(
-                    Pos2::new(label_x + key_w, label_y[i] + 2.0),
-                    egui::Align2::LEFT_TOP,
-                    self.cats.label(row.cat),
-                    font.clone(),
-                    ink,
-                );
+                if labelled[i] {
+                    // A long name ends in "…"; the tooltip has it in full.
+                    let mut job = egui::text::LayoutJob::simple_singleline(
+                        self.cats.label(row.cat),
+                        font.clone(),
+                        ink,
+                    );
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(name_w - key_w);
+                    painter.galley(
+                        Pos2::new(label_x + key_w, label_y[i] + 2.0),
+                        painter.layout_job(job),
+                        ink,
+                    );
+                }
                 let pct = row.size as f64 * 100.0 / total as f64;
                 // The name screen readers announce.
                 let spoken = trf(
@@ -1238,21 +1280,23 @@ impl DiskScanApp {
                 hit.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, &spoken)
                 });
-                painter.text(
-                    Pos2::new(label_x + key_w, label_y[i] + 2.0 + line_h),
-                    egui::Align2::LEFT_TOP,
-                    format!("{pct:.1}% · {}", human_size(row.size)),
-                    font.clone(),
-                    ui.visuals().weak_text_color(),
-                );
+                if labelled[i] && two_lines {
+                    painter.text(
+                        Pos2::new(label_x + key_w, label_y[i] + 2.0 + line_h),
+                        egui::Align2::LEFT_TOP,
+                        format!("{pct:.1}% · {}", human_size(row.size)),
+                        font.clone(),
+                        ui.visuals().weak_text_color(),
+                    );
+                }
 
                 let hit = hit.on_hover_ui(|ui| {
                     ui.strong(self.cats.label(row.cat));
                     ui.label(format!(
                         "{} · {pct:.1}% · {} {}",
                         human_size(row.size),
-                        format_count(row.files),
-                        tr("CAT_FILES")
+                        tr("HOVER_FILES"),
+                        format_count(row.files)
                     ));
                     let exts: Vec<String> = row
                         .exts
@@ -1263,6 +1307,9 @@ impl DiskScanApp {
                                 "{} {}",
                                 if e.is_empty() {
                                     tr("EXT_NO_EXTENSION")
+                                } else if e.chars().any(|c| c.is_whitespace() || c.is_control()) {
+                                    // Quoted, so a trailing space shows.
+                                    format!("\".{}\"", e.escape_debug())
                                 } else {
                                     format!(".{e}")
                                 },
