@@ -389,7 +389,7 @@ impl Default for DiskScanApp {
             group_cache: std::collections::HashMap::new(),
         };
         // Tests build the app too: they keep the defaults and never read or
-        // write the user's settings or categories.
+        // write the user's settings.
         if !cfg!(test) {
             let (cfg, needs_save, problem) = Config::load();
             app.settings = cfg.chart.clone();
@@ -398,8 +398,8 @@ impl Default for DiskScanApp {
             if let Some(p) = problem {
                 app.log_issue(p);
             }
-            app.reload_categories();
         }
+        app.reload_categories();
         app
     }
 }
@@ -424,6 +424,10 @@ impl DiskScanApp {
     /// Rereads categories.json (edits show up at the next scan). A changed
     /// list drops the picked category: positions may mean something else.
     fn reload_categories(&mut self) {
+        // Tests keep the built-in categories and never read the user's file.
+        if cfg!(test) {
+            return;
+        }
         let (model, problem) = CategoryModel::load();
         if *self.cats != model {
             self.cats = Arc::new(model);
@@ -436,7 +440,6 @@ impl DiskScanApp {
     }
 
     fn start_scan(&mut self, path: PathBuf) {
-        self.reload_categories();
         // The canonical path, so no "..", "./" or doubled slashes show up.
         let path = true_case(&std::fs::canonicalize(&path).unwrap_or(path));
         // Any new scan supersedes a pending folder rescan ("r").
@@ -459,6 +462,8 @@ impl DiskScanApp {
         self.hidden.clear();
         self.log.clear();
         self.log_truncated = 0;
+        // After clearing the log, so problems in the file stay listed.
+        self.reload_categories();
         self.partial_root = empty_node();
         self.partial_root.path = path.clone();
         self.partial_root.name = file_name_of(&path);
