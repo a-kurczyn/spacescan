@@ -30,7 +30,8 @@ or as an ncdu-style table you can drive from the keyboard.
 - **Handles large and awkward trees:** millions of files, very deep folders,
   paths longer than `PATH_MAX`, unreadable folders (listed as issues, not
   errors), and names in any script.
-- **Translatable.** English and Spanish included; add your own language with
+- **In ten languages:** English, Spanish, French, German, Italian,
+  Portuguese, Russian, Japanese, Chinese and Korean; more can be added with
   a plain text file (see below).
 
 ## Requirements
@@ -89,10 +90,12 @@ language.
 ### Adding a language
 
 Copy `lang/en.lang` to `~/.config/spacemap/lang/<code>.lang` (for example
-`fr.lang`), set the first line to `# name: <language name>`, and translate
+`nl.lang`), set the first line to `# name: <language name>`, and translate
 the right-hand side of each line. It appears in Settings › Language. Any
-line you leave out falls back to English. Contributions of new languages
-are welcome.
+line you leave out shows in English. A file there with the code of a
+built-in language (for example `fr.lang`) changes just the lines it
+contains. New translations and corrections are welcome as suggestions in an
+issue.
 
 ## Contributing
 
