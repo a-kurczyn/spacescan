@@ -4,7 +4,7 @@
       "name": "CAT_VIDEO",
       "extensions": [
         "mkv", "mp4", "m4v", "avi", "mov", "wmv", "flv", "webm", "mpg", "mpeg", "m2ts", "mts",
-        "ts", "vob", "ogv", "3gp", "divx", "rm", "rmvb", "asf", "f4v", "m2v", "srt", "ass", "ssa",
+        "vob", "ogv", "3gp", "divx", "rm", "rmvb", "asf", "f4v", "m2v", "srt", "ass", "ssa",
         "sub", "idx", "vtt", "sup"
       ]
     },
@@ -50,7 +50,7 @@
     {
       "name": "CAT_CODE",
       "extensions": [
-        "rs", "py", "js", "mjs", "cjs", "jsx", "tsx", "c", "h", "cpp", "hpp", "cc", "hh", "cxx",
+        "rs", "py", "js", "mjs", "cjs", "jsx", "ts", "tsx", "c", "h", "cpp", "hpp", "cc", "hh", "cxx",
         "java", "kt", "kts", "go", "rb", "php", "sh", "bash", "zsh", "fish", "pl", "pm", "lua",
         "cs", "swift", "scala", "hs", "ml", "r", "m", "dart", "vue", "svelte", "html", "htm",
         "css", "scss", "sass", "less", "json", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf",
