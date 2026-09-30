@@ -3,10 +3,9 @@
 
 use super::*;
 
-/// Opens the desktop's native folder chooser (XDG portal — the Plasma dialog
-/// on KDE, which lists every drive, mount point and folder) on a background
-/// thread so the UI keeps repainting while it's open. The result (None if
-/// cancelled) arrives on the returned channel.
+/// Opens the desktop's folder chooser (XDG portal) on a background thread,
+/// so the UI keeps running while it's open. The chosen folder, or None if
+/// cancelled, arrives on the returned channel.
 pub(crate) fn pick_folder_async(start_dir: Option<PathBuf>) -> Receiver<Option<PathBuf>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
@@ -21,7 +20,7 @@ pub(crate) fn pick_folder_async(start_dir: Option<PathBuf>) -> Receiver<Option<P
 
 /// Size / file count / permissions of the folder being viewed.
 pub(crate) fn folder_stats_ui(ui: &mut egui::Ui, n: &Node) {
-    // One line per stat: never wrap (the corner overlay's area is narrow).
+    // One line per stat, never wrapped.
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
     ui.label(trf("STATS_SIZE", &[&human_size(n.size)]));
     ui.label(trf("STATS_FILES", &[&format_count(n.file_count)]));
@@ -29,18 +28,13 @@ pub(crate) fn folder_stats_ui(ui: &mut egui::Ui, n: &Node) {
 }
 
 
-/// Draws one clickable, sortable column header. Clicking the currently
-/// active column flips its direction; clicking a different column switches
-/// to it with a sensible default direction (descending for numeric columns,
-/// so "biggest first" without an extra click — ascending for the name
-/// column, so alphabetical order reads naturally).
+/// A clickable column header. Clicking the sorted column reverses it;
+/// clicking another sorts by it, largest first (A–Z for names).
 pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn, state: &mut SortState) -> egui::Response {
     let is_active = state.column == column;
-    // The direction marker is a hand-drawn chevron rather than a ▲/▼
-    // glyph, which egui's bundled font doesn't render cleanly. The button
-    // is laid out by hand (empty label + painted text) so there's room for
-    // the chevron after the label; inactive columns reserve the same room
-    // so headers don't shift width when the sort column changes.
+    // Label and direction chevron are painted over an empty button. Every
+    // header reserves room for the chevron, so widths don't jump when the
+    // sort column changes.
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
         egui::TextStyle::Button.resolve(ui.style()),
@@ -51,8 +45,7 @@ pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn
     let gap = pad.x * 0.8;
     let size = Vec2::new(pad.x * 2.0 + galley.size().x + gap + chevron_w, (galley.size().y + pad.y * 2.0).max(ui.spacing().interact_size.y));
     let resp = ui.add(egui::Button::new("").min_size(size));
-    // The label is painted, not the button's own text: name it for screen
-    // readers, with the sort state when this is the sorted column.
+    // The name screen readers announce, with the sort direction if sorted.
     let name = match (is_active, state.ascending) {
         (false, _) => label.to_string(),
         (true, true) => trf("A11Y_SORTED_ASC", &[label]),
@@ -61,8 +54,7 @@ pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn
     name_for_screen_readers(&resp, &name, Some(is_active));
     let color = ui.style().interact(&resp).text_color();
     let text_pos = Pos2::new(resp.rect.left() + pad.x, resp.rect.center().y - galley.size().y / 2.0);
-    // Headers read as bold, like the previous `.strong()` label: overdraw
-    // the text half a pixel to the right.
+    // Bold look: the text drawn twice, half a pixel apart.
     ui.painter().galley(text_pos, galley.clone(), color);
     ui.painter().galley(text_pos + Vec2::new(0.5, 0.0), galley, color);
     if is_active {
@@ -80,14 +72,8 @@ pub(crate) fn sortable_header(ui: &mut egui::Ui, label: &str, column: SortColumn
     resp
 }
 
-/// Draws the hub's two-line label — folder name, then size occupied —
-/// wrapped to fit inside the hub circle so a long folder name folds onto
-/// multiple lines instead of spilling out past the circle's edge.
-/// Flat, single-color vector icons drawn with the painter — deliberately
-/// not Unicode/emoji glyphs (📄/📁), since those render in full color via
-/// the system's emoji font on most Linux setups, clashing with the app's
-/// flat, theme-matched look. `color` should track the current theme's text
-/// color so the icon stays flat and readable in both light and dark modes.
+/// File icon. Icons are drawn as flat single-color shapes in `color`
+/// (normally the text color), since emoji glyphs render in full color.
 pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
     let fold = rect.width() * 0.35;
@@ -108,7 +94,7 @@ pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: C
         [Pos2::new(rect.right() - fold, rect.top() + fold), Pos2::new(rect.right(), rect.top() + fold)],
         stroke,
     );
-    // A couple of text lines, to read unambiguously as a document.
+    // Text lines.
     let lx0 = rect.left() + rect.width() * 0.2;
     let lx1 = rect.right() - rect.width() * 0.2;
     for frac in [0.55, 0.72] {
@@ -117,6 +103,7 @@ pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: C
     }
 }
 
+/// Folder icon.
 pub(crate) fn draw_folder_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
     let tab_h = rect.height() * 0.22;
@@ -133,10 +120,7 @@ pub(crate) fn draw_folder_icon(painter: &egui::Painter, rect: egui::Rect, color:
     painter.rect_stroke(body, egui::CornerRadius::from(1u8), stroke, egui::StrokeKind::Outside);
 }
 
-/// Table/grid icon for the Summary view toggle — a bordered rect with a
-/// header divider and two column dividers, in the same flat single-color
-/// style as the file/folder icons above (chosen over the previous 📊 emoji,
-/// which rendered in full color via the system emoji font).
+/// Table icon for the Summary view button.
 pub(crate) fn draw_table_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
     painter.rect_stroke(rect, egui::CornerRadius::from(1u8), stroke, egui::StrokeKind::Outside);
@@ -148,8 +132,7 @@ pub(crate) fn draw_table_icon(painter: &egui::Painter, rect: egui::Rect, color: 
     painter.line_segment([Pos2::new(col2_x, header_y), Pos2::new(col2_x, rect.bottom())], stroke);
 }
 
-/// Sunburst icon for the Chart view button: a ring around a hub, split
-/// into a few slices.
+/// Sunburst icon for the Chart view button.
 pub(crate) fn draw_chart_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
     let c = rect.center();
@@ -163,8 +146,7 @@ pub(crate) fn draw_chart_icon(painter: &egui::Painter, rect: egui::Rect, color: 
     }
 }
 
-/// Funnel icon for the Filters toggle — same flat single-color style,
-/// chosen over the previous ▽ glyph.
+/// Funnel icon for the Filters button.
 pub(crate) fn draw_filter_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
     let stem_half = rect.width() * 0.12;
@@ -181,8 +163,7 @@ pub(crate) fn draw_filter_icon(painter: &egui::Painter, rect: egui::Rect, color:
     painter.add(egui::Shape::closed_line(points, stroke));
 }
 
-/// A "^" / "v" chevron centered on `center`, `half_w` wide on each side —
-/// the sort-direction marker for table headers and the chart-order button.
+/// An up or down chevron centered on `center`, `half_w` wide on each side.
 pub(crate) fn draw_chevron(painter: &egui::Painter, center: Pos2, half_w: f32, up: bool, color: Color32) {
     let stroke = egui::Stroke::new(1.5, color);
     let half_h = half_w * 0.55;
@@ -197,12 +178,9 @@ pub(crate) fn draw_chevron(painter: &egui::Painter, center: Pos2, half_w: f32, u
     ));
 }
 
-/// Chart-order icon: a single glyph ("9" for size, "A" for name) with a
-/// down chevron beside it — compact enough for a square toolbar button,
-/// unlike the previous "9-1" / "A-Z" text labels.
+/// Chart-order icon: "9" (by size) or "A" (by name) with a down chevron.
 pub(crate) fn draw_sort_order_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32, glyph: &str) {
-    // The toolbar icon rect is small; let the pair spill slightly into the
-    // button's padding so both parts stay legible.
+    // Slightly wider than the icon area, into the button's padding.
     let rect = rect.expand2(Vec2::new(rect.width() * 0.2, 0.0));
     let font = egui::FontId::proportional(rect.height() * 1.05);
     let glyph_center = Pos2::new(rect.left() + rect.width() * 0.28, rect.center().y);
@@ -211,14 +189,9 @@ pub(crate) fn draw_sort_order_icon(painter: &egui::Painter, rect: egui::Rect, co
     draw_chevron(painter, chevron_center, rect.width() * 0.17, false, color);
 }
 
-/// A toolbar button whose face is a hand-drawn flat icon (via `draw`)
-/// instead of text/emoji — an empty-label `Button` for correct
-/// hit-testing/hover/selected styling, with the icon painted over it
-/// afterward using the same resolved color the button would have used for
-/// text in that state (idle/hovered/selected), so it blends in exactly
-/// like a normal labeled button would.
-/// `name` is both its tooltip and its name for screen readers (the drawn
-/// icon gives it no text of its own).
+/// A toolbar button showing an icon painted by `draw`, in the color the
+/// button would give its text. `name` is its tooltip and its name for
+/// screen readers.
 pub(crate) fn icon_toolbar_button(
     ui: &mut egui::Ui,
     selected: bool,
@@ -236,7 +209,7 @@ pub(crate) fn icon_toolbar_button(
 }
 
 /// `.named(x)` on a glyph button (🔍, ⟳, ⚙ …): `x` becomes its tooltip and
-/// its name for screen readers, which would otherwise read the glyph.
+/// its name for screen readers.
 pub(crate) trait Named {
     fn named(self, name: &str) -> Self;
 }
@@ -258,9 +231,8 @@ pub(crate) fn name_for_screen_readers(resp: &egui::Response, name: &str, selecte
     });
 }
 
-/// Size / counts / permissions / times / owner / type of one item, as a
-/// two-column grid — shared by the chart's hover tooltip and the Summary
-/// table's details panel.
+/// Size, counts, permissions, times, owner and type of one item as a
+/// two-column grid (chart tooltip and table details panel).
 pub(crate) fn details_grid(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -277,9 +249,7 @@ pub(crate) fn details_grid(
             ui.label(human_size(h.size));
             ui.end_row();
 
-            // Always 1 for a real file, always 0 for free space — neither is
-            // informative, so only show it for folders and the aggregate
-            // "other" bucket.
+            // File count: shown for folders and "other" only.
             if h.is_dir {
                 ui.label(tr("HOVER_FILES"));
                 ui.label(format_count(h.file_count));
@@ -290,8 +260,7 @@ pub(crate) fn details_grid(
                 ui.label(tr("HOVER_PERMS"));
                 ui.label(format_perms(m));
                 ui.end_row();
-                // A symbolic link: say so, and where it points (its target
-                // isn't part of any total).
+                // Symbolic link: where it points (not counted in sizes).
                 if m & 0o170000 == 0o120000 {
                     ui.label(tr("HOVER_LINK"));
                     ui.label(match std::fs::read_link(&h.path) {
@@ -327,16 +296,16 @@ pub(crate) fn details_grid(
 /// `text` cut to fit `width` by replacing its middle with "…", so both the
 /// start and the end (where error messages put the reason) stay visible.
 pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
-    // Nothing wider than a few hundred characters fits a line anyway:
-    // cut huge texts (errors naming very deep paths) before measuring.
+    // Cut very long texts first; no line fits more than a few hundred
+    // characters.
     let text = &shorten_middle(text, 600);
     let fits = |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) <= width;
     if fits(text) {
         return text.to_string();
     }
     let chars: Vec<char> = text.chars().collect();
-    // Keep this many characters, split 40/60 between start and end (the
-    // end carries the reason); binary search for the most that fit.
+    // Binary search for how many characters fit, kept 40% from the start
+    // and 60% from the end.
     let cut = |keep: usize| -> String {
         let head = keep * 2 / 5;
         let tail = keep - head;
