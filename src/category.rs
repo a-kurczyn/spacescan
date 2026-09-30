@@ -59,10 +59,12 @@ impl CategoryModel {
     /// The category of a file called `name`, by its extension (any case);
     /// Other if it has none or it isn't listed.
     pub(crate) fn of_name(&self, name: &str) -> Category {
-        Path::new(name)
-            .extension()
-            .and_then(|e| self.by_ext.get(&e.to_string_lossy().to_lowercase()))
-            .map_or(self.other(), |i| Category(*i))
+        self.of_ext(&ext_key(name))
+    }
+
+    /// The category of an `ext_key`.
+    pub(crate) fn of_ext(&self, ext: &str) -> Category {
+        self.by_ext.get(ext).map_or(self.other(), |i| Category(*i))
     }
 
     pub(crate) fn label(&self, c: Category) -> String {
@@ -174,25 +176,42 @@ pub(crate) struct CategoryRow {
     pub(crate) exts: Vec<(String, u64, u64)>,
 }
 
+/// A file's extension as the categories see it: lowercased, "" if none.
+pub(crate) fn ext_key(name: &str) -> String {
+    Path::new(name).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// (extension, size, file count) totals, added up by extension.
+pub(crate) type ExtTotals = HashMap<String, (u64, u64)>;
+
+pub(crate) fn add_ext(totals: &mut ExtTotals, ext: String, size: u64, files: u64) {
+    let e = totals.entry(ext).or_insert((0, 0));
+    e.0 = e.0.saturating_add(size);
+    e.1 += files;
+}
+
 /// How the files under `node` split into categories, largest first with
 /// Other last; categories with no files are left out.
 pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<CategoryRow> {
-    fn walk(n: &Node, model: &CategoryModel, acc: &mut HashMap<(Category, String), (u64, u64)>) {
+    fn walk(n: &Node, acc: &mut ExtTotals) {
         if n.is_dir {
             for c in &n.children {
-                deep(|| walk(c, model, acc));
+                deep(|| walk(c, acc));
             }
         } else {
-            let ext = Path::new(&n.name).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            let e = acc.entry((model.of_name(&n.name), ext)).or_insert((0, 0));
-            e.0 = e.0.saturating_add(n.size);
-            e.1 += n.file_count.max(1);
+            add_ext(acc, ext_key(&n.name), n.size, n.file_count.max(1));
         }
     }
-    let mut acc = HashMap::new();
-    walk(node, model, &mut acc);
+    let mut acc = ExtTotals::new();
+    walk(node, &mut acc);
+    category_rows(&acc, model)
+}
+
+/// Extension totals grouped into categories, largest first with Other last.
+pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<CategoryRow> {
     let mut rows: Vec<CategoryRow> = Vec::new();
-    for ((cat, ext), (size, files)) in acc {
+    for (ext, &(size, files)) in totals {
+        let cat = model.of_ext(ext);
         let i = match rows.iter().position(|r| r.cat == cat) {
             Some(i) => i,
             None => {
@@ -203,7 +222,7 @@ pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<Cate
         let row = &mut rows[i];
         row.size = row.size.saturating_add(size);
         row.files += files;
-        row.exts.push((ext, size, files));
+        row.exts.push((ext.clone(), size, files));
     }
     for r in &mut rows {
         r.exts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));

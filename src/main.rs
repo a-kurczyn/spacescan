@@ -198,6 +198,9 @@ struct DiskScanApp {
     /// A click in the category bar, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     category_pending: Option<Option<Category>>,
+    /// Extension totals of the files found so far in the running scan, so
+    /// the category bar grows live like the table.
+    live_exts: ExtTotals,
     /// Category picked in the summary view's category bar (None = all).
     /// Applied on top of `filter`.
     category: Option<Category>,
@@ -363,6 +366,7 @@ impl Default for DiskScanApp {
             cats: Arc::new(CategoryModel::defaults()),
             category: None,
             category_pending: None,
+            live_exts: ExtTotals::new(),
             cat_base: None,
             cat_breakdown: Vec::new(),
             cat_breakdown_for: None,
@@ -418,6 +422,9 @@ impl DiskScanApp {
         // A new live table: nothing cached from a previous scan's.
         self.live_gen += 1;
         self.live_view = empty_node();
+        self.live_exts.clear();
+        self.cat_breakdown.clear();
+        self.cat_breakdown_for = None;
         // Not the previous scan's "completed in …" while this one runs.
         self.status = tr("STATUS_SCANNING");
         // This scan re-reports whatever it can't read under `path`.
@@ -798,8 +805,11 @@ impl DiskScanApp {
                             self.log_truncated += 1;
                         }
                     }
-                    Ok(ScanMsg::SliceDone { path, size, file_count, mode, mtime, ctime, uid, gid }) => {
+                    Ok(ScanMsg::SliceDone { path, size, file_count, mode, mtime, ctime, uid, gid, exts }) => {
                         graft_slice(&mut self.partial_root, &path, size, file_count, mode, mtime, ctime, uid, gid);
+                        for (ext, size, files) in exts {
+                            add_ext(&mut self.live_exts, ext, size, files);
+                        }
                         self.partial_gen += 1;
                     }
                     Ok(ScanMsg::Done(node, secs)) => {

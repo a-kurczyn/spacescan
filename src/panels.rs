@@ -803,17 +803,25 @@ impl DiskScanApp {
             self.live_seen = self.partial_gen;
             self.live_refreshed = Instant::now();
             self.live_view = flat_copy(&self.partial_root);
+            self.cat_breakdown = category_rows(&self.live_exts, &self.cats);
+            // The finished tree is broken down afresh when the scan ends.
+            self.cat_breakdown_for = None;
         }
         let width = ui.available_width();
         self.scan_progress_bar(ui, width);
         ui.add_space(6.0);
+        let avail = ui.available_height();
         let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
-        let height = ui.available_height() - heading_h;
         // table_ui needs &mut self and the folder shown at once: borrow the
         // live rows out for the call.
         let view = std::mem::replace(&mut self.live_view, empty_node());
-        self.table_ui(ui, &view, height);
+        self.bar_and_table(ui, avail, heading_h, &view);
         self.live_view = view;
+        // Mid-scan, a picked category is only remembered: like the Filters
+        // panel's, it applies to the finished scan (see ScanMsg::Done).
+        if let Some(cat) = self.category_pending.take() {
+            self.category = cat;
+        }
     }
 
     /// While scanning: a read-only live preview of the chart.
@@ -920,10 +928,22 @@ impl DiskScanApp {
             self.cat_breakdown_for = Some(key);
         }
 
-        // Drawn in the main area itself (not floating over it), so a side
-        // panel always clips it instead of being drawn over.
         let avail = ui.available_height();
         let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
+        self.bar_and_table(ui, avail, heading_h, view_node);
+        // Only now: `view_node` belongs to the tree this frame started with,
+        // and the table must not mix it with the rebuilt one.
+        if let Some(cat) = self.category_pending.take() {
+            self.category = cat;
+            self.rebuild_view_tree();
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// The category bar on the left, the contents table of `view_node` on
+    /// the right. Drawn in the main area itself (not floating over it), so
+    /// a side panel always clips it instead of being drawn over.
+    fn bar_and_table(&mut self, ui: &mut egui::Ui, avail: f32, heading_h: f32, view_node: &Node) {
         let cat_w = 210.0;
         let table_w = (ui.available_width() - cat_w - 16.0).max(320.0);
         ui.horizontal_top(|ui| {
@@ -937,13 +957,6 @@ impl DiskScanApp {
                 self.table_ui(ui, view_node, avail - heading_h);
             });
         });
-        // Only now: `view_node` belongs to the tree this frame started with,
-        // and the table must not mix it with the rebuilt one.
-        if let Some(cat) = self.category_pending.take() {
-            self.category = cat;
-            self.rebuild_view_tree();
-            ui.ctx().request_repaint();
-        }
     }
 
     /// "Categories": a vertical bar split by the space each category takes
@@ -959,6 +972,11 @@ impl DiskScanApp {
                 clear = true;
             }
         });
+        let mut height = height;
+        if self.scanning && self.category.is_some() {
+            ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
+            height -= ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
+        }
 
         let rows = &self.cat_breakdown;
         let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);

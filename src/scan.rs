@@ -647,6 +647,17 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     let file_count = children.iter().map(|c| c.file_count).sum::<u64>() + if children.is_empty() { 0 } else { 0 };
     let file_count = if children.is_empty() { 0 } else { file_count };
 
+    let mut exts: Vec<(String, u64, u64)> = Vec::new();
+    for c in children.iter().filter(|c| !c.is_dir) {
+        let key = ext_key(&c.name);
+        match exts.iter_mut().find(|e| e.0 == key) {
+            Some(e) => {
+                e.1 = e.1.saturating_add(c.size);
+                e.2 += c.file_count.max(1);
+            }
+            None => exts.push((key, c.size, c.file_count.max(1))),
+        }
+    }
     let _ = progress.send(ScanMsg::SliceDone {
         path: path.to_path_buf(),
         size,
@@ -656,6 +667,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         ctime: self_ctime,
         uid: self_uid,
         gid: self_gid,
+        exts,
     });
 
     Node {
@@ -689,6 +701,9 @@ pub(crate) enum ScanMsg {
         ctime: i64,
         uid: u32,
         gid: u32,
+        /// (extension, size, file count) of the files directly in it, for
+        /// the category bar's live totals (see `ext_key`).
+        exts: Vec<(String, u64, u64)>,
     },
     Done(Node, f64),
     Error(String),
@@ -1034,5 +1049,51 @@ mod case_tests {
         if typed.is_dir() && real.is_dir() && typed != real {
             assert_eq!(true_case(&typed), real);
         }
+    }
+}
+
+#[cfg(test)]
+mod live_category_tests {
+    use super::*;
+
+    /// The per-folder extension totals streamed during a scan add up to
+    /// exactly what the finished tree's category bar shows.
+    #[test]
+    fn streamed_extension_totals_match_the_finished_tree() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = std::env::temp_dir().join(format!("spacemap-livecat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a/b")).unwrap();
+        std::fs::write(dir.join("top.MKV"), vec![0u8; 20_000]).unwrap();
+        std::fs::write(dir.join("a/doc.pdf"), vec![0u8; 5_000]).unwrap();
+        std::fs::write(dir.join("a/b/noext"), vec![0u8; 9_000]).unwrap();
+        std::fs::write(dir.join("a/b/clip.mp4"), vec![0u8; 7_000]).unwrap();
+        std::fs::hard_link(dir.join("a/b/clip.mp4"), dir.join("a/clip-link.mp4")).unwrap();
+        let (tx, rx) = channel();
+        let ctx = ScanCtx {
+            root_dev: std::fs::metadata(&dir).unwrap().dev(),
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &Default::default(),
+            progress_interval: 512,
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+        };
+        let tree = scan_dir(&dir, &ctx);
+        drop(tx);
+        let mut live = ExtTotals::new();
+        for msg in rx {
+            if let ScanMsg::SliceDone { exts, .. } = msg {
+                for (ext, size, files) in exts {
+                    add_ext(&mut live, ext, size, files);
+                }
+            }
+        }
+        let cats = CategoryModel::defaults();
+        assert_eq!(category_rows(&live, &cats), category_breakdown(&tree, &cats));
+        assert_eq!(live.get("mkv").map(|e| e.1), Some(1));
+        assert_eq!(live.get("mp4").map(|e| e.1), Some(2));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
