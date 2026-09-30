@@ -82,7 +82,9 @@ impl CategoryModel {
     }
 
     pub(crate) fn defaults() -> Self {
-        Self::parse(DEFAULT_CATEGORIES).map(|(m, _)| m).expect("built-in categories.json is valid")
+        Self::parse(DEFAULT_CATEGORIES)
+            .map(|(m, _)| m)
+            .expect("built-in categories.json is valid")
     }
 
     /// Reads categories.json text. Err if it isn't a JSON object with a
@@ -91,12 +93,21 @@ impl CategoryModel {
     /// list.
     pub(crate) fn parse(text: &str) -> Result<(Self, Vec<String>), String> {
         let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        let list = value.get("categories").and_then(Value::as_array).ok_or_else(|| tr("ERR_CATEGORIES_NO_LIST"))?;
-        let mut model = CategoryModel { names: Vec::new(), by_ext: HashMap::new() };
+        let list = value
+            .get("categories")
+            .and_then(Value::as_array)
+            .ok_or_else(|| tr("ERR_CATEGORIES_NO_LIST"))?;
+        let mut model = CategoryModel {
+            names: Vec::new(),
+            by_ext: HashMap::new(),
+        };
         let mut problems = Vec::new();
         for (n, entry) in list.iter().enumerate() {
             let at = format!("categories[{n}]");
-            let name = entry.get("name").and_then(Value::as_str).map(|s| s.trim().to_string());
+            let name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string());
             let Some(name) = name.filter(|s| !s.is_empty()) else {
                 problems.push(trf("ERR_CATEGORIES_NO_NAME", &[&at]));
                 continue;
@@ -116,7 +127,8 @@ impl CategoryModel {
                                 .map(|s| s.trim().trim_start_matches('.').to_lowercase())
                                 .filter(|s| !s.is_empty());
                             if s.is_none() {
-                                problems.push(trf("ERR_CATEGORIES_ENTRY", &[&at, key, &v.to_string()]));
+                                problems
+                                    .push(trf("ERR_CATEGORIES_ENTRY", &[&at, key, &v.to_string()]));
                             }
                             s
                         })
@@ -129,9 +141,10 @@ impl CategoryModel {
             };
             for ext in strings("extensions", &mut problems) {
                 match model.by_ext.get(&ext) {
-                    Some(&first) => {
-                        problems.push(trf("ERR_CATEGORIES_TWICE", &[&format!(".{ext}"), &tr(&model.names[first])]))
-                    }
+                    Some(&first) => problems.push(trf(
+                        "ERR_CATEGORIES_TWICE",
+                        &[&format!(".{ext}"), &tr(&model.names[first])],
+                    )),
                     None => {
                         model.by_ext.insert(ext, idx);
                     }
@@ -139,7 +152,10 @@ impl CategoryModel {
             }
         }
         if model.names.len() > PALETTE.len() {
-            problems.push(trf("ERR_CATEGORIES_MANY", &[&model.names.len().to_string(), &PALETTE.len().to_string()]));
+            problems.push(trf(
+                "ERR_CATEGORIES_MANY",
+                &[&model.names.len().to_string(), &PALETTE.len().to_string()],
+            ));
         }
         Ok((model, problems))
     }
@@ -151,9 +167,11 @@ impl CategoryModel {
         let path = config_dir().join("categories.json");
         let text = match std::fs::metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let written =
-                    std::fs::create_dir_all(config_dir()).and_then(|_| std::fs::write(&path, DEFAULT_CATEGORIES));
-                let problem = written.err().map(|e| trf("ERR_CATEGORIES_SAVE", &[&show_path(&path), &e.to_string()]));
+                let written = std::fs::create_dir_all(config_dir())
+                    .and_then(|_| std::fs::write(&path, DEFAULT_CATEGORIES));
+                let problem = written
+                    .err()
+                    .map(|e| trf("ERR_CATEGORIES_SAVE", &[&show_path(&path), &e.to_string()]));
                 return (Self::defaults(), problem);
             }
             Err(e) => Err(e.to_string()),
@@ -163,10 +181,17 @@ impl CategoryModel {
         };
         match text.and_then(|t| Self::parse(&t)) {
             Ok((model, problems)) if problems.is_empty() => (model, None),
-            Ok((model, problems)) => {
-                (model, Some(trf("ERR_CATEGORIES_PROBLEMS", &[&show_path(&path), &problems.join("; ")])))
-            }
-            Err(e) => (Self::defaults(), Some(trf("ERR_CATEGORIES_FILE", &[&show_path(&path), &e]))),
+            Ok((model, problems)) => (
+                model,
+                Some(trf(
+                    "ERR_CATEGORIES_PROBLEMS",
+                    &[&show_path(&path), &problems.join("; ")],
+                )),
+            ),
+            Err(e) => (
+                Self::defaults(),
+                Some(trf("ERR_CATEGORIES_FILE", &[&show_path(&path), &e])),
+            ),
         }
     }
 }
@@ -184,7 +209,10 @@ pub(crate) struct CategoryRow {
 
 /// A file's extension as the categories see it: lowercased, "" if none.
 pub(crate) fn ext_key(name: &str) -> String {
-    Path::new(name).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+    Path::new(name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// Extension → (total size, file count).
@@ -222,7 +250,12 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
         let i = match rows.iter().position(|r| r.cat == cat) {
             Some(i) => i,
             None => {
-                rows.push(CategoryRow { cat, size: 0, files: 0, exts: Vec::new() });
+                rows.push(CategoryRow {
+                    cat,
+                    size: 0,
+                    files: 0,
+                    exts: Vec::new(),
+                });
                 rows.len() - 1
             }
         };
@@ -232,7 +265,8 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
         row.exts.push((ext.clone(), size, files));
     }
     for r in &mut rows {
-        r.exts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        r.exts
+            .sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     }
     // Other always last; the rest by size, ties in list order.
     let other = model.other();
@@ -334,10 +368,26 @@ mod tests {
             ],
         );
         let rows = category_breakdown(&tree, &m);
-        let b: Vec<(String, u64, u64)> = rows.iter().map(|r| (m.label(r.cat), r.size, r.files)).collect();
-        assert_eq!(b, vec![("Documents".into(), 200, 1), ("Video".into(), 150, 2), ("Other".into(), 999, 1)]);
-        assert_eq!(rows[1].exts, vec![("mkv".to_string(), 100, 1), ("mp4".to_string(), 50, 1)]);
-        assert_eq!(find_by_path(&tree, Path::new("/r/d")).map(|n| n.children.len()), Some(3));
+        let b: Vec<(String, u64, u64)> = rows
+            .iter()
+            .map(|r| (m.label(r.cat), r.size, r.files))
+            .collect();
+        assert_eq!(
+            b,
+            vec![
+                ("Documents".into(), 200, 1),
+                ("Video".into(), 150, 2),
+                ("Other".into(), 999, 1)
+            ]
+        );
+        assert_eq!(
+            rows[1].exts,
+            vec![("mkv".to_string(), 100, 1), ("mp4".to_string(), 50, 1)]
+        );
+        assert_eq!(
+            find_by_path(&tree, Path::new("/r/d")).map(|n| n.children.len()),
+            Some(3)
+        );
         assert!(find_by_path(&tree, Path::new("/r/x")).is_none());
     }
 
@@ -351,12 +401,20 @@ mod tests {
             true,
             vec![
                 test_node("/r/a.mkv", 100, false, vec![]),
-                test_node("/r/docs", 0, true, vec![test_node("/r/docs/c.pdf", 200, false, vec![])]),
+                test_node(
+                    "/r/docs",
+                    0,
+                    true,
+                    vec![test_node("/r/docs/c.pdf", 200, false, vec![])],
+                ),
                 test_node(
                     "/r/d",
                     0,
                     true,
-                    vec![test_node("/r/d/b.srt", 5, false, vec![]), test_node("/r/d/n.txt", 7, false, vec![])],
+                    vec![
+                        test_node("/r/d/b.srt", 5, false, vec![]),
+                        test_node("/r/d/n.txt", 7, false, vec![]),
+                    ],
                 ),
             ],
         );

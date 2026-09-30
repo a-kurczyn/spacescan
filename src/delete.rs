@@ -14,7 +14,9 @@ use std::sync::mpsc::channel;
 
 /// Mount points at or below `path`, from /proc/self/mountinfo.
 fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
-    let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else { return Vec::new() };
+    let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return Vec::new();
+    };
     let mut mounts: Vec<PathBuf> = info
         .lines()
         .filter_map(|line| line.split(' ').nth(4))
@@ -34,7 +36,10 @@ fn unescape_mountinfo(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+        if b[i] == b'\\'
+            && i + 3 < b.len()
+            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+        {
             out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
             i += 4;
         } else {
@@ -62,20 +67,26 @@ fn mount_guard(path: &Path) -> Result<(), String> {
         return Ok(());
     }
     let list: Vec<String> = mounts.iter().map(|m| show_path(m)).collect();
-    Err(trf("ERR_CONTAINS_MOUNT", &[&show_path(path), &list.join(", ")]))
+    Err(trf(
+        "ERR_CONTAINS_MOUNT",
+        &[&show_path(path), &list.join(", ")],
+    ))
 }
 
 /// Err (for the Issues log) if `path` is inside a trash folder or contains
 /// one: trashing it would lose the trash's restore information.
 fn trash_guard(path: &Path) -> Result<(), String> {
-    let Ok(folders) = trash::os_limited::trash_folders() else { return Ok(()) };
+    let Ok(folders) = trash::os_limited::trash_folders() else {
+        return Ok(());
+    };
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let canonical_parent = path.parent().and_then(|p| std::fs::canonicalize(p).ok());
     for f in folders {
         let f = std::fs::canonicalize(&f).unwrap_or(f);
         // A symlink inside the trash canonicalizes to its target, so its
         // parent is checked too.
-        let inside = canonical.starts_with(&f) || canonical_parent.as_ref().is_some_and(|p| p.starts_with(&f));
+        let inside = canonical.starts_with(&f)
+            || canonical_parent.as_ref().is_some_and(|p| p.starts_with(&f));
         if inside || f.starts_with(&canonical) {
             return Err(trf("ERR_TRASH_IN_TRASH", &[&show_path(path)]));
         }
@@ -105,8 +116,11 @@ fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()
     let open_at = openable(dir, parent);
     // Keep this folder open while its entries' paths may be too long to
     // use directly.
-    let handle: DirHandle =
-        if dir.as_os_str().len() + 256 > LONG_PATH { Some(std::fs::File::open(&open_at)?) } else { None };
+    let handle: DirHandle = if dir.as_os_str().len() + 256 > LONG_PATH {
+        Some(std::fs::File::open(&open_at)?)
+    } else {
+        None
+    };
     let listing = match &handle {
         Some(f) => PathBuf::from(format!("/proc/self/fd/{}", f.as_raw_fd())),
         None => open_at.clone(),
@@ -118,7 +132,10 @@ fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()
         let m = entry.metadata()?;
         if m.is_dir() {
             if m.dev() != dev {
-                return Err(std::io::Error::other(trf("ERR_OTHER_FS_INSIDE", &[&show_path(&child)])));
+                return Err(std::io::Error::other(trf(
+                    "ERR_OTHER_FS_INSIDE",
+                    &[&show_path(&child)],
+                )));
             }
             deep(|| remove_dir_in(&child, &handle, dev))?;
         } else {
@@ -202,7 +219,9 @@ impl DiskScanApp {
                         Err(e) => self.log_issue(trf("ERR_EMPTY_TRASH", &[&e])),
                     }
                 }
-                Err(TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+                Err(TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100))
+                }
                 Err(TryRecvError::Disconnected) => self.removal.purge_rx = None,
             }
         }
@@ -218,7 +237,9 @@ impl DiskScanApp {
         if !self.mount_check(&paths) {
             return;
         }
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         let nodes: Vec<&Node> = paths.iter().filter_map(|p| find_node(&root, p)).collect();
         if nodes.is_empty() {
             return;
@@ -227,7 +248,11 @@ impl DiskScanApp {
             paths: nodes.iter().map(|n| n.path.clone()).collect(),
             size: nodes.iter().map(|n| n.size).fold(0u64, u64::saturating_add),
             file_count: nodes.iter().map(|n| n.file_count).sum(),
-            unreadable: self.unreadable.iter().filter(|u| nodes.iter().any(|n| u.starts_with(&n.path))).count(),
+            unreadable: self
+                .unreadable
+                .iter()
+                .filter(|u| nodes.iter().any(|n| u.starts_with(&n.path)))
+                .count(),
             single_is_dir: (nodes.len() == 1).then(|| nodes[0].is_dir),
         });
     }
@@ -280,11 +305,19 @@ impl DiskScanApp {
 
     /// The confirmation dialog, when one is pending.
     pub(crate) fn confirm_dialog(&mut self, ctx: &egui::Context) {
-        let Some(confirm) = self.removal.confirm.clone() else { return };
+        let Some(confirm) = self.removal.confirm.clone() else {
+            return;
+        };
         let modal = egui::Modal::new("confirm_removal".into()).show(ctx, |ui| {
             ui.set_max_width(480.0);
             let yes_label = match &confirm {
-                Confirm::Delete { paths, size, file_count, unreadable, single_is_dir } => {
+                Confirm::Delete {
+                    paths,
+                    size,
+                    file_count,
+                    unreadable,
+                    single_is_dir,
+                } => {
                     ui.heading(tr("DELETE_CONFIRM_TITLE"));
                     ui.add_space(6.0);
                     match single_is_dir {
@@ -293,24 +326,34 @@ impl DiskScanApp {
                             let link = std::fs::read_link(&paths[0]).ok();
                             ui.label(match (&link, *is_dir) {
                                 // Removing a link never touches its target.
-                                (Some(target), _) => trf("DELETE_CONFIRM_LINK", &[&show_path(target)]),
-                                (None, true) => {
-                                    trf("DELETE_CONFIRM_DIR", &[&human_size(*size), &format_count(*file_count)])
+                                (Some(target), _) => {
+                                    trf("DELETE_CONFIRM_LINK", &[&show_path(target)])
                                 }
+                                (None, true) => trf(
+                                    "DELETE_CONFIRM_DIR",
+                                    &[&human_size(*size), &format_count(*file_count)],
+                                ),
                                 (None, false) => trf("DELETE_CONFIRM_FILE", &[&human_size(*size)]),
                             });
                         }
                         None => {
                             ui.label(trf(
                                 "DELETE_CONFIRM_MANY",
-                                &[&format_count(paths.len() as u64), &human_size(*size), &format_count(*file_count)],
+                                &[
+                                    &format_count(paths.len() as u64),
+                                    &human_size(*size),
+                                    &format_count(*file_count),
+                                ],
                             ));
                             const SHOWN: usize = 8;
                             for p in paths.iter().take(SHOWN) {
                                 ui.label(egui::RichText::new(file_name_of(p)).monospace());
                             }
                             if paths.len() > SHOWN {
-                                ui.weak(trf("DELETE_CONFIRM_MORE", &[&format_count((paths.len() - SHOWN) as u64)]));
+                                ui.weak(trf(
+                                    "DELETE_CONFIRM_MORE",
+                                    &[&format_count((paths.len() - SHOWN) as u64)],
+                                ));
                             }
                         }
                     }
@@ -318,7 +361,10 @@ impl DiskScanApp {
                         ui.add_space(4.0);
                         ui.colored_label(
                             ui.visuals().warn_fg_color,
-                            trf("DELETE_CONFIRM_UNREADABLE", &[&format_count(*unreadable as u64)]),
+                            trf(
+                                "DELETE_CONFIRM_UNREADABLE",
+                                &[&format_count(*unreadable as u64)],
+                            ),
                         );
                     }
                     tr("DELETE_CONFIRM_YES")
@@ -326,7 +372,10 @@ impl DiskScanApp {
                 Confirm::EmptyTrash(items) => {
                     ui.heading(tr("TRASH_CONFIRM_TITLE"));
                     ui.add_space(6.0);
-                    ui.label(trf("TRASH_CONFIRM_BODY", &[&format_count(items.len() as u64)]));
+                    ui.label(trf(
+                        "TRASH_CONFIRM_BODY",
+                        &[&format_count(items.len() as u64)],
+                    ));
                     tr("TRASH_CONFIRM_YES")
                 }
             };
@@ -341,7 +390,10 @@ impl DiskScanApp {
                 if cancel.clicked() {
                     choice = Some(false);
                 }
-                if ui.button(egui::RichText::new(yes_label).color(ui.visuals().error_fg_color)).clicked() {
+                if ui
+                    .button(egui::RichText::new(yes_label).color(ui.visuals().error_fg_color))
+                    .clicked()
+                {
                     choice = Some(true);
                 }
             });
@@ -359,14 +411,17 @@ impl DiskScanApp {
                     Confirm::EmptyTrash(items) => {
                         // Checked again: something may have been mounted meanwhile.
                         if let Ok(folders) = trash::os_limited::trash_folders() {
-                            let files: Vec<PathBuf> = folders.iter().map(|f| f.join("files")).collect();
+                            let files: Vec<PathBuf> =
+                                folders.iter().map(|f| f.join("files")).collect();
                             if !self.mount_check(&files) {
                                 return;
                             }
                         }
                         let (tx, rx) = channel();
                         std::thread::spawn(move || {
-                            let _ = tx.send(trash::os_limited::purge_all(&items).map_err(|e| trash_reason(&e)));
+                            let _ = tx.send(
+                                trash::os_limited::purge_all(&items).map_err(|e| trash_reason(&e)),
+                            );
                         });
                         self.removal.purge_rx = Some(rx);
                         self.status = tr("STATUS_EMPTYING_TRASH");
@@ -385,12 +440,16 @@ impl DiskScanApp {
         let mut done: Vec<PathBuf> = Vec::new();
         for p in paths {
             // Checked again: something may have been mounted meanwhile.
-            if let Err(e) = mount_guard(&p).and_then(|()| if permanent { Ok(()) } else { trash_guard(&p) }) {
+            if let Err(e) =
+                mount_guard(&p).and_then(|()| if permanent { Ok(()) } else { trash_guard(&p) })
+            {
                 self.log_issue(e);
                 continue;
             }
             // Already gone from disk: just drop it from the tree.
-            if std::fs::symlink_metadata(&p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+            if std::fs::symlink_metadata(&p)
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
                 done.push(p);
                 continue;
             }
@@ -406,7 +465,11 @@ impl DiskScanApp {
             match result {
                 Ok(()) => done.push(p),
                 Err(e) => {
-                    let key = if permanent { "ERR_DELETE_FAILED" } else { "ERR_TRASH_FAILED" };
+                    let key = if permanent {
+                        "ERR_DELETE_FAILED"
+                    } else {
+                        "ERR_TRASH_FAILED"
+                    };
                     self.log_issue(trf(key, &[&show_path(&p), &e]));
                     // A folder may now be partly deleted: say so.
                     if permanent && std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir()) {
@@ -422,7 +485,11 @@ impl DiskScanApp {
     /// tree.
     fn drop_trash_from_tree(&mut self) {
         self.status = tr("STATUS_TRASH_EMPTIED");
-        let (Some(full), Ok(folders)) = (self.full_root.clone(), trash::os_limited::trash_folders()) else { return };
+        let (Some(full), Ok(folders)) =
+            (self.full_root.clone(), trash::os_limited::trash_folders())
+        else {
+            return;
+        };
         let gone: Vec<PathBuf> = folders
             .iter()
             .flat_map(|f| ["files", "info"].map(|sub| f.join(sub)))
@@ -457,14 +524,22 @@ impl DiskScanApp {
     }
 
     pub(crate) fn view_paths(&self, root: &Node) -> Vec<PathBuf> {
-        self.view_stack.iter().map(|vp| get_node(root, vp).path.clone()).collect()
+        self.view_stack
+            .iter()
+            .map(|vp| get_node(root, vp).path.clone())
+            .collect()
     }
 
     /// Points the zoom history back at `paths` (skipping any that no
     /// longer exist) in the current tree.
     pub(crate) fn restore_view(&mut self, paths: &[PathBuf]) {
-        let Some(root) = self.root.clone() else { return };
-        self.view_stack = paths.iter().filter_map(|p| index_path_to(&root, p)).collect();
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        self.view_stack = paths
+            .iter()
+            .filter_map(|p| index_path_to(&root, p))
+            .collect();
         self.view_stack.dedup();
         if self.view_stack.is_empty() {
             self.view_stack.push(vec![]);
@@ -487,7 +562,8 @@ mod tests {
     #[test]
     fn deletes_trees_deeper_than_path_max() {
         use std::os::unix::fs::MetadataExt;
-        let base = std::env::temp_dir().join(format!("spacemap-deep-delete-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("spacemap-deep-delete-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let outside = base.join("outside.txt");
@@ -526,14 +602,27 @@ mod tests {
         let mut app = DiskScanApp::default();
         let locked = test_node("/nonexistent-qa/locked", 0, true, vec![]);
         let other = test_node("/nonexistent-qa/other", 0, true, vec![]);
-        app.root = Some(Arc::new(test_node("/nonexistent-qa", 0, true, vec![locked, other])));
-        app.unreadable =
-            vec![PathBuf::from("/nonexistent-qa/locked/secret"), PathBuf::from("/nonexistent-qa/elsewhere")];
+        app.root = Some(Arc::new(test_node(
+            "/nonexistent-qa",
+            0,
+            true,
+            vec![locked, other],
+        )));
+        app.unreadable = vec![
+            PathBuf::from("/nonexistent-qa/locked/secret"),
+            PathBuf::from("/nonexistent-qa/elsewhere"),
+        ];
         app.ask_delete(vec![PathBuf::from("/nonexistent-qa/locked")]);
-        assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 1, .. })));
+        assert!(matches!(
+            app.removal.confirm,
+            Some(Confirm::Delete { unreadable: 1, .. })
+        ));
         app.removal.confirm = None;
         app.ask_delete(vec![PathBuf::from("/nonexistent-qa/other")]);
-        assert!(matches!(app.removal.confirm, Some(Confirm::Delete { unreadable: 0, .. })));
+        assert!(matches!(
+            app.removal.confirm,
+            Some(Confirm::Delete { unreadable: 0, .. })
+        ));
     }
 
     /// Builds a chain of `levels` nested folders named "d" (files every
@@ -542,7 +631,8 @@ mod tests {
     /// find, replace, remove, drop, and the delete from disk.
     fn deep_chain(levels: usize) {
         use std::os::unix::fs::MetadataExt;
-        let base = std::env::temp_dir().join(format!("spacemap-deep-{levels}-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("spacemap-deep-{levels}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let top = base.join("chain");
@@ -582,7 +672,10 @@ mod tests {
         };
         let tree = scan_dir(&top, &ctx);
         assert_eq!(tree.file_count, files);
-        assert_eq!(find_node(&tree, &bottom.join("f.bin")).map(|n| n.size), Some(10));
+        assert_eq!(
+            find_node(&tree, &bottom.join("f.bin")).map(|n| n.size),
+            Some(10)
+        );
 
         // Live-preview graft of the deepest folder.
         let mut partial = empty_node();
@@ -593,18 +686,31 @@ mod tests {
         // Categories, filter, clone.
         let cats = CategoryModel::defaults();
         assert_eq!(
-            category_breakdown(&tree, &cats).iter().find(|r| r.cat == cats.of_name("f.bin")).map(|r| r.files),
+            category_breakdown(&tree, &cats)
+                .iter()
+                .find(|r| r.cat == cats.of_name("f.bin"))
+                .map(|r| r.files),
             Some(files)
         );
-        let filter =
-            CompiledFilter::compile(&FilterForm { name: "*.bin".into(), ..Default::default() }).unwrap().unwrap();
-        assert_eq!(filter_tree(&tree, &filter).map(|t| t.file_count), Some(files));
+        let filter = CompiledFilter::compile(&FilterForm {
+            name: "*.bin".into(),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            filter_tree(&tree, &filter).map(|t| t.file_count),
+            Some(files)
+        );
         let mut copy = tree.clone();
 
         // Replace (a folder rescan) and remove (a delete) at the bottom.
         let fresh = find_node(&tree, &bottom).unwrap().clone();
         assert!(table::replace_in_tree(&mut copy, &bottom, fresh).is_some());
-        assert_eq!(remove_from_tree(&mut copy, &bottom.join("f.bin")), Some((10, 1)));
+        assert_eq!(
+            remove_from_tree(&mut copy, &bottom.join("f.bin")),
+            Some((10, 1))
+        );
         assert_eq!(copy.file_count, files - 1);
         drop(copy);
         drop(partial);

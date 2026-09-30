@@ -124,23 +124,52 @@ impl Settings {
     const PROGRESS_POW2: RangeInclusive<u32> = 0..=16;
 
     fn sanitized(mut self) -> Self {
-        self.max_render_depth = self.max_render_depth.clamp(*Self::DEPTH.start(), *Self::DEPTH.end());
-        self.min_segment_angle_deg = self.min_segment_angle_deg.clamp(*Self::MIN_ANGLE.start(), *Self::MIN_ANGLE.end());
-        self.max_children_shown = self.max_children_shown.clamp(*Self::MAX_CHILDREN.start(), *Self::MAX_CHILDREN.end());
-        self.hub_radius_frac = self.hub_radius_frac.clamp(*Self::HUB.start(), *Self::HUB.end());
-        self.ring_sat = self.ring_sat.clamp(*Self::RING_SAT.start(), *Self::RING_SAT.end());
-        self.ring_val_base = self.ring_val_base.clamp(*Self::RING_VAL_BASE.start(), *Self::RING_VAL_BASE.end());
-        self.ring_val_falloff =
-            self.ring_val_falloff.clamp(*Self::RING_VAL_FALLOFF.start(), *Self::RING_VAL_FALLOFF.end());
-        self.ring_val_floor = self.ring_val_floor.clamp(*Self::RING_VAL_FLOOR.start(), *Self::RING_VAL_FLOOR.end());
-        self.other_sat = self.other_sat.clamp(*Self::OTHER_SAT.start(), *Self::OTHER_SAT.end());
-        self.other_val = self.other_val.clamp(*Self::OTHER_VAL.start(), *Self::OTHER_VAL.end());
-        self.free_space_gamma = self.free_space_gamma.clamp(*Self::FREE_GAMMA.start(), *Self::FREE_GAMMA.end());
-        self.stroke_width = self.stroke_width.clamp(*Self::STROKE_WIDTH.start(), *Self::STROKE_WIDTH.end());
-        self.tess_px_per_step = self.tess_px_per_step.clamp(*Self::TESS.start(), *Self::TESS.end());
-        self.max_log_lines = self.max_log_lines.clamp(*Self::LOG_LINES.start(), *Self::LOG_LINES.end());
-        self.progress_interval_pow2 =
-            self.progress_interval_pow2.clamp(*Self::PROGRESS_POW2.start(), *Self::PROGRESS_POW2.end());
+        self.max_render_depth = self
+            .max_render_depth
+            .clamp(*Self::DEPTH.start(), *Self::DEPTH.end());
+        self.min_segment_angle_deg = self
+            .min_segment_angle_deg
+            .clamp(*Self::MIN_ANGLE.start(), *Self::MIN_ANGLE.end());
+        self.max_children_shown = self
+            .max_children_shown
+            .clamp(*Self::MAX_CHILDREN.start(), *Self::MAX_CHILDREN.end());
+        self.hub_radius_frac = self
+            .hub_radius_frac
+            .clamp(*Self::HUB.start(), *Self::HUB.end());
+        self.ring_sat = self
+            .ring_sat
+            .clamp(*Self::RING_SAT.start(), *Self::RING_SAT.end());
+        self.ring_val_base = self
+            .ring_val_base
+            .clamp(*Self::RING_VAL_BASE.start(), *Self::RING_VAL_BASE.end());
+        self.ring_val_falloff = self.ring_val_falloff.clamp(
+            *Self::RING_VAL_FALLOFF.start(),
+            *Self::RING_VAL_FALLOFF.end(),
+        );
+        self.ring_val_floor = self
+            .ring_val_floor
+            .clamp(*Self::RING_VAL_FLOOR.start(), *Self::RING_VAL_FLOOR.end());
+        self.other_sat = self
+            .other_sat
+            .clamp(*Self::OTHER_SAT.start(), *Self::OTHER_SAT.end());
+        self.other_val = self
+            .other_val
+            .clamp(*Self::OTHER_VAL.start(), *Self::OTHER_VAL.end());
+        self.free_space_gamma = self
+            .free_space_gamma
+            .clamp(*Self::FREE_GAMMA.start(), *Self::FREE_GAMMA.end());
+        self.stroke_width = self
+            .stroke_width
+            .clamp(*Self::STROKE_WIDTH.start(), *Self::STROKE_WIDTH.end());
+        self.tess_px_per_step = self
+            .tess_px_per_step
+            .clamp(*Self::TESS.start(), *Self::TESS.end());
+        self.max_log_lines = self
+            .max_log_lines
+            .clamp(*Self::LOG_LINES.start(), *Self::LOG_LINES.end());
+        self.progress_interval_pow2 = self
+            .progress_interval_pow2
+            .clamp(*Self::PROGRESS_POW2.start(), *Self::PROGRESS_POW2.end());
         self
     }
 }
@@ -348,7 +377,10 @@ impl Default for DiskScanApp {
             cat_breakdown: Vec::new(),
             cat_breakdown_for: None,
             // Largest first, like the chart.
-            contents_sort: SortState { column: SortColumn::Size, ascending: false },
+            contents_sort: SortState {
+                column: SortColumn::Size,
+                ascending: false,
+            },
             mime_cache: std::collections::HashMap::new(),
             mime_inflight: HashSet::new(),
             mime_tx,
@@ -414,7 +446,11 @@ impl DiskScanApp {
         self.partial_root = empty_node();
         self.partial_root.path = path.clone();
         self.partial_root.name = file_name_of(&path);
-        self.free_space = if is_real_mount_point(&path) { fs_space(&path) } else { None };
+        self.free_space = if is_real_mount_point(&path) {
+            fs_space(&path)
+        } else {
+            None
+        };
 
         // Stop any previous scan still running.
         if let Some(prev) = &self.cancel_flag {
@@ -431,13 +467,19 @@ impl DiskScanApp {
         self.scan_rx = Some(rx);
         // A whole drive's progress is measured against its used space; other
         // folders need a counted total.
-        let entry_count = self.free_space.is_none().then(|| Arc::new(EntryCount::default()));
+        let entry_count = self
+            .free_space
+            .is_none()
+            .then(|| Arc::new(EntryCount::default()));
         self.entry_count = entry_count.clone();
         std::thread::spawn(move || {
             let counter = std::sync::atomic::AtomicU64::new(0);
             let start = Instant::now();
             if !path.exists() {
-                let _ = tx.send(ScanMsg::Error(trf("ERR_PATH_NOT_FOUND", &[&show_path(&path)])));
+                let _ = tx.send(ScanMsg::Error(trf(
+                    "ERR_PATH_NOT_FOUND",
+                    &[&show_path(&path)],
+                )));
                 return;
             }
             let root_dev = match std::fs::metadata(&path) {
@@ -446,16 +488,21 @@ impl DiskScanApp {
                     m.dev()
                 }
                 Err(e) => {
-                    let _ = tx.send(ScanMsg::Error(trf("ERR_CANNOT_STAT", &[&show_path(&path), &e.to_string()])));
+                    let _ = tx.send(ScanMsg::Error(trf(
+                        "ERR_CANNOT_STAT",
+                        &[&show_path(&path), &e.to_string()],
+                    )));
                     return;
                 }
             };
             let scan_finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
             if let Some(count) = entry_count {
-                let (path, cancel, scan_finished) = (path.clone(), cancel.clone(), scan_finished.clone());
+                let (path, cancel, scan_finished) =
+                    (path.clone(), cancel.clone(), scan_finished.clone());
                 std::thread::spawn(move || {
                     use std::sync::atomic::Ordering;
-                    let stop = || cancel.load(Ordering::Relaxed) || scan_finished.load(Ordering::Relaxed);
+                    let stop =
+                        || cancel.load(Ordering::Relaxed) || scan_finished.load(Ordering::Relaxed);
                     count_entries(&path, root_dev, &count.found, &stop);
                     if !stop() {
                         count.done.store(true, Ordering::Relaxed);
@@ -485,7 +532,9 @@ impl DiskScanApp {
     /// folder (or its nearest remaining parent).
     fn rebuild_view_tree(&mut self) {
         self.tree_gen += 1;
-        let Some(full) = self.full_root.clone() else { return };
+        let Some(full) = self.full_root.clone() else {
+            return;
+        };
         let empty = |full: &Node| Node {
             name: full.name.clone(),
             path: full.path.clone(),
@@ -502,14 +551,19 @@ impl DiskScanApp {
             Some(cat) => {
                 let cats = self.cats.clone();
                 Arc::new(
-                    filter_tree_by(&base, &|n: &Node| cats.of_name(&n.name) == cat).unwrap_or_else(|| empty(&full)),
+                    filter_tree_by(&base, &|n: &Node| cats.of_name(&n.name) == cat)
+                        .unwrap_or_else(|| empty(&full)),
                 )
             }
             None => base.clone(),
         };
         self.cat_base = Some(base);
         if let Some(old) = &self.root {
-            self.view_stack = self.view_stack.iter().map(|vp| remap_index_path(old, &new_root, vp)).collect();
+            self.view_stack = self
+                .view_stack
+                .iter()
+                .map(|vp| remap_index_path(old, &new_root, vp))
+                .collect();
             self.view_stack.dedup();
         }
         self.root = Some(new_root);
@@ -611,7 +665,10 @@ impl DiskScanApp {
         let tx = self.mime_tx.clone();
         let p = path.to_path_buf();
         std::thread::spawn(move || {
-            let result = infer::get_from_path(&p).ok().flatten().map(|t| t.mime_type().to_string());
+            let result = infer::get_from_path(&p)
+                .ok()
+                .flatten()
+                .map(|t| t.mime_type().to_string());
             let _ = tx.send((p, result));
         });
     }
@@ -628,7 +685,10 @@ impl DiskScanApp {
     /// The highlighted slice (idx_path relative to the current view), if
     /// it belongs to the view being shown.
     fn selected_rel(&self) -> Option<&Vec<usize>> {
-        self.selection.as_ref().filter(|s| Some(&s.view) == self.view_stack.last()).map(|s| &s.rel)
+        self.selection
+            .as_ref()
+            .filter(|s| Some(&s.view) == self.view_stack.last())
+            .map(|s| &s.rel)
     }
 
     /// Moves the slice highlight: ⬆⬇ previous/next slice in the same ring
@@ -639,15 +699,20 @@ impl DiskScanApp {
         let view = self.view_stack.last().unwrap().clone();
         let segs = &self.chart_segs;
         let first_where = |pred: &dyn Fn(&Vec<usize>) -> bool| {
-            segs.iter().filter(|(p, _)| pred(p)).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(p, _)| p.clone())
+            segs.iter()
+                .filter(|(p, _)| pred(p))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(p, _)| p.clone())
         };
         let new_rel = match self.selected_rel().cloned() {
             None => first_where(&|p| p.len() == 1),
             Some(cur) => match dir {
                 NavDir::Prev | NavDir::Next => {
                     let parent = &cur[..cur.len() - 1];
-                    let mut sibs: Vec<&(Vec<usize>, f32)> =
-                        segs.iter().filter(|(p, _)| p.len() == cur.len() && p[..p.len() - 1] == *parent).collect();
+                    let mut sibs: Vec<&(Vec<usize>, f32)> = segs
+                        .iter()
+                        .filter(|(p, _)| p.len() == cur.len() && p[..p.len() - 1] == *parent)
+                        .collect();
                     sibs.sort_by(|a, b| a.1.total_cmp(&b.1));
                     let n = sibs.len();
                     (n > 0).then(|| match sibs.iter().position(|(p, _)| *p == cur) {
@@ -687,19 +752,26 @@ impl DiskScanApp {
         if let Some((&left, parent_view)) = view.split_last() {
             let parent_view = parent_view.to_vec();
             *self.view_stack.last_mut().unwrap() = parent_view.clone();
-            self.selection = Some(ChartSel { view: parent_view, rel: vec![left] });
+            self.selection = Some(ChartSel {
+                view: parent_view,
+                rel: vec![left],
+            });
         }
     }
 
     /// Enter: same as clicking the highlighted slice — opens it if it's a
     /// folder.
     fn open_selection(&mut self) {
-        let Some(rel) = self.selected_rel().cloned() else { return };
+        let Some(rel) = self.selected_rel().cloned() else {
+            return;
+        };
         if is_other_marker(&rel) {
             self.open_other_bucket(&rel);
             return;
         }
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         let view = self.view_stack.last().unwrap().clone();
         if try_get_node(get_node(&root, &view), &rel).is_some_and(|n| n.is_dir) {
             let mut vp = view;
@@ -732,7 +804,10 @@ impl DiskScanApp {
         let mut processed = 0u32;
         if let Some(rx) = &self.scan_rx {
             loop {
-                if processed.is_multiple_of(64) && processed > 0 && drain_start.elapsed() >= FRAME_BUDGET {
+                if processed.is_multiple_of(64)
+                    && processed > 0
+                    && drain_start.elapsed() >= FRAME_BUDGET
+                {
                     return true;
                 }
                 processed += 1;
@@ -750,8 +825,28 @@ impl DiskScanApp {
                             self.log_truncated += 1;
                         }
                     }
-                    Ok(ScanMsg::SliceDone { path, size, file_count, mode, mtime, ctime, uid, gid, exts }) => {
-                        graft_slice(&mut self.partial_root, &path, size, file_count, mode, mtime, ctime, uid, gid);
+                    Ok(ScanMsg::SliceDone {
+                        path,
+                        size,
+                        file_count,
+                        mode,
+                        mtime,
+                        ctime,
+                        uid,
+                        gid,
+                        exts,
+                    }) => {
+                        graft_slice(
+                            &mut self.partial_root,
+                            &path,
+                            size,
+                            file_count,
+                            mode,
+                            mtime,
+                            ctime,
+                            uid,
+                            gid,
+                        );
                         for (ext, size, files) in exts {
                             add_ext(&mut self.live_exts, ext, size, files);
                         }
@@ -832,7 +927,9 @@ impl eframe::App for DiskScanApp {
             && let Some(root) = &self.root
         {
             let view_node = self.current_view_node(root);
-            let selected = self.selected_rel().and_then(|rel| try_get_node(view_node, rel));
+            let selected = self
+                .selected_rel()
+                .and_then(|rel| try_get_node(view_node, rel));
             egui::Area::new("folder_stats_overlay".into())
                 .order(egui::Order::Foreground)
                 .interactable(false)
@@ -909,7 +1006,10 @@ impl eframe::App for DiskScanApp {
 fn quiet_accessibility_panic() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if info.location().is_some_and(|l| l.file().contains("accesskit_unix")) {
+        if info
+            .location()
+            .is_some_and(|l| l.file().contains("accesskit_unix"))
+        {
             return;
         }
         default(info);
@@ -921,7 +1021,10 @@ fn quiet_accessibility_panic() {
 /// files would cut very deep chains short. Raise it to the hard limit (as
 /// file managers and `find` effectively allow).
 fn raise_open_file_limit() {
-    let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    let mut lim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
     unsafe {
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 && lim.rlim_cur < lim.rlim_max {
             lim.rlim_cur = lim.rlim_max;

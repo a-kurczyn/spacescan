@@ -60,13 +60,23 @@ pub(crate) fn sortable_header(
     };
     name_for_screen_readers(&resp, &name, Some(is_active));
     let color = ui.style().interact(&resp).text_color();
-    let text_pos = Pos2::new(resp.rect.left() + pad.x, resp.rect.center().y - galley.size().y / 2.0);
+    let text_pos = Pos2::new(
+        resp.rect.left() + pad.x,
+        resp.rect.center().y - galley.size().y / 2.0,
+    );
     // Bold look: the text drawn twice, half a pixel apart.
     ui.painter().galley(text_pos, galley.clone(), color);
-    ui.painter().galley(text_pos + Vec2::new(0.5, 0.0), galley, color);
+    ui.painter()
+        .galley(text_pos + Vec2::new(0.5, 0.0), galley, color);
     if is_active {
         let cx = resp.rect.right() - pad.x - chevron_w / 2.0;
-        draw_chevron(ui.painter(), Pos2::new(cx, resp.rect.center().y), chevron_w / 2.0, state.ascending, color);
+        draw_chevron(
+            ui.painter(),
+            Pos2::new(cx, resp.rect.center().y),
+            chevron_w / 2.0,
+            state.ascending,
+            color,
+        );
     }
     if resp.clicked() {
         if is_active {
@@ -94,11 +104,17 @@ pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: C
     painter.add(egui::Shape::closed_line(body, stroke));
     // Folded corner.
     painter.line_segment(
-        [Pos2::new(rect.right() - fold, rect.top()), Pos2::new(rect.right() - fold, rect.top() + fold)],
+        [
+            Pos2::new(rect.right() - fold, rect.top()),
+            Pos2::new(rect.right() - fold, rect.top() + fold),
+        ],
         stroke,
     );
     painter.line_segment(
-        [Pos2::new(rect.right() - fold, rect.top() + fold), Pos2::new(rect.right(), rect.top() + fold)],
+        [
+            Pos2::new(rect.right() - fold, rect.top() + fold),
+            Pos2::new(rect.right(), rect.top() + fold),
+        ],
         stroke,
     );
     // Text lines.
@@ -124,19 +140,47 @@ pub(crate) fn draw_folder_icon(painter: &egui::Painter, rect: egui::Rect, color:
     ];
     painter.add(egui::Shape::closed_line(tab, stroke));
     let body = egui::Rect::from_min_max(Pos2::new(rect.left(), body_top), rect.right_bottom());
-    painter.rect_stroke(body, egui::CornerRadius::from(1u8), stroke, egui::StrokeKind::Outside);
+    painter.rect_stroke(
+        body,
+        egui::CornerRadius::from(1u8),
+        stroke,
+        egui::StrokeKind::Outside,
+    );
 }
 
 /// Table icon for the Summary view button.
 pub(crate) fn draw_table_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
-    painter.rect_stroke(rect, egui::CornerRadius::from(1u8), stroke, egui::StrokeKind::Outside);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::from(1u8),
+        stroke,
+        egui::StrokeKind::Outside,
+    );
     let header_y = rect.top() + rect.height() * 0.32;
-    painter.line_segment([Pos2::new(rect.left(), header_y), Pos2::new(rect.right(), header_y)], stroke);
+    painter.line_segment(
+        [
+            Pos2::new(rect.left(), header_y),
+            Pos2::new(rect.right(), header_y),
+        ],
+        stroke,
+    );
     let col1_x = rect.left() + rect.width() * 0.38;
     let col2_x = rect.left() + rect.width() * 0.69;
-    painter.line_segment([Pos2::new(col1_x, header_y), Pos2::new(col1_x, rect.bottom())], stroke);
-    painter.line_segment([Pos2::new(col2_x, header_y), Pos2::new(col2_x, rect.bottom())], stroke);
+    painter.line_segment(
+        [
+            Pos2::new(col1_x, header_y),
+            Pos2::new(col1_x, rect.bottom()),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(col2_x, header_y),
+            Pos2::new(col2_x, rect.bottom()),
+        ],
+        stroke,
+    );
 }
 
 /// Sunburst icon for the Chart view button.
@@ -171,10 +215,20 @@ pub(crate) fn draw_filter_icon(painter: &egui::Painter, rect: egui::Rect, color:
 }
 
 /// An up or down chevron centered on `center`, `half_w` wide on each side.
-pub(crate) fn draw_chevron(painter: &egui::Painter, center: Pos2, half_w: f32, up: bool, color: Color32) {
+pub(crate) fn draw_chevron(
+    painter: &egui::Painter,
+    center: Pos2,
+    half_w: f32,
+    up: bool,
+    color: Color32,
+) {
     let stroke = egui::Stroke::new(1.5, color);
     let half_h = half_w * 0.55;
-    let (tip, arms) = if up { (-half_h, half_h) } else { (half_h, -half_h) };
+    let (tip, arms) = if up {
+        (-half_h, half_h)
+    } else {
+        (half_h, -half_h)
+    };
     painter.add(egui::Shape::line(
         vec![
             Pos2::new(center.x - half_w, center.y + arms),
@@ -186,13 +240,27 @@ pub(crate) fn draw_chevron(painter: &egui::Painter, center: Pos2, half_w: f32, u
 }
 
 /// Chart-order icon: "9" (by size) or "A" (by name) with a down chevron.
-pub(crate) fn draw_sort_order_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32, glyph: &str) {
+pub(crate) fn draw_sort_order_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    color: Color32,
+    glyph: &str,
+) {
     // Slightly wider than the icon area, into the button's padding.
     let rect = rect.expand2(Vec2::new(rect.width() * 0.2, 0.0));
     let font = egui::FontId::proportional(rect.height() * 1.05);
     let glyph_center = Pos2::new(rect.left() + rect.width() * 0.28, rect.center().y);
-    painter.text(glyph_center, egui::Align2::CENTER_CENTER, glyph, font, color);
-    let chevron_center = Pos2::new(rect.left() + rect.width() * 0.8, rect.center().y + rect.height() * 0.05);
+    painter.text(
+        glyph_center,
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        font,
+        color,
+    );
+    let chevron_center = Pos2::new(
+        rect.left() + rect.width() * 0.8,
+        rect.center().y + rect.height() * 0.05,
+    );
     draw_chevron(painter, chevron_center, rect.width() * 0.17, false, color);
 }
 
@@ -207,7 +275,12 @@ pub(crate) fn icon_toolbar_button(
     draw: impl FnOnce(&egui::Painter, egui::Rect, Color32),
 ) -> egui::Response {
     let size = ui.spacing().interact_size.y;
-    let resp = ui.add_enabled(enabled, egui::Button::new("").selected(selected).min_size(Vec2::splat(size)));
+    let resp = ui.add_enabled(
+        enabled,
+        egui::Button::new("")
+            .selected(selected)
+            .min_size(Vec2::splat(size)),
+    );
     let color = ui.style().interact_selectable(&resp, selected).text_color();
     let icon_rect = resp.rect.shrink(resp.rect.width() * 0.24);
     draw(ui.painter(), icon_rect, color);
@@ -248,53 +321,60 @@ pub(crate) fn details_grid(
     user_cache: &mut HashMap<u32, String>,
     group_cache: &mut HashMap<u32, String>,
 ) {
-    egui::Grid::new(id).num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
-        ui.label(if h.is_free { tr("HOVER_AVAILABLE") } else { tr("HOVER_SIZE") });
-        ui.label(human_size(h.size));
-        ui.end_row();
-
-        // File count: shown for folders and "other" only.
-        if h.is_dir {
-            ui.label(tr("HOVER_FILES"));
-            ui.label(format_count(h.file_count));
+    egui::Grid::new(id)
+        .num_columns(2)
+        .spacing([12.0, 4.0])
+        .show(ui, |ui| {
+            ui.label(if h.is_free {
+                tr("HOVER_AVAILABLE")
+            } else {
+                tr("HOVER_SIZE")
+            });
+            ui.label(human_size(h.size));
             ui.end_row();
-        }
 
-        if let Some(m) = h.mode {
-            ui.label(tr("HOVER_PERMS"));
-            ui.label(format_perms(m));
-            ui.end_row();
-            // Symbolic link: where it points (not counted in sizes).
-            if m & 0o170000 == 0o120000 {
-                ui.label(tr("HOVER_LINK"));
-                ui.label(match std::fs::read_link(&h.path) {
-                    Ok(target) => trf("HOVER_LINK_TARGET", &[&show_path(&target)]),
-                    Err(_) => tr("HOVER_LINK_UNREADABLE"),
-                });
+            // File count: shown for folders and "other" only.
+            if h.is_dir {
+                ui.label(tr("HOVER_FILES"));
+                ui.label(format_count(h.file_count));
                 ui.end_row();
             }
-        }
-        if let Some(mt) = h.mtime {
-            ui.label(tr("HOVER_MODIFIED"));
-            ui.label(format_epoch(mt));
-            ui.end_row();
-        }
-        if let Some(ct) = h.ctime {
-            ui.label(tr("HOVER_CHANGED"));
-            ui.label(format_epoch(ct));
-            ui.end_row();
-        }
-        if let (Some(uid), Some(gid)) = (h.uid, h.gid) {
-            ui.label(tr("HOVER_OWNER"));
-            ui.label(format_owner(uid, gid, user_cache, group_cache));
-            ui.end_row();
-        }
-        if let Some(mime) = mime {
-            ui.label(tr("HOVER_TYPE"));
-            ui.label(mime);
-            ui.end_row();
-        }
-    });
+
+            if let Some(m) = h.mode {
+                ui.label(tr("HOVER_PERMS"));
+                ui.label(format_perms(m));
+                ui.end_row();
+                // Symbolic link: where it points (not counted in sizes).
+                if m & 0o170000 == 0o120000 {
+                    ui.label(tr("HOVER_LINK"));
+                    ui.label(match std::fs::read_link(&h.path) {
+                        Ok(target) => trf("HOVER_LINK_TARGET", &[&show_path(&target)]),
+                        Err(_) => tr("HOVER_LINK_UNREADABLE"),
+                    });
+                    ui.end_row();
+                }
+            }
+            if let Some(mt) = h.mtime {
+                ui.label(tr("HOVER_MODIFIED"));
+                ui.label(format_epoch(mt));
+                ui.end_row();
+            }
+            if let Some(ct) = h.ctime {
+                ui.label(tr("HOVER_CHANGED"));
+                ui.label(format_epoch(ct));
+                ui.end_row();
+            }
+            if let (Some(uid), Some(gid)) = (h.uid, h.gid) {
+                ui.label(tr("HOVER_OWNER"));
+                ui.label(format_owner(uid, gid, user_cache, group_cache));
+                ui.end_row();
+            }
+            if let Some(mime) = mime {
+                ui.label(tr("HOVER_TYPE"));
+                ui.label(mime);
+                ui.end_row();
+            }
+        });
 }
 
 /// `text` cut to fit `width` by replacing its middle with "…", so both the
@@ -303,8 +383,13 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
     // Cut very long texts first; no line fits more than a few hundred
     // characters.
     let text = &shorten_middle(text, 600);
-    let fits =
-        |s: &str| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) <= width;
+    let fits = |s: &str| {
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
+                .size()
+                .x
+        }) <= width
+    };
     if fits(text) {
         return text.to_string();
     }
@@ -322,7 +407,11 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
     let (mut lo, mut hi) = (0, chars.len());
     while lo < hi {
         let mid = (lo + hi).div_ceil(2);
-        if fits(&cut(mid)) { lo = mid } else { hi = mid - 1 }
+        if fits(&cut(mid)) {
+            lo = mid
+        } else {
+            hi = mid - 1
+        }
     }
     cut(lo)
 }
@@ -335,7 +424,10 @@ mod tests {
     fn painted_buttons_have_accessible_names() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        let mut state = SortState { column: SortColumn::Size, ascending: false };
+        let mut state = SortState {
+            column: SortColumn::Size,
+            ascending: false,
+        };
         let mut run = || {
             ctx.run_ui(Default::default(), |ui| {
                 sortable_header(ui, "Size", SortColumn::Size, &mut state);
@@ -345,10 +437,21 @@ mod tests {
         };
         let _ = run();
         let out = run();
-        let update = out.platform_output.accesskit_update.expect("accesskit output");
-        let labels: Vec<String> = update.nodes.iter().filter_map(|(_, n)| n.label().map(str::to_string)).collect();
+        let update = out
+            .platform_output
+            .accesskit_update
+            .expect("accesskit output");
+        let labels: Vec<String> = update
+            .nodes
+            .iter()
+            .filter_map(|(_, n)| n.label().map(str::to_string))
+            .collect();
         eprintln!("{labels:?}");
-        assert!(labels.iter().any(|l| l.contains("Size") && l.contains("descending")));
+        assert!(
+            labels
+                .iter()
+                .any(|l| l.contains("Size") && l.contains("descending"))
+        );
         assert!(labels.iter().any(|l| l == "Chart view"));
         assert!(labels.iter().any(|l| l == "Rescan"));
     }

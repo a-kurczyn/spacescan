@@ -19,7 +19,11 @@ pub(crate) struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { language: "en".to_string(), chart: Settings::default(), table: TablePrefs::default() }
+        Config {
+            language: "en".to_string(),
+            chart: Settings::default(),
+            table: TablePrefs::default(),
+        }
     }
 }
 
@@ -70,7 +74,10 @@ impl Unreadable {
             Unreadable::TooBig => tr("ERR_SETTINGS_TOO_BIG"),
             Unreadable::Io(e) => e.to_string(),
         };
-        trf("ERR_SETTINGS_UNREADABLE", &[&show_path(&settings_file()), &why])
+        trf(
+            "ERR_SETTINGS_UNREADABLE",
+            &[&show_path(&settings_file()), &why],
+        )
     }
 }
 
@@ -83,7 +90,9 @@ fn read_settings() -> Result<Option<String>, Unreadable> {
         Err(e) => Err(Unreadable::Io(e)),
         Ok(m) if !m.is_file() => Err(Unreadable::NotAFile),
         Ok(m) if m.len() > MAX_SETTINGS_BYTES => Err(Unreadable::TooBig),
-        Ok(_) => std::fs::read_to_string(&path).map(Some).map_err(Unreadable::Io),
+        Ok(_) => std::fs::read_to_string(&path)
+            .map(Some)
+            .map_err(Unreadable::Io),
     }
 }
 
@@ -102,7 +111,9 @@ fn lenient<T: Serialize + DeserializeOwned>(
         dropped.push(section.to_string());
         return default;
     };
-    let Ok(mut merged) = serde_json::to_value(&default) else { return default };
+    let Ok(mut merged) = serde_json::to_value(&default) else {
+        return default;
+    };
     let fits = |v: &Value| serde_json::from_value::<T>(v.clone()).is_ok();
     for (key, value) in fields {
         let mut trial = merged.clone();
@@ -167,12 +178,19 @@ impl Config {
         let table = lenient(defaults.table, value.get("table"), "table", &mut dropped);
         let sanitized = chart.clone().sanitized();
         let corrected = sanitized != chart;
-        let cfg = Config { language, chart: sanitized, table };
+        let cfg = Config {
+            language,
+            chart: sanitized,
+            table,
+        };
         if dropped.is_empty() {
             return (cfg, corrected, None);
         }
         let _ = std::fs::copy(&path, &bad);
-        let problem = trf("ERR_SETTINGS_FIELDS", &[&dropped.join(", "), &show_path(&bad)]);
+        let problem = trf(
+            "ERR_SETTINGS_FIELDS",
+            &[&dropped.join(", "), &show_path(&bad)],
+        );
         (cfg, true, Some(problem))
     }
 
@@ -187,10 +205,16 @@ impl Config {
             Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(&link)?,
             _ => link,
         };
-        let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let tmp = target.with_file_name(format!(".{name}.tmp"));
         let write = || -> std::io::Result<()> {
-            std::fs::write(&tmp, serde_json::to_string_pretty(self).map_err(std::io::Error::other)?)?;
+            std::fs::write(
+                &tmp,
+                serde_json::to_string_pretty(self).map_err(std::io::Error::other)?,
+            )?;
             if let Ok(m) = std::fs::metadata(&target) {
                 std::fs::set_permissions(&tmp, m.permissions())?;
             }
@@ -207,7 +231,11 @@ impl Config {
 impl DiskScanApp {
     /// The configuration as it stands right now.
     fn current_config(&self) -> Config {
-        Config { language: current_lang_code(), chart: self.settings.clone(), table: self.table_prefs() }
+        Config {
+            language: current_lang_code(),
+            chart: self.settings.clone(),
+            table: self.table_prefs(),
+        }
     }
 
     /// Once per frame: saves the configuration if anything in it changed
@@ -267,7 +295,11 @@ mod tests {
             assert!(problem.is_none() && path.is_file());
             assert_eq!(m, CategoryModel::defaults());
 
-            std::fs::write(&path, r#"{"categories": [{"name": "Mail", "extensions": ["eml"]}]}"#).unwrap();
+            std::fs::write(
+                &path,
+                r#"{"categories": [{"name": "Mail", "extensions": ["eml"]}]}"#,
+            )
+            .unwrap();
             let (m, problem) = CategoryModel::load();
             assert!(problem.is_none());
             assert_eq!(m.label(m.of_name("a.EML")), "Mail");
@@ -294,12 +326,17 @@ mod tests {
             assert_eq!(cfg.language, "es");
             assert_eq!(cfg.chart.ring_sat, 0.9);
             assert_eq!(cfg.chart.stroke_alpha, Settings::default().stroke_alpha);
-            assert_eq!(cfg.chart.max_render_depth, Settings::default().max_render_depth);
+            assert_eq!(
+                cfg.chart.max_render_depth,
+                Settings::default().max_render_depth
+            );
             assert!(cfg.table.sort == SortColumn::Files && cfg.table.dirs_first);
             assert!(cfg.table.hidden_columns == vec![TableCol::Perms]);
             assert!(needs_save);
             let problem = problem.unwrap();
-            assert!(problem.contains("chart.stroke_alpha") && problem.contains("table.hidden_columns"));
+            assert!(
+                problem.contains("chart.stroke_alpha") && problem.contains("table.hidden_columns")
+            );
             assert!(settings_file().with_extension("json.bad").exists());
         });
     }
@@ -317,8 +354,11 @@ mod tests {
             let (_, needs_save, problem) = Config::load();
             assert!(!needs_save && problem.is_some());
             assert!(Config::default().save().is_err());
-            let leftovers: Vec<_> =
-                std::fs::read_dir(config_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+            let leftovers: Vec<_> = std::fs::read_dir(config_dir())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name())
+                .collect();
             assert_eq!(leftovers, vec![std::ffi::OsString::from("settings.json")]);
         });
     }
@@ -333,9 +373,17 @@ mod tests {
             let mut cfg = Config::default();
             cfg.language = "es".into();
             cfg.save().unwrap();
-            assert!(std::fs::symlink_metadata(settings_file()).unwrap().file_type().is_symlink());
+            assert!(
+                std::fs::symlink_metadata(settings_file())
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
             assert!(std::fs::read_to_string(&real).unwrap().contains("\"es\""));
-            assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(&real).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         });
     }
 }

@@ -109,7 +109,11 @@ pub(crate) fn format_mode_ls(mode: u32, is_dir: bool) -> String {
     };
     let mut s = String::with_capacity(10);
     s.push(kind);
-    for (shift, special, set_x, set_no_x) in [(6, 0o4000, 's', 'S'), (3, 0o2000, 's', 'S'), (0, 0o1000, 't', 'T')] {
+    for (shift, special, set_x, set_no_x) in [
+        (6, 0o4000, 's', 'S'),
+        (3, 0o2000, 's', 'S'),
+        (0, 0o1000, 't', 'T'),
+    ] {
         let bits = (mode >> shift) & 7;
         s.push(if bits & 4 != 0 { 'r' } else { '-' });
         s.push(if bits & 2 != 0 { 'w' } else { '-' });
@@ -220,7 +224,11 @@ fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node))
         return;
     };
     // Compare last path components as bytes: fast on wide folders.
-    let idx = match node.children.iter().position(|c| c.path.file_name() == Some(*first)) {
+    let idx = match node
+        .children
+        .iter()
+        .position(|c| c.path.file_name() == Some(*first))
+    {
         Some(i) => i,
         None => {
             let mut child = empty_node();
@@ -232,8 +240,14 @@ fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node))
         }
     };
     deep(|| graft_at(&mut node.children[idx], rest, set));
-    node.size = node.children.iter().fold(0u64, |t, c| t.saturating_add(c.size));
-    node.file_count = node.children.iter().fold(0u64, |t, c| t.saturating_add(c.file_count));
+    node.size = node
+        .children
+        .iter()
+        .fold(0u64, |t, c| t.saturating_add(c.size));
+    node.file_count = node
+        .children
+        .iter()
+        .fold(0u64, |t, c| t.saturating_add(c.file_count));
     // Only children[idx] changed: move it into place instead of re-sorting.
     reposition_by_size(&mut node.children, idx);
 }
@@ -301,7 +315,10 @@ pub(crate) fn flat_copy(n: &Node) -> Node {
         gid: c.gid,
         btime: c.btime,
     };
-    shallow(n, n.children.iter().map(|c| shallow(c, Vec::new())).collect())
+    shallow(
+        n,
+        n.children.iter().map(|c| shallow(c, Vec::new())).collect(),
+    )
 }
 
 /// Sort key for file-manager name order: case-insensitive, numbers by value
@@ -344,8 +361,9 @@ pub(crate) fn natural_key(name: &str) -> Vec<u8> {
                     'þ' => key.extend_from_slice(b"th"),
                     _ => {
                         use unicode_normalization::UnicodeNormalization;
-                        for base in
-                            std::iter::once(l).nfd().filter(|b| !unicode_normalization::char::is_combining_mark(*b))
+                        for base in std::iter::once(l)
+                            .nfd()
+                            .filter(|b| !unicode_normalization::char::is_combining_mark(*b))
                         {
                             key.extend_from_slice(base.encode_utf8(&mut buf).as_bytes());
                         }
@@ -408,7 +426,11 @@ pub(crate) fn io_reason(e: &std::io::Error) -> String {
 
 /// Birth (creation) time in Unix seconds; 0 if unavailable.
 pub(crate) fn birth_secs(m: &std::fs::Metadata) -> i64 {
-    m.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0)
+    m.created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Everything a scan's worker threads share.
@@ -436,10 +458,17 @@ impl ScanCtx<'_> {
     /// at the first name found.
     fn size_of(&self, m: &std::fs::Metadata) -> u64 {
         use std::os::unix::fs::MetadataExt;
-        if !m.is_dir() && m.nlink() > 1 && !self.hard_links.lock().unwrap().insert((m.dev(), m.ino())) {
+        if !m.is_dir()
+            && m.nlink() > 1
+            && !self.hard_links.lock().unwrap().insert((m.dev(), m.ino()))
+        {
             return 0;
         }
-        if self.apparent_size { m.len() } else { m.blocks() * 512 }
+        if self.apparent_size {
+            m.len()
+        } else {
+            m.blocks() * 512
+        }
     }
 }
 
@@ -471,14 +500,27 @@ pub(crate) fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
 /// Scans one folder entry: a folder on the same filesystem is scanned into
 /// a subtree, anything else becomes a file node. `path` is the entry's full
 /// path; `dir` is its folder's handle.
-pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHandle, ctx: &ScanCtx) -> Node {
-    let ScanCtx { root_dev, progress, counter, progress_interval, .. } = *ctx;
+pub(crate) fn scan_entry(
+    entry: &std::fs::DirEntry,
+    path: PathBuf,
+    dir: &DirHandle,
+    ctx: &ScanCtx,
+) -> Node {
+    let ScanCtx {
+        root_dev,
+        progress,
+        counter,
+        progress_interval,
+        ..
+    } = *ctx;
     use std::os::unix::fs::MetadataExt;
     let p = path;
     if !ctx.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
-        && p.file_name().is_some_and(|n| n.to_string_lossy().chars().any(is_hangul))
+        && p.file_name()
+            .is_some_and(|n| n.to_string_lossy().chars().any(is_hangul))
     {
-        ctx.saw_hangul.store(true, std::sync::atomic::Ordering::Relaxed);
+        ctx.saw_hangul
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let ft = entry.file_type();
     let node = match ft {
@@ -507,7 +549,15 @@ pub(crate) fn scan_entry(entry: &std::fs::DirEntry, path: PathBuf, dir: &DirHand
         }
         _ => {
             let (sz, mode, mtime, ctime, uid, gid, btime) = match entry.metadata() {
-                Ok(m) => (ctx.size_of(&m), m.mode(), m.mtime(), m.ctime(), m.uid(), m.gid(), birth_secs(&m)),
+                Ok(m) => (
+                    ctx.size_of(&m),
+                    m.mode(),
+                    m.mtime(),
+                    m.ctime(),
+                    m.uid(),
+                    m.gid(),
+                    birth_secs(&m),
+                ),
                 Err(e) => {
                     let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
                     (0, 0, NO_TIME, NO_TIME, 0, 0, 0)
@@ -543,7 +593,9 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
 /// Scans `path`, whose parent folder is open as `parent` when the path is
 /// long (see `DirHandle`).
 fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
-    let ScanCtx { progress, cancel, .. } = *ctx;
+    let ScanCtx {
+        progress, cancel, ..
+    } = *ctx;
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
     let name = file_name_of(path);
@@ -567,8 +619,11 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     // Keep this folder open when its children's paths may get too long
     // to open directly.
     let open_at = openable(path, parent);
-    let handle: DirHandle =
-        if path.as_os_str().len() + 256 > LONG_PATH { std::fs::File::open(&open_at).ok() } else { None };
+    let handle: DirHandle = if path.as_os_str().len() + 256 > LONG_PATH {
+        std::fs::File::open(&open_at).ok()
+    } else {
+        None
+    };
     let listing = match &handle {
         Some(f) => {
             use std::os::fd::AsRawFd;
@@ -591,15 +646,19 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         }
     };
 
-    let children: Vec<Node> =
-        entries.par_iter().map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx)).collect();
+    let children: Vec<Node> = entries
+        .par_iter()
+        .map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx))
+        .collect();
 
     let mut children = children;
     children.sort_by_key(|c| std::cmp::Reverse(c.size));
     // The folder's own entry uses space too. Saturating: apparent sizes of
     // sparse files can add up past u64.
     let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
-    let size = children.iter().fold(own_size, |t, c| t.saturating_add(c.size));
+    let size = children
+        .iter()
+        .fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
     let mut exts: Vec<(String, u64, u64)> = Vec::new();
@@ -688,11 +747,15 @@ pub(crate) fn count_entries(
     if stop() {
         return;
     }
-    let Ok(rd) = std::fs::read_dir(path) else { return };
+    let Ok(rd) = std::fs::read_dir(path) else {
+        return;
+    };
     let entries: Vec<std::fs::DirEntry> = rd.filter_map(|e| e.ok()).collect();
     found.fetch_add(entries.len() as u64, Ordering::Relaxed);
     entries.par_iter().for_each(|e| {
-        let is_dir = e.file_type().is_ok_and(|ft| ft.is_dir() && !ft.is_symlink());
+        let is_dir = e
+            .file_type()
+            .is_ok_and(|ft| ft.is_dir() && !ft.is_symlink());
         // Only directories need a stat, to stay on the same filesystem.
         if is_dir && e.metadata().is_ok_and(|m| m.dev() == root_dev) {
             deep(|| count_entries(&e.path(), root_dev, found, stop));
@@ -802,12 +865,21 @@ pub(crate) fn true_case(p: &Path) -> PathBuf {
 /// Tree lookups compare one name per level (whole paths would be slow on
 /// deep chains).
 pub(crate) fn rel_parts<'a>(base: &Path, target: &'a Path) -> Option<Vec<&'a std::ffi::OsStr>> {
-    Some(target.strip_prefix(base).ok()?.components().map(|c| c.as_os_str()).collect())
+    Some(
+        target
+            .strip_prefix(base)
+            .ok()?
+            .components()
+            .map(|c| c.as_os_str())
+            .collect(),
+    )
 }
 
 /// Index of `node`'s child named `name`.
 pub(crate) fn child_named(node: &Node, name: &std::ffi::OsStr) -> Option<usize> {
-    node.children.iter().position(|c| c.path.file_name() == Some(name))
+    node.children
+        .iter()
+        .position(|c| c.path.file_name() == Some(name))
 }
 
 /// Re-finds the folder at `idx` (child indices from `old`'s root) in `new`,
@@ -818,7 +890,9 @@ pub(crate) fn remap_index_path(old: &Node, new: &Node, idx: &[usize]) -> Vec<usi
     for &i in idx {
         let Some(oc) = o.children.get(i) else { break };
         // Same parent, so the same name means the same folder.
-        let Some(j) = oc.path.file_name().and_then(|name| child_named(n, name)) else { break };
+        let Some(j) = oc.path.file_name().and_then(|name| child_named(n, name)) else {
+            break;
+        };
         out.push(j);
         o = oc;
         n = &n.children[j];
@@ -832,7 +906,10 @@ pub(crate) fn index_path_to(root: &Node, target: &Path) -> Option<Vec<usize>> {
     let mut n = root;
     let mut out = Vec::new();
     for comp in rel.components() {
-        let j = n.children.iter().position(|c| c.is_dir && c.path.file_name() == Some(comp.as_os_str()))?;
+        let j = n
+            .children
+            .iter()
+            .position(|c| c.is_dir && c.path.file_name() == Some(comp.as_os_str()))?;
         out.push(j);
         n = &n.children[j];
     }
@@ -850,25 +927,41 @@ mod tests {
         let lookalike = std::ffi::OsStr::new("x\u{FFFD}y");
         assert_eq!(show_os(bad), "x\\xFFy");
         assert_eq!(show_os(lookalike), "x\u{FFFD}y");
-        assert_eq!(show_os(std::ffi::OsStr::new("a\nb\tc\\d")), "a\\nb\\tc\\\\d");
-        assert_eq!(show_os(std::ffi::OsStr::new("ünïcödé 日本語")), "ünïcödé 日本語");
+        assert_eq!(
+            show_os(std::ffi::OsStr::new("a\nb\tc\\d")),
+            "a\\nb\\tc\\\\d"
+        );
+        assert_eq!(
+            show_os(std::ffi::OsStr::new("ünïcödé 日本語")),
+            "ünïcödé 日本語"
+        );
     }
 
     #[test]
     fn natural_name_order() {
-        let mut names =
-            vec!["file10", "File2", "file1", ".dotfile", "Beta", "alpha", "b", "Ärger", "a007", "a7", "a07x", "Zed"];
+        let mut names = vec![
+            "file10", "File2", "file1", ".dotfile", "Beta", "alpha", "b", "Ärger", "a007", "a7",
+            "a07x", "Zed",
+        ];
         names.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(
             names,
-            vec![".dotfile", "a007", "a7", "a07x", "alpha", "Ärger", "b", "Beta", "file1", "File2", "file10", "Zed"]
+            vec![
+                ".dotfile", "a007", "a7", "a07x", "alpha", "Ärger", "b", "Beta", "file1", "File2",
+                "file10", "Zed"
+            ]
         );
         assert_eq!(natural_cmp("abc", "abc"), std::cmp::Ordering::Equal);
-        let mut accented = vec!["Zed", "émile", "Árbol", "abc", "Ñandú", "emile", "Øre", "nube", "Straße", "strasse"];
+        let mut accented = vec![
+            "Zed", "émile", "Árbol", "abc", "Ñandú", "emile", "Øre", "nube", "Straße", "strasse",
+        ];
         accented.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(
             accented,
-            vec!["abc", "Árbol", "emile", "émile", "Ñandú", "nube", "Øre", "Straße", "strasse", "Zed"]
+            vec![
+                "abc", "Árbol", "emile", "émile", "Ñandú", "nube", "Øre", "Straße", "strasse",
+                "Zed"
+            ]
         );
         assert_eq!(natural_cmp("x9", "x10"), std::cmp::Ordering::Less);
     }
@@ -952,7 +1045,9 @@ mod format_tests {
         assert_eq!(human_size(12_000), "11.7 KiB");
         assert_eq!(u64::MAX.saturating_add(5), u64::MAX);
         assert_eq!(format_epoch(NO_TIME), "-");
-        assert!(format_epoch(0).starts_with("1970-01-01") || format_epoch(0).starts_with("1969-12-31"));
+        assert!(
+            format_epoch(0).starts_with("1970-01-01") || format_epoch(0).starts_with("1969-12-31")
+        );
     }
 }
 
@@ -991,7 +1086,10 @@ mod case_tests {
     #[test]
     fn typed_case_becomes_disk_case() {
         // Case-sensitive filesystems are left alone.
-        assert_eq!(true_case(Path::new("/usr/share")), PathBuf::from("/usr/share"));
+        assert_eq!(
+            true_case(Path::new("/usr/share")),
+            PathBuf::from("/usr/share")
+        );
         // On the dev machine /mnt/DATA is exFAT (case-insensitive).
         let real = PathBuf::from("/mnt/DATA/System Volume Information");
         let typed = PathBuf::from("/mnt/DATA/SYSTEM VOLUME INFORMATION");
@@ -1040,7 +1138,10 @@ mod live_category_tests {
             }
         }
         let cats = CategoryModel::defaults();
-        assert_eq!(category_rows(&live, &cats), category_breakdown(&tree, &cats));
+        assert_eq!(
+            category_rows(&live, &cats),
+            category_breakdown(&tree, &cats)
+        );
         assert_eq!(live.get("mkv").map(|e| e.1), Some(1));
         assert_eq!(live.get("mp4").map(|e| e.1), Some(2));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1076,7 +1177,10 @@ mod scan_perf {
             let took = t.elapsed();
             drop(tx);
             let msgs = drain.join().unwrap();
-            eprintln!("run {run}: {took:?}, {} files, {msgs} messages", tree.file_count);
+            eprintln!(
+                "run {run}: {took:?}, {} files, {msgs} messages",
+                tree.file_count
+            );
         }
     }
 }

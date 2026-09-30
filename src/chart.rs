@@ -99,9 +99,21 @@ pub(crate) struct LayoutOpts<'a> {
 
 /// The slices of the chart of `node`, around the full circle. `free` is the
 /// drive's (capacity, free bytes), shown as a free-space slice.
-pub(crate) fn layout_sunburst(node: &Node, free: Option<(u64, u64)>, opts: LayoutOpts) -> Vec<Segment> {
+pub(crate) fn layout_sunburst(
+    node: &Node,
+    free: Option<(u64, u64)>,
+    opts: LayoutOpts,
+) -> Vec<Segment> {
     let mut out = Vec::new();
-    layout_ring(node, vec![], (0.0, std::f32::consts::TAU), 0, free.unwrap_or((0, 0)), opts, &mut out);
+    layout_ring(
+        node,
+        vec![],
+        (0.0, std::f32::consts::TAU),
+        0,
+        free.unwrap_or((0, 0)),
+        opts,
+        &mut out,
+    );
     out
 }
 
@@ -118,12 +130,20 @@ fn layout_ring(
     opts: LayoutOpts,
     out: &mut Vec<Segment>,
 ) {
-    let LayoutOpts { hidden, settings, order } = opts;
+    let LayoutOpts {
+        hidden,
+        settings,
+        order,
+    } = opts;
     if ring >= settings.max_render_depth {
         return;
     }
-    let visible_children: Vec<(usize, &Node)> =
-        node.children.iter().enumerate().filter(|(_, c)| !hidden.contains(&c.path)).collect();
+    let visible_children: Vec<(usize, &Node)> = node
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !hidden.contains(&c.path))
+        .collect();
 
     // Free space takes its share of the drive's capacity; the content found
     // so far fills the rest of the ring (also while a scan is running).
@@ -148,7 +168,11 @@ fn layout_ring(
         // At most 360 slices per full ring, whatever the min angle.
         let slots = ((span_abs / settings.min_segment_angle_deg.to_radians().max(1e-6)) as usize)
             .min((360.0 * span_abs / std::f32::consts::TAU) as usize);
-        let n = if visible_children.len() <= slots { visible_children.len() } else { slots.saturating_sub(1) };
+        let n = if visible_children.len() <= slots {
+            visible_children.len()
+        } else {
+            slots.saturating_sub(1)
+        };
         // Shown slices are stretched to fill the ring. Stop at the first
         // child that would still be drawn narrower than the min angle;
         // "other" takes it and the rest.
@@ -160,7 +184,11 @@ fn layout_ring(
             .enumerate()
             .take_while(|(k, (_, c))| {
                 shown_sum = shown_sum.saturating_add(c.size);
-                let room = if k + 1 < visible_children.len() { 1.0 - min_frac.min(0.5) } else { 1.0 };
+                let room = if k + 1 < visible_children.len() {
+                    1.0 - min_frac.min(0.5)
+                } else {
+                    1.0
+                };
                 c.size > 0 && (c.size as f32 / shown_sum as f32) * room >= min_frac * 0.999
             })
             .count()
@@ -171,13 +199,24 @@ fn layout_ring(
         shown.sort_by(|(_, a), (_, b)| cmp_names(a, b));
     }
     let rest: Vec<(usize, &Node)> = visible_children.iter().skip(split).cloned().collect();
-    let rest_size: u64 = rest.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
+    let rest_size: u64 = rest
+        .iter()
+        .map(|(_, c)| c.size)
+        .fold(0u64, u64::saturating_add);
 
     // "Other" is one min-angle slot; the shown slices split the rest in
     // proportion to their sizes.
-    let other_frac = if rest_size > 0 { min_frac.min(0.5) } else { 0.0 };
+    let other_frac = if rest_size > 0 {
+        min_frac.min(0.5)
+    } else {
+        0.0
+    };
     let available_frac = (1.0 - other_frac).max(0.0);
-    let shown_total = shown.iter().map(|(_, c)| c.size as f32).sum::<f32>().max(1.0);
+    let shown_total = shown
+        .iter()
+        .map(|(_, c)| c.size as f32)
+        .sum::<f32>()
+        .max(1.0);
 
     let span = content_end_angle - start_angle;
     let mut cursor = start_angle;
@@ -279,7 +318,11 @@ pub(crate) fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
 
 /// `c` with a gamma curve applied: gamma < 1 lightens it.
 pub(crate) fn gamma_lighten(c: Color32, gamma: f32) -> Color32 {
-    let f = |v: u8| ((v as f32 / 255.0).powf(gamma) * 255.0).round().clamp(0.0, 255.0) as u8;
+    let f = |v: u8| {
+        ((v as f32 / 255.0).powf(gamma) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
     Color32::from_rgb(f(c.r()), f(c.g()), f(c.b()))
 }
 
@@ -289,12 +332,19 @@ pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Setti
         // A pale tint of the same hue.
         return hsv_to_rgb(top_branch_hue, settings.other_sat, settings.other_val);
     }
-    let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff).max(settings.ring_val_floor);
+    let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff)
+        .max(settings.ring_val_floor);
     hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
 }
 
 /// Folder name and size in the center hub, wrapped to fit inside it.
-pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f32, name: &str, size: u64) {
+pub(crate) fn draw_hub_text(
+    painter: &egui::Painter,
+    center: Pos2,
+    hub_radius: f32,
+    name: &str,
+    size: u64,
+) {
     // About the width of a rectangle inside the circle, with a margin.
     let wrap_width = (hub_radius * 1.3).max(24.0);
 
@@ -307,8 +357,12 @@ pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f
     );
     let name_galley = painter.layout_job(name_job);
 
-    let size_job =
-        egui::text::LayoutJob::simple(human_size(size), egui::FontId::proportional(18.0), Color32::WHITE, wrap_width);
+    let size_job = egui::text::LayoutJob::simple(
+        human_size(size),
+        egui::FontId::proportional(18.0),
+        Color32::WHITE,
+        wrap_width,
+    );
     let size_galley = painter.layout_job(size_job);
 
     let gap = 4.0;
@@ -318,7 +372,10 @@ pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f
     let name_pos = Pos2::new(center.x - name_galley.size().x / 2.0, top);
     painter.galley(name_pos, name_galley.clone(), Color32::WHITE);
 
-    let size_pos = Pos2::new(center.x - size_galley.size().x / 2.0, top + name_galley.size().y + gap);
+    let size_pos = Pos2::new(
+        center.x - size_galley.size().x / 2.0,
+        top + name_galley.size().y + gap,
+    );
     painter.galley(size_pos, size_galley.clone(), Color32::WHITE);
 }
 
@@ -336,8 +393,15 @@ pub(crate) fn arc_dir(t: f32) -> Vec2 {
 
 /// Outline of a slice between two radii and two angles: the outer arc
 /// forward, then the inner arc back, `steps` segments each.
-fn slice_outline(center: Pos2, (r0, r1): (f32, f32), (a0, a1): (f32, f32), steps: usize) -> Vec<Pos2> {
-    let arc = |r: f32| (0..=steps).map(move |i| center + arc_dir(a0 + (a1 - a0) * (i as f32 / steps as f32)) * r);
+fn slice_outline(
+    center: Pos2,
+    (r0, r1): (f32, f32),
+    (a0, a1): (f32, f32),
+    steps: usize,
+) -> Vec<Pos2> {
+    let arc = |r: f32| {
+        (0..=steps).map(move |i| center + arc_dir(a0 + (a1 - a0) * (i as f32 / steps as f32)) * r)
+    };
     let mut pts: Vec<Pos2> = arc(r1).collect();
     let mut inner: Vec<Pos2> = arc(r0).collect();
     inner.reverse();
@@ -353,8 +417,12 @@ pub(crate) fn draw_arc_outline(
     angles: (f32, f32),
     stroke: egui::Stroke,
 ) {
-    let steps = (((angles.1 - angles.0).abs() * radii.1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
-    painter.add(egui::Shape::closed_line(slice_outline(center, radii, angles, steps), stroke));
+    let steps =
+        (((angles.1 - angles.0).abs() * radii.1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
+    painter.add(egui::Shape::closed_line(
+        slice_outline(center, radii, angles, steps),
+        stroke,
+    ));
 }
 
 /// Draws one slice, filled with `color` and with a thin dark border.
@@ -378,8 +446,16 @@ pub(crate) fn draw_arc_mesh(
     for i in 0..=steps {
         let t = a0 + (a1 - a0) * (i as f32 / steps as f32);
         let dir = arc_dir(t);
-        mesh.vertices.push(egui::epaint::Vertex { pos: center + dir * r0, uv: egui::epaint::WHITE_UV, color });
-        mesh.vertices.push(egui::epaint::Vertex { pos: center + dir * r1, uv: egui::epaint::WHITE_UV, color });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: center + dir * r0,
+            uv: egui::epaint::WHITE_UV,
+            color,
+        });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: center + dir * r1,
+            uv: egui::epaint::WHITE_UV,
+            color,
+        });
     }
     for i in 0..steps as u32 {
         let i0 = base + i * 2;
@@ -390,8 +466,14 @@ pub(crate) fn draw_arc_mesh(
     }
     painter.add(egui::Shape::mesh(mesh));
 
-    let stroke = egui::Stroke::new(settings.stroke_width, Color32::from_black_alpha(settings.stroke_alpha));
-    painter.add(egui::Shape::closed_line(slice_outline(center, radii, angles, steps), stroke));
+    let stroke = egui::Stroke::new(
+        settings.stroke_width,
+        Color32::from_black_alpha(settings.stroke_alpha),
+    );
+    painter.add(egui::Shape::closed_line(
+        slice_outline(center, radii, angles, steps),
+        stroke,
+    ));
 }
 
 #[cfg(test)]
@@ -404,7 +486,11 @@ mod tests {
 
     fn layout_with(root: &Node, span: f32, settings: &Settings) -> Vec<Segment> {
         let mut segs = Vec::new();
-        let opts = LayoutOpts { hidden: &HashSet::new(), settings, order: ChartOrder::Size };
+        let opts = LayoutOpts {
+            hidden: &HashSet::new(),
+            settings,
+            order: ChartOrder::Size,
+        };
         layout_ring(root, vec![], (0.0, span), 0, (0, 0), opts, &mut segs);
         segs
     }
@@ -428,10 +514,17 @@ mod tests {
         let shown: Vec<&Segment> = segs.iter().filter(|s| !s.is_other).collect();
         // 159 slots, but the 30-GB movies would be drawn under 1° by then.
         let w = |s: &Segment| s.end_angle - s.start_angle;
-        assert!(shown.len() > 100 && shown.len() < 159, "{} shown", shown.len());
+        assert!(
+            shown.len() > 100 && shown.len() < 159,
+            "{} shown",
+            shown.len()
+        );
         assert!(shown.iter().all(|s| w(s) >= 1f32.to_radians() * 0.999));
         let (a, b) = (w(shown[0]), w(shown[1]));
-        assert!((a / b - 171.0 / 158.0).abs() < 1e-3, "171 GB vs 158 GB drawn {a} vs {b}");
+        assert!(
+            (a / b - 171.0 / 158.0).abs() < 1e-3,
+            "171 GB vs 158 GB drawn {a} vs {b}"
+        );
         let other = segs.iter().find(|s| s.is_other).unwrap();
         assert!((w(other) - 1f32.to_radians()).abs() < 1e-4);
         assert!((other.end_angle - span).abs() < 1e-4);
@@ -441,13 +534,18 @@ mod tests {
     /// narrower than the min angle; the thin tail goes into "other".
     #[test]
     fn uneven_tail_goes_to_other() {
-        let mut kids: Vec<Node> = (0..10).map(|i| test_node(&format!("/m/big{i}"), 100, false, vec![])).collect();
+        let mut kids: Vec<Node> = (0..10)
+            .map(|i| test_node(&format!("/m/big{i}"), 100, false, vec![]))
+            .collect();
         kids.extend((0..100).map(|i| test_node(&format!("/m/{i}"), 10, false, vec![])));
         let root = test_node("/m", 2000, true, kids);
         let settings = Settings::default();
         let segs = layout(&root, 120f32.to_radians());
         let min = settings.min_segment_angle_deg.to_radians();
-        assert!(segs.iter().all(|s| s.end_angle - s.start_angle >= min * 0.999));
+        assert!(
+            segs.iter()
+                .all(|s| s.end_angle - s.start_angle >= min * 0.999)
+        );
         assert!(segs.iter().any(|s| s.is_other));
         assert!(segs.iter().filter(|s| !s.is_other).count() > 10);
     }
@@ -455,7 +553,14 @@ mod tests {
     /// When every child fits, there's no "other" at all.
     #[test]
     fn no_other_when_everything_fits() {
-        let root = test_node("/m", 6, true, (1..=3).map(|i| test_node(&format!("/m/{i}"), i, false, vec![])).collect());
+        let root = test_node(
+            "/m",
+            6,
+            true,
+            (1..=3)
+                .map(|i| test_node(&format!("/m/{i}"), i, false, vec![]))
+                .collect(),
+        );
         let segs = layout(&root, std::f32::consts::TAU);
         assert_eq!(segs.len(), 3);
         assert!(segs.iter().all(|s| !s.is_other));
@@ -466,7 +571,14 @@ mod tests {
     fn overflow_goes_to_a_min_width_other() {
         let settings = Settings::default();
         let n = 1000;
-        let root = test_node("/m", n, true, (0..n).map(|i| test_node(&format!("/m/{i}"), 1, false, vec![])).collect());
+        let root = test_node(
+            "/m",
+            n,
+            true,
+            (0..n)
+                .map(|i| test_node(&format!("/m/{i}"), 1, false, vec![]))
+                .collect(),
+        );
         let segs = layout(&root, std::f32::consts::TAU);
         let other = segs.iter().find(|s| s.is_other).unwrap();
         let min = settings.min_segment_angle_deg.to_radians();
@@ -481,7 +593,14 @@ mod tests {
         settings.min_segment_angle_deg = 0.1;
         settings.max_children_shown = usize::MAX;
         let n = 5000;
-        let root = test_node("/m", n, true, (0..n).map(|i| test_node(&format!("/m/{i}"), 1, false, vec![])).collect());
+        let root = test_node(
+            "/m",
+            n,
+            true,
+            (0..n)
+                .map(|i| test_node(&format!("/m/{i}"), 1, false, vec![]))
+                .collect(),
+        );
         let segs = layout_with(&root, std::f32::consts::TAU, &settings);
         assert_eq!(segs.len(), 360);
     }

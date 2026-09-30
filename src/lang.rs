@@ -49,7 +49,10 @@ impl Lang {
         {
             map.extend(parse_kv_file(&text));
         }
-        Lang { code: code.to_string(), map }
+        Lang {
+            code: code.to_string(),
+            map,
+        }
     }
 
     /// The string for `key`, or the key itself if there is none.
@@ -73,7 +76,8 @@ impl Lang {
 }
 
 /// The active language.
-pub(crate) static LANG: LazyLock<RwLock<Lang>> = LazyLock::new(|| RwLock::new(Lang::load(&config::language_setting())));
+pub(crate) static LANG: LazyLock<RwLock<Lang>> =
+    LazyLock::new(|| RwLock::new(Lang::load(&config::language_setting())));
 
 /// The translated string for `key`.
 pub(crate) fn tr(key: &str) -> String {
@@ -104,7 +108,9 @@ pub(crate) fn available_languages() -> Vec<(String, String)> {
             if path.extension().is_none_or(|e| e != "lang") {
                 continue;
             }
-            let Some(code) = path.file_stem().map(|s| s.to_string_lossy().to_string()) else { continue };
+            let Some(code) = path.file_stem().map(|s| s.to_string_lossy().to_string()) else {
+                continue;
+            };
             if code == "en" {
                 continue;
             }
@@ -121,5 +127,7 @@ pub(crate) fn available_languages() -> Vec<(String, String)> {
 }
 
 pub(crate) fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
 }

@@ -102,7 +102,12 @@ struct RowOrder {
 /// Where `cursor` is in the rows `idx` (indices into `view`'s children).
 /// `pos` is the last answer, checked first, so large folders aren't
 /// searched every frame.
-fn find_cursor(cursor: &Path, pos: &std::cell::Cell<Option<usize>>, view: &Node, idx: &[usize]) -> Option<usize> {
+fn find_cursor(
+    cursor: &Path,
+    pos: &std::cell::Cell<Option<usize>>,
+    view: &Node,
+    idx: &[usize],
+) -> Option<usize> {
     let at = |i: usize| idx.get(i).is_some_and(|&k| view.children[k].path == cursor);
     if let Some(i) = pos.get().filter(|&i| at(i)) {
         return Some(i);
@@ -178,12 +183,20 @@ impl Default for TableState {
 /// Replaces the node at `target` with `new`, adjusting the size and file
 /// count of every folder above it. Returns the (old, new) (size, file
 /// count), or None if `target` isn't in the tree.
-pub(crate) fn replace_in_tree(node: &mut Node, target: &Path, new: Node) -> Option<((u64, u64), (u64, u64))> {
+pub(crate) fn replace_in_tree(
+    node: &mut Node,
+    target: &Path,
+    new: Node,
+) -> Option<((u64, u64), (u64, u64))> {
     let parts = rel_parts(&node.path, target)?;
     replace_at(node, &parts, new)
 }
 
-fn replace_at(node: &mut Node, parts: &[&std::ffi::OsStr], new: Node) -> Option<((u64, u64), (u64, u64))> {
+fn replace_at(
+    node: &mut Node,
+    parts: &[&std::ffi::OsStr],
+    new: Node,
+) -> Option<((u64, u64), (u64, u64))> {
     let (first, rest) = parts.split_first()?;
     let i = child_named(node, first)?;
     let (old, new) = if rest.is_empty() {
@@ -251,14 +264,20 @@ impl DiskScanApp {
         TablePrefs {
             sort: self.contents_sort.column,
             ascending: self.contents_sort.ascending,
-            hidden_columns: TableCol::ALL.into_iter().filter(|c| self.table.hidden_cols.contains(c)).collect(),
+            hidden_columns: TableCol::ALL
+                .into_iter()
+                .filter(|c| self.table.hidden_cols.contains(c))
+                .collect(),
             column_order: self.table.col_order.clone(),
             dirs_first: self.table.dirs_first,
         }
     }
 
     pub(crate) fn apply_table_prefs(&mut self, p: &TablePrefs) {
-        self.contents_sort = SortState { column: p.sort, ascending: p.ascending };
+        self.contents_sort = SortState {
+            column: p.sort,
+            ascending: p.ascending,
+        };
         self.table.hidden_cols = p.hidden_columns.iter().copied().collect();
         // Every column exactly once: unknown ones dropped, missing ones appended.
         let mut order: Vec<TableCol> = Vec::new();
@@ -274,7 +293,8 @@ impl DiskScanApp {
     /// Start of every frame: keeps keyboard focus off the table's buttons,
     /// so a clicked header doesn't also react to Enter or Space.
     pub(crate) fn table_frame_start(&mut self, ctx: &egui::Context) {
-        if self.summary_view && !self.typing && !self.delete_dialog_open() && !self.table.show_help {
+        if self.summary_view && !self.typing && !self.delete_dialog_open() && !self.table.show_help
+        {
             ctx.memory_mut(|m| {
                 if let Some(id) = m.focused() {
                     m.surrender_focus(id);
@@ -293,8 +313,16 @@ impl DiskScanApp {
 
         // The row order is recomputed only when something it depends on changes.
         let key = OrderKey {
-            tree_gen: if self.scanning { self.live_gen } else { self.tree_gen },
-            view: if self.scanning { vec![] } else { self.view_stack.last().unwrap().clone() },
+            tree_gen: if self.scanning {
+                self.live_gen
+            } else {
+                self.tree_gen
+            },
+            view: if self.scanning {
+                vec![]
+            } else {
+                self.view_stack.last().unwrap().clone()
+            },
             live: self.scanning,
             sort: self.contents_sort,
             dirs_first: self.table.dirs_first,
@@ -309,8 +337,11 @@ impl DiskScanApp {
         let n_rows = order.idx.len();
         let shown_size = order.shown_size;
         // The cursor goes to the first row when it isn't in this folder.
-        let found =
-            self.table.cursor.as_ref().and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
+        let found = self
+            .table
+            .cursor
+            .as_ref()
+            .and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
         let cursor_row = match found {
             Some(i) => Some(i),
             None => {
@@ -329,7 +360,13 @@ impl DiskScanApp {
                 ui.weak(format!("· {}", tr("TABLE_TAG_DIRS_FIRST")));
             }
             if !self.table.show_dotfiles {
-                ui.weak(format!("· {}", trf("TABLE_TAG_DOTFILES_HIDDEN", &[&human_size(order.dotfile_size)])));
+                ui.weak(format!(
+                    "· {}",
+                    trf(
+                        "TABLE_TAG_DOTFILES_HIDDEN",
+                        &[&human_size(order.dotfile_size)]
+                    )
+                ));
             }
             if !self.table.marked.is_empty() {
                 let size: u64 = (0..n_rows)
@@ -339,7 +376,13 @@ impl DiskScanApp {
                     .fold(0u64, u64::saturating_add);
                 ui.strong(format!(
                     "· {}",
-                    trf("TABLE_TAG_MARKED", &[&format_count(self.table.marked.len() as u64), &human_size(size)])
+                    trf(
+                        "TABLE_TAG_MARKED",
+                        &[
+                            &format_count(self.table.marked.len() as u64),
+                            &human_size(size)
+                        ]
+                    )
                 ));
             }
             if self.scanning {
@@ -378,8 +421,13 @@ impl DiskScanApp {
         ui.add_space(4.0);
 
         let mut cells = vec![Cell::Mark];
-        cells
-            .extend(self.table.col_order.iter().filter(|c| !self.table.hidden_cols.contains(c)).map(|c| Cell::Opt(*c)));
+        cells.extend(
+            self.table
+                .col_order
+                .iter()
+                .filter(|c| !self.table.hidden_cols.contains(c))
+                .map(|c| Cell::Opt(*c)),
+        );
         cells.push(Cell::Name);
 
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
@@ -466,12 +514,22 @@ impl DiskScanApp {
                             sortable_header(ui, &tr("COL_FILES"), SortColumn::Files, contents_sort);
                         }
                         Cell::Opt(TableCol::Modified) => {
-                            sortable_header(ui, &tr("COL_MODIFIED"), SortColumn::Modified, contents_sort)
-                                .on_hover_text(tr("COL_MODIFIED_TIP"));
+                            sortable_header(
+                                ui,
+                                &tr("COL_MODIFIED"),
+                                SortColumn::Modified,
+                                contents_sort,
+                            )
+                            .on_hover_text(tr("COL_MODIFIED_TIP"));
                         }
                         Cell::Opt(TableCol::Changed) => {
-                            sortable_header(ui, &tr("COL_CHANGED"), SortColumn::Changed, contents_sort)
-                                .on_hover_text(tr("COL_CHANGED_TIP"));
+                            sortable_header(
+                                ui,
+                                &tr("COL_CHANGED"),
+                                SortColumn::Changed,
+                                contents_sort,
+                            )
+                            .on_hover_text(tr("COL_CHANGED_TIP"));
                         }
                         Cell::Opt(TableCol::Perms) => {
                             sortable_header(ui, &tr("COL_PERMS"), SortColumn::Perms, contents_sort);
@@ -494,7 +552,10 @@ impl DiskScanApp {
                         tr_row.col(|ui| match cell {
                             Cell::Mark => {
                                 if is_marked {
-                                    let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                                    let (r, _) = ui.allocate_exact_size(
+                                        Vec2::splat(10.0),
+                                        egui::Sense::hover(),
+                                    );
                                     let stroke = egui::Stroke::new(1.8, pick(mark_color));
                                     ui.painter().add(egui::Shape::line(
                                         vec![
@@ -508,24 +569,34 @@ impl DiskScanApp {
                             }
                             Cell::Opt(TableCol::Bar) => {
                                 // Share of the folder, matching the % column.
-                                let (r, _) =
-                                    ui.allocate_exact_size(Vec2::new(86.0, row_h * 0.55), egui::Sense::hover());
+                                let (r, _) = ui.allocate_exact_size(
+                                    Vec2::new(86.0, row_h * 0.55),
+                                    egui::Sense::hover(),
+                                );
                                 let frac = c.size as f32 / total as f32;
                                 if selected {
                                     // A dark track under the fill.
-                                    ui.painter().rect_filled(r, egui::CornerRadius::ZERO, panel_bg);
+                                    ui.painter()
+                                        .rect_filled(r, egui::CornerRadius::ZERO, panel_bg);
                                 }
                                 if frac > 0.0 {
                                     let filled = egui::Rect::from_min_size(
                                         r.min,
                                         Vec2::new((r.width() * frac).max(1.0), r.height()),
                                     );
-                                    ui.painter().rect_filled(filled, egui::CornerRadius::ZERO, bar_fill);
+                                    ui.painter().rect_filled(
+                                        filled,
+                                        egui::CornerRadius::ZERO,
+                                        bar_fill,
+                                    );
                                 }
                                 ui.painter().rect_stroke(
                                     r,
                                     egui::CornerRadius::ZERO,
-                                    egui::Stroke::new(1.0, if selected { panel_bg } else { bar_frame }),
+                                    egui::Stroke::new(
+                                        1.0,
+                                        if selected { panel_bg } else { bar_frame },
+                                    ),
                                     egui::StrokeKind::Inside,
                                 );
                             }
@@ -534,15 +605,20 @@ impl DiskScanApp {
                             }
                             Cell::Opt(TableCol::Size) => {
                                 // Right-aligned, so sizes line up by unit.
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(human_size(c.size));
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(human_size(c.size));
+                                    },
+                                );
                             }
                             Cell::Opt(TableCol::Files) => {
                                 ui.label(format_count(c.file_count));
                             }
                             // A folder still being scanned shows "…".
-                            Cell::Opt(TableCol::Modified | TableCol::Changed | TableCol::Perms) if pending(c) => {
+                            Cell::Opt(TableCol::Modified | TableCol::Changed | TableCol::Perms)
+                                if pending(c) =>
+                            {
                                 ui.weak("…");
                             }
                             Cell::Opt(TableCol::Modified) => {
@@ -611,7 +687,8 @@ impl DiskScanApp {
         let mut idx: Vec<usize> = (0..children.len())
             .filter(|&i| {
                 let c = &children[i];
-                (key.show_dotfiles || !c.name.starts_with('.')) && (hidden.is_empty() || !hidden.contains(&c.path))
+                (key.show_dotfiles || !c.name.starts_with('.'))
+                    && (hidden.is_empty() || !hidden.contains(&c.path))
             })
             .collect();
         let cs = key.sort;
@@ -623,11 +700,22 @@ impl DiskScanApp {
             // Natural, case-insensitive order (see natural_key).
             let mut keyed: Vec<(u8, Vec<u8>, &str, u32)> = idx
                 .par_iter()
-                .map(|&i| (group(&children[i]), natural_key(&children[i].name), children[i].name.as_str(), i as u32))
+                .map(|&i| {
+                    (
+                        group(&children[i]),
+                        natural_key(&children[i].name),
+                        children[i].name.as_str(),
+                        i as u32,
+                    )
+                })
                 .collect();
             keyed.par_sort_unstable_by(|a, b| {
                 let by_name = a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2));
-                let by_name = if cs.ascending { by_name } else { by_name.reverse() };
+                let by_name = if cs.ascending {
+                    by_name
+                } else {
+                    by_name.reverse()
+                };
                 a.0.cmp(&b.0).then(by_name).then(a.3.cmp(&b.3))
             });
             idx = keyed.into_iter().map(|(_, _, _, i)| i as usize).collect();
@@ -646,7 +734,11 @@ impl DiskScanApp {
                         SortColumn::Files => c.file_count as u128,
                         SortColumn::Modified => signed(c.mtime),
                         SortColumn::Changed => signed(c.ctime),
-                        SortColumn::Perms => ((c.mode & 0o7777) as u128) << 64 | (c.uid as u128) << 32 | c.gid as u128,
+                        SortColumn::Perms => {
+                            ((c.mode & 0o7777) as u128) << 64
+                                | (c.uid as u128) << 32
+                                | c.gid as u128
+                        }
                         SortColumn::Name => 0,
                     };
                     let v = if cs.ascending { v } else { VALUE_MAX - v };
@@ -654,10 +746,16 @@ impl DiskScanApp {
                 })
                 .collect();
             keyed.par_sort_unstable();
-            idx = keyed.into_iter().map(|k| (k & 0xFFFF_FFFF) as usize).collect();
+            idx = keyed
+                .into_iter()
+                .map(|k| (k & 0xFFFF_FFFF) as usize)
+                .collect();
         }
         RowOrder {
-            shown_size: idx.iter().map(|&i| children[i].size).fold(0u64, u64::saturating_add),
+            shown_size: idx
+                .iter()
+                .map(|&i| children[i].size)
+                .fold(0u64, u64::saturating_add),
             dotfile_size: children
                 .iter()
                 .filter(|c| c.name.starts_with('.'))
@@ -680,9 +778,20 @@ impl DiskScanApp {
 
     /// Details of the row under the cursor, in the top-right corner.
     fn info_panel(&mut self, ctx: &egui::Context, area: egui::Rect) {
-        let Some(root) = self.root.clone() else { return };
-        let Some(cursor) = self.table.cursor.clone() else { return };
-        let Some(n) = self.current_view_node(&root).children.iter().find(|c| c.path == cursor) else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let Some(cursor) = self.table.cursor.clone() else {
+            return;
+        };
+        let Some(n) = self
+            .current_view_node(&root)
+            .children
+            .iter()
+            .find(|c| c.path == cursor)
+        else {
+            return;
+        };
         let h = HoverInfo {
             path: n.path.clone(),
             size: n.size,
@@ -699,7 +808,11 @@ impl DiskScanApp {
         if !h.is_dir {
             self.ensure_mime_lookup(&h.path);
         }
-        let mime = if h.is_dir { None } else { self.mime_cache.get(&h.path).cloned().flatten() };
+        let mime = if h.is_dir {
+            None
+        } else {
+            self.mime_cache.get(&h.path).cloned().flatten()
+        };
         egui::Area::new("table_info".into())
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::RIGHT_TOP)
@@ -708,14 +821,18 @@ impl DiskScanApp {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_width(INFO_PANEL_WIDTH - 16.0);
                     ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+                        let (r, _) =
+                            ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
                         let color = ui.visuals().text_color();
                         if h.is_dir {
                             draw_folder_icon(ui.painter(), r, color);
                         } else {
                             draw_file_icon(ui.painter(), r, color);
                         }
-                        ui.add(egui::Label::new(egui::RichText::new(short_path(&h.path)).monospace()).wrap());
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(short_path(&h.path)).monospace())
+                                .wrap(),
+                        );
                     });
                     ui.separator();
                     details_grid(
@@ -737,16 +854,16 @@ impl DiskScanApp {
             for (section, rows) in HELP_ROWS {
                 ui.add_space(8.0);
                 ui.strong(tr(section));
-                egui::Grid::new(egui::Id::new("help_grid").with(section)).num_columns(2).spacing([16.0, 4.0]).show(
-                    ui,
-                    |ui| {
+                egui::Grid::new(egui::Id::new("help_grid").with(section))
+                    .num_columns(2)
+                    .spacing([16.0, 4.0])
+                    .show(ui, |ui| {
                         for (keys, desc) in *rows {
                             ui.label(egui::RichText::new(tr(keys)).monospace());
                             ui.label(tr(desc));
                             ui.end_row();
                         }
-                    },
-                );
+                    });
             }
             ui.add_space(10.0);
             ui.button(tr("HELP_CLOSE")).clicked()
@@ -761,7 +878,11 @@ impl DiskScanApp {
         if self.table.show_help {
             // "?" closes the help. Checked before the overlay is drawn, so the press
             // that opened it doesn't also close it.
-            if ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "?"))) {
+            if ctx.input(|i| {
+                i.events
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::Text(t) if t == "?"))
+            }) {
                 self.table.show_help = false;
             }
             return;
@@ -773,11 +894,19 @@ impl DiskScanApp {
         let (arrow, named, typed) = ctx.input(|i| {
             let plain = !i.modifiers.command && !i.modifiers.alt;
             let arrow = arrow_nav(i);
-            let named: Vec<Key> =
-                [Key::PageUp, Key::PageDown, Key::Home, Key::End, Key::Enter, Key::Backspace, Key::Escape, Key::Space]
-                    .into_iter()
-                    .filter(|k| plain && i.key_pressed(*k))
-                    .collect();
+            let named: Vec<Key> = [
+                Key::PageUp,
+                Key::PageDown,
+                Key::Home,
+                Key::End,
+                Key::Enter,
+                Key::Backspace,
+                Key::Escape,
+                Key::Space,
+            ]
+            .into_iter()
+            .filter(|k| plain && i.key_pressed(*k))
+            .collect();
             // Letters and symbols come from text input, so they follow the keyboard
             // layout, and Shift gives the uppercase commands.
             let typed: String = i
@@ -865,7 +994,10 @@ impl DiskScanApp {
             let current = order.key.live && order.key.tree_gen == self.live_gen;
             return current.then_some((&self.live_view, &order.idx[..]));
         }
-        if order.key.live || order.key.tree_gen != self.tree_gen || Some(&order.key.view) != self.view_stack.last() {
+        if order.key.live
+            || order.key.tree_gen != self.tree_gen
+            || Some(&order.key.view) != self.view_stack.last()
+        {
             return None;
         }
         Some((get_node(self.root.as_ref()?, &order.key.view), &order.idx))
@@ -873,7 +1005,12 @@ impl DiskScanApp {
 
     fn cursor_index(&self) -> Option<usize> {
         let (view, idx) = self.listed()?;
-        find_cursor(self.table.cursor.as_ref()?, &self.table.cursor_pos, view, idx)
+        find_cursor(
+            self.table.cursor.as_ref()?,
+            &self.table.cursor_pos,
+            view,
+            idx,
+        )
     }
 
     /// Path of the cursor row, and whether it's a folder.
@@ -902,7 +1039,9 @@ impl DiskScanApp {
     /// Moves the cursor `delta` rows, stopping at the first/last row.
     fn move_cursor(&mut self, delta: isize) {
         let from = self.cursor_index();
-        let Some((view, idx)) = self.listed() else { return };
+        let Some((view, idx)) = self.listed() else {
+            return;
+        };
         let n = idx.len();
         if n == 0 {
             return;
@@ -920,7 +1059,9 @@ impl DiskScanApp {
         if self.scanning {
             return; // opening folders waits for the scan to finish
         }
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         if let Some(vp) = index_path_to(&root, path) {
             self.view_stack.push(vp);
             self.table.cursor = None;
@@ -933,7 +1074,9 @@ impl DiskScanApp {
         if self.scanning {
             return;
         }
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         let view = self.view_stack.last().unwrap().clone();
         if let Some((_, parent_view)) = view.split_last() {
             let left = get_node(&root, &view).path.clone();
@@ -949,7 +1092,9 @@ impl DiskScanApp {
         if self.scanning {
             return;
         }
-        let Some((path, is_dir)) = self.cursor_row() else { return };
+        let Some((path, is_dir)) = self.cursor_row() else {
+            return;
+        };
         if is_dir {
             self.open_dir(&path);
             return;
@@ -991,9 +1136,15 @@ impl DiskScanApp {
             self.table.hidden_cols.insert(col);
             if col.sort_column() == Some(self.contents_sort.column) {
                 self.contents_sort = if self.table.hidden_cols.contains(&TableCol::Size) {
-                    SortState { column: SortColumn::Name, ascending: true }
+                    SortState {
+                        column: SortColumn::Name,
+                        ascending: true,
+                    }
                 } else {
-                    SortState { column: SortColumn::Size, ascending: false }
+                    SortState {
+                        column: SortColumn::Size,
+                        ascending: false,
+                    }
                 };
                 self.table.scroll_pending = true;
             }
@@ -1004,16 +1155,31 @@ impl DiskScanApp {
     /// else the sort column) one visible column left/right. Name stays
     /// last: it takes whatever width is left.
     fn move_col(&mut self, right: bool) {
-        let Some(col) = self.table.active_col.or_else(|| self.contents_sort.column.table_col()) else { return };
-        let TableState { col_order, hidden_cols, .. } = &mut self.table;
+        let Some(col) = self
+            .table
+            .active_col
+            .or_else(|| self.contents_sort.column.table_col())
+        else {
+            return;
+        };
+        let TableState {
+            col_order,
+            hidden_cols,
+            ..
+        } = &mut self.table;
         if hidden_cols.contains(&col) {
             return;
         }
-        let Some(i) = col_order.iter().position(|c| *c == col) else { return };
+        let Some(i) = col_order.iter().position(|c| *c == col) else {
+            return;
+        };
         let visible = |c: &TableCol| !hidden_cols.contains(c);
         // Hop over hidden columns to the next visible one.
         let target = if right {
-            col_order[i + 1..].iter().position(visible).map(|j| i + 1 + j)
+            col_order[i + 1..]
+                .iter()
+                .position(visible)
+                .map(|j| i + 1 + j)
         } else {
             col_order[..i].iter().rposition(visible)
         };
@@ -1025,7 +1191,9 @@ impl DiskScanApp {
 
     /// Space: marks/unmarks the cursor row and moves down, like ncdu.
     fn toggle_mark(&mut self) {
-        let Some(c) = self.table.cursor.clone() else { return };
+        let Some(c) = self.table.cursor.clone() else {
+            return;
+        };
         self.toggle_mark_of(c);
         self.move_cursor(1);
     }
@@ -1082,7 +1250,9 @@ impl DiskScanApp {
     /// r: rescans just the folder being viewed; the result is spliced into
     /// the full tree when done (see finish_graft).
     pub(crate) fn rescan_current(&mut self) {
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         let target = self.current_view_node(&root).path.clone();
         let graft = Graft {
             target: target.clone(),
@@ -1098,9 +1268,13 @@ impl DiskScanApp {
     /// of the folder's old contents and returns to where the user was.
     /// False if no folder rescan was in progress.
     pub(crate) fn finish_graft(&mut self, node: Node) -> bool {
-        let Some(g) = self.graft.take() else { return false };
+        let Some(g) = self.graft.take() else {
+            return false;
+        };
         self.root = None;
-        let Some(mut full) = self.full_root.take() else { return false };
+        let Some(mut full) = self.full_root.take() else {
+            return false;
+        };
         if full.path == g.target {
             full = Arc::new(node);
         } else {
@@ -1109,7 +1283,9 @@ impl DiskScanApp {
         self.full_root = Some(full);
         self.rebuild_view_tree();
         self.restore_view(&g.view_paths);
-        self.free_space = g.free_space.and(self.root.as_ref().and_then(|r| fs_space(&r.path)));
+        self.free_space = g
+            .free_space
+            .and(self.root.as_ref().and_then(|r| fs_space(&r.path)));
         self.table.cursor = g.cursor;
         self.table.scroll_pending = true;
         true
@@ -1139,7 +1315,12 @@ mod perf {
         let children: Vec<Node> = (0..300_000u64)
             .map(|i| {
                 let path = format!("/t/many/file_{:06}.dat", (i * 7919) % 300_000);
-                test_node(&path, [0, 0, 4096, 8192, 20480, 69632][(i % 6) as usize], false, vec![])
+                test_node(
+                    &path,
+                    [0, 0, 4096, 8192, 20480, 69632][(i % 6) as usize],
+                    false,
+                    vec![],
+                )
             })
             .collect();
         let folder = test_node("/t/many", 0, true, children);
@@ -1161,7 +1342,11 @@ mod perf {
             };
             let t = Instant::now();
             let order = app.row_order(&folder, key);
-            eprintln!("{column:?} asc={ascending}: {:?} ({} rows)", t.elapsed(), order.idx.len());
+            eprintln!(
+                "{column:?} asc={ascending}: {:?} ({} rows)",
+                t.elapsed(),
+                order.idx.len()
+            );
         }
     }
 }
@@ -1185,7 +1370,10 @@ mod cursor_tests {
         let key = OrderKey {
             tree_gen: app.tree_gen,
             view: vec![],
-            sort: SortState { column: SortColumn::Size, ascending: false },
+            sort: SortState {
+                column: SortColumn::Size,
+                ascending: false,
+            },
             dirs_first: false,
             show_dotfiles: true,
             hidden: 0,
@@ -1218,7 +1406,10 @@ mod cursor_tests {
         let mut app = app_with(&["a", "b", "c", "d"]);
         app.table.marked.insert(PathBuf::from("/t/c"));
         app.table.marked.insert(PathBuf::from("/t/a"));
-        assert_eq!(app.selected_targets(), vec![PathBuf::from("/t/a"), PathBuf::from("/t/c")]);
+        assert_eq!(
+            app.selected_targets(),
+            vec![PathBuf::from("/t/a"), PathBuf::from("/t/c")]
+        );
         app.table.cursor = Some(PathBuf::from("/t/b"));
         app.table_forget(&[PathBuf::from("/t/b"), PathBuf::from("/t/c")]);
         assert_eq!(cursor(&app), "d");
@@ -1271,7 +1462,10 @@ mod live_tests {
     fn live_rows_follow_the_scan_and_the_cursor_stays_put() {
         let mut app = DiskScanApp::default();
         app.scanning = true;
-        app.contents_sort = SortState { column: SortColumn::Size, ascending: false };
+        app.contents_sort = SortState {
+            column: SortColumn::Size,
+            ascending: false,
+        };
         app.partial_root = test_node("/scan", 0, true, vec![folder("a", 30), folder("b", 20)]);
         refresh(&mut app);
         assert_eq!(names(&app), ["a", "b"]);
@@ -1282,7 +1476,10 @@ mod live_tests {
         app.partial_root.children.push(folder("c", 40));
         refresh(&mut app);
         assert_eq!(names(&app), ["b", "c", "a"]);
-        assert_eq!(app.cursor_row().map(|(p, _)| p), Some(PathBuf::from("/scan/b")));
+        assert_eq!(
+            app.cursor_row().map(|(p, _)| p),
+            Some(PathBuf::from("/scan/b"))
+        );
         // The preview tree re-sorts itself as data arrives; until the next
         // refresh the table keeps showing its snapshot, row for row.
         app.partial_root.children.reverse();

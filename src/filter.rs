@@ -39,21 +39,31 @@ impl CompiledFilter {
             if s.trim().is_empty() {
                 Ok(None)
             } else {
-                parse_size(s).map(Some).map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e]))
+                parse_size(s)
+                    .map(Some)
+                    .map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e]))
             }
         };
         let date = |s: &str, what: &str, end_of_day: bool| -> Result<Option<i64>, String> {
             if s.trim().is_empty() {
                 Ok(None)
             } else {
-                parse_date(s, end_of_day).map(Some).map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e]))
+                parse_date(s, end_of_day)
+                    .map(Some)
+                    .map_err(|e| trf("ERR_FIELD_PREFIX", &[what, &e]))
             }
         };
         let c = CompiledFilter {
             names: split_name_patterns(&f.name)
                 .iter()
                 .flat_map(|p| expand_alternatives(p))
-                .map(|p| if f.case_sensitive { p } else { p.to_lowercase() })
+                .map(|p| {
+                    if f.case_sensitive {
+                        p
+                    } else {
+                        p.to_lowercase()
+                    }
+                })
                 .collect(),
             case_sensitive: f.case_sensitive,
             min_size: size(&f.min_size, &tr("FILTER_ERR_MIN_SIZE"))?,
@@ -75,8 +85,9 @@ impl CompiledFilter {
 
     /// True if file `n` passes every filled-in field.
     pub(crate) fn matches_file(&self, n: &Node) -> bool {
-        let in_range =
-            |v: i64, lo: Option<i64>, hi: Option<i64>| lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v <= hi);
+        let in_range = |v: i64, lo: Option<i64>, hi: Option<i64>| {
+            lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v <= hi)
+        };
         if self.min_size.is_some_and(|m| n.size < m) || self.max_size.is_some_and(|m| n.size > m) {
             return false;
         }
@@ -92,11 +103,18 @@ impl CompiledFilter {
             return false;
         }
         if !self.names.is_empty() {
-            let name = if self.case_sensitive { n.name.clone() } else { n.name.to_lowercase() };
-            let hit = self
-                .names
-                .iter()
-                .any(|p| if p.contains(['*', '?']) { glob_match(p, &name) } else { name.contains(p.as_str()) });
+            let name = if self.case_sensitive {
+                n.name.clone()
+            } else {
+                n.name.to_lowercase()
+            };
+            let hit = self.names.iter().any(|p| {
+                if p.contains(['*', '?']) {
+                    glob_match(p, &name)
+                } else {
+                    name.contains(p.as_str())
+                }
+            });
             if !hit {
                 return false;
             }
@@ -156,11 +174,19 @@ pub(crate) fn split_name_patterns(s: &str) -> Vec<String> {
 /// Expands `*.[mkv,mp4]` (or `*.{mkv,mp4}`) into `*.mkv`, `*.mp4`. Brackets
 /// here are comma-separated alternatives, not regex-style character classes.
 pub(crate) fn expand_alternatives(p: &str) -> Vec<String> {
-    let Some(open) = p.find(['[', '{']) else { return vec![p.to_string()] };
+    let Some(open) = p.find(['[', '{']) else {
+        return vec![p.to_string()];
+    };
     let close_ch = if p.as_bytes()[open] == b'[' { ']' } else { '}' };
-    let Some(close) = p[open..].find(close_ch).map(|i| open + i) else { return vec![p.to_string()] };
+    let Some(close) = p[open..].find(close_ch).map(|i| open + i) else {
+        return vec![p.to_string()];
+    };
     let (head, inner, tail) = (&p[..open], &p[open + 1..close], &p[close + 1..]);
-    inner.split(',').map(str::trim).flat_map(|alt| expand_alternatives(&format!("{head}{alt}{tail}"))).collect()
+    inner
+        .split(',')
+        .map(str::trim)
+        .flat_map(|alt| expand_alternatives(&format!("{head}{alt}{tail}")))
+        .collect()
 }
 
 /// Whole-string wildcard match: `*` = any run of characters, `?` = one.
@@ -189,9 +215,13 @@ pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
 /// "1.5G", "500 MB", "100k", "4096" (plain bytes). Units are powers of 1024.
 pub(crate) fn parse_size(s: &str) -> Result<u64, String> {
     let s = s.trim().to_lowercase();
-    let split = s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len());
+    let split = s
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(s.len());
     let (num, unit) = (s[..split].trim(), s[split..].trim());
-    let n: f64 = num.parse().map_err(|_| trf("ERR_SIZE_FORMAT", &[s.as_str()]))?;
+    let n: f64 = num
+        .parse()
+        .map_err(|_| trf("ERR_SIZE_FORMAT", &[s.as_str()]))?;
     let mult: u64 = match unit.trim_end_matches("ib").trim_end_matches('b') {
         "" => 1,
         "k" => 1 << 10,
@@ -211,10 +241,19 @@ pub(crate) fn parse_date(s: &str, end_of_day: bool) -> Result<i64, String> {
     let dt = if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
         dt
     } else {
-        let d = NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| trf("ERR_DATE_FORMAT", &[s]))?;
-        if end_of_day { d.and_hms_opt(23, 59, 59).unwrap() } else { d.and_hms_opt(0, 0, 0).unwrap() }
+        let d =
+            NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| trf("ERR_DATE_FORMAT", &[s]))?;
+        if end_of_day {
+            d.and_hms_opt(23, 59, 59).unwrap()
+        } else {
+            d.and_hms_opt(0, 0, 0).unwrap()
+        }
     };
-    Local.from_local_datetime(&dt).earliest().map(|d| d.timestamp()).ok_or_else(|| trf("ERR_DATE_TZ", &[s]))
+    Local
+        .from_local_datetime(&dt)
+        .earliest()
+        .map(|d| d.timestamp())
+        .ok_or_else(|| trf("ERR_DATE_TZ", &[s]))
 }
 
 /// Copy of `n` keeping only files that match `f`, with folder sizes and file
@@ -229,7 +268,11 @@ pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) ->
     if !n.is_dir {
         return keep(n).then(|| n.clone());
     }
-    let mut children: Vec<Node> = n.children.par_iter().filter_map(|c| deep(|| filter_tree_by(c, keep))).collect();
+    let mut children: Vec<Node> = n
+        .children
+        .par_iter()
+        .filter_map(|c| deep(|| filter_tree_by(c, keep)))
+        .collect();
     if children.is_empty() {
         return None;
     }
@@ -237,7 +280,10 @@ pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) ->
     Some(Node {
         name: n.name.clone(),
         path: n.path.clone(),
-        size: children.iter().map(|c| c.size).fold(0u64, u64::saturating_add),
+        size: children
+            .iter()
+            .map(|c| c.size)
+            .fold(0u64, u64::saturating_add),
         file_count: children.iter().map(|c| c.file_count).sum(),
         is_dir: true,
         children,
@@ -256,9 +302,18 @@ mod tests {
 
     #[test]
     fn name_patterns_split_and_quote() {
-        assert_eq!(split_name_patterns("*.iso, *.[mkv,mp4] backup"), vec!["*.iso", "*.[mkv,mp4]", "backup"]);
+        assert_eq!(
+            split_name_patterns("*.iso, *.[mkv,mp4] backup"),
+            vec!["*.iso", "*.[mkv,mp4]", "backup"]
+        );
         assert_eq!(split_name_patterns(r#""sp ace*" x"#), vec!["sp ace*", "x"]);
-        assert_eq!(split_name_patterns(r#"" leading space""#), vec![" leading space"]);
-        assert_eq!(split_name_patterns(r"my\ file a\,b"), vec!["my file", "a,b"]);
+        assert_eq!(
+            split_name_patterns(r#"" leading space""#),
+            vec![" leading space"]
+        );
+        assert_eq!(
+            split_name_patterns(r"my\ file a\,b"),
+            vec!["my file", "a,b"]
+        );
     }
 }

@@ -26,7 +26,8 @@ pub(crate) fn read_kde_colors() -> Option<KdeColors> {
     let content = std::fs::read_to_string(home_dir().join(".config/kdeglobals")).ok()?;
 
     let mut section = String::new();
-    let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) = (None, None, None, None, None);
+    let (mut window_bg, mut view_bg, mut text, mut accent, mut button_bg) =
+        (None, None, None, None, None);
 
     for line in content.lines() {
         let line = line.trim();
@@ -102,7 +103,10 @@ pub(crate) fn apply_theme(ctx: &egui::Context) {
 /// A system font file (and face index, for collections) matching the
 /// fontconfig `pattern`, or None.
 fn system_font(pattern: &str) -> Option<(PathBuf, u32)> {
-    let out = std::process::Command::new("fc-match").args(["-f", "%{file}|%{index}", pattern]).output().ok()?;
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}|%{index}", pattern])
+        .output()
+        .ok()?;
     let text = String::from_utf8(out.stdout).ok()?;
     let (file, index) = text.split_once('|')?;
     let file = PathBuf::from(file);
@@ -120,7 +124,9 @@ pub(crate) fn install_fallback_fonts(ctx: &egui::Context, korean: bool) {
     let mut fonts = egui::FontDefinitions::default();
     let mut add = |id: &str, font: Option<(PathBuf, u32)>| {
         let Some((path, index)) = font else { return };
-        let Ok(bytes) = std::fs::read(path) else { return };
+        let Ok(bytes) = std::fs::read(path) else {
+            return;
+        };
         let mut data = egui::FontData::from_owned(bytes);
         data.index = index;
         fonts.font_data.insert(id.into(), std::sync::Arc::new(data));
@@ -156,10 +162,18 @@ mod tests {
         let has = |c: char| ctx.fonts_mut(|f| f.has_glyph(&font, c));
         assert!(has('ü'));
         // Only checked where a CJK font is installed.
-        if std::process::Command::new("fc-list").arg(":lang=ja").output().is_ok_and(|o| !o.stdout.is_empty()) {
+        if std::process::Command::new("fc-list")
+            .arg(":lang=ja")
+            .output()
+            .is_ok_and(|o| !o.stdout.is_empty())
+        {
             assert!(has('日') && has('本') && has('語'));
         }
-        if std::process::Command::new("fc-list").arg(":lang=ko").output().is_ok_and(|o| !o.stdout.is_empty()) {
+        if std::process::Command::new("fc-list")
+            .arg(":lang=ko")
+            .output()
+            .is_ok_and(|o| !o.stdout.is_empty())
+        {
             assert!(!has('한'));
             install_fallback_fonts(&ctx, true);
             let _ = ctx.run_ui(Default::default(), |_| {});
