@@ -734,7 +734,7 @@ impl DiskScanApp {
         let mut processed = 0u32;
         if let Some(rx) = &self.scan_rx {
             loop {
-                if processed % 64 == 0 && processed > 0 && drain_start.elapsed() >= FRAME_BUDGET {
+                if processed.is_multiple_of(64) && processed > 0 && drain_start.elapsed() >= FRAME_BUDGET {
                     return true;
                 }
                 processed += 1;
@@ -829,21 +829,20 @@ impl eframe::App for DiskScanApp {
 
         // Chart view, after a scan: stats of the highlighted slice (else the
         // folder viewed) in the top-left corner.
-        if !self.scanning && !self.summary_view {
-            if let Some(root) = &self.root {
-                let view_node = self.current_view_node(root);
-                let selected = self.selected_rel().and_then(|rel| try_get_node(view_node, rel));
-                egui::Area::new("folder_stats_overlay".into())
-                    .order(egui::Order::Foreground)
-                    .interactable(false)
-                    .fixed_pos(area.left_top() + Vec2::new(8.0, 8.0))
-                    .show(&ctx, |ui| {
-                        let n = selected.unwrap_or(view_node);
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                        ui.strong(short_path(&n.path));
-                        folder_stats_ui(ui, n);
-                    });
-            }
+        if !self.scanning && !self.summary_view
+            && let Some(root) = &self.root {
+            let view_node = self.current_view_node(root);
+            let selected = self.selected_rel().and_then(|rel| try_get_node(view_node, rel));
+            egui::Area::new("folder_stats_overlay".into())
+                .order(egui::Order::Foreground)
+                .interactable(false)
+                .fixed_pos(area.left_top() + Vec2::new(8.0, 8.0))
+                .show(&ctx, |ui| {
+                    let n = selected.unwrap_or(view_node);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    ui.strong(short_path(&n.path));
+                    folder_stats_ui(ui, n);
+                });
         }
 
         // Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
@@ -883,14 +882,13 @@ impl eframe::App for DiskScanApp {
             if typed.contains('r') {
                 self.rescan_current();
             }
-            if typed.contains('D') || typed.contains('T') {
-                if let Some(target) = self.selected_slice_path() {
-                    if typed.contains('D') {
-                        self.ask_delete(vec![target]);
-                    } else {
-                        self.queue_trash(vec![target]);
-                        ctx.request_repaint();
-                    }
+            if (typed.contains('D') || typed.contains('T'))
+                && let Some(target) = self.selected_slice_path() {
+                if typed.contains('D') {
+                    self.ask_delete(vec![target]);
+                } else {
+                    self.queue_trash(vec![target]);
+                    ctx.request_repaint();
                 }
             }
         }

@@ -390,7 +390,7 @@ pub(crate) fn show_path(p: &Path) -> String {
 
 /// An I/O error as a plain-language line naming `path`.
 pub(crate) fn friendly_io_error(path: &Path, e: &std::io::Error) -> String {
-    trf("ERR_IO_LINE", &[&show_path(&path), &io_reason(e)])
+    trf("ERR_IO_LINE", &[&show_path(path), &io_reason(e)])
 }
 
 /// Plain-language reason for an I/O error ("not found", "don't have
@@ -599,7 +599,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         .collect();
 
     let mut children = children;
-    children.sort_by(|a, b| b.size.cmp(&a.size));
+    children.sort_by_key(|c| std::cmp::Reverse(c.size));
     // The folder's own entry uses space too. Saturating: apparent sizes of
     // sparse files can add up past u64.
     let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));

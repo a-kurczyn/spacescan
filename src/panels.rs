@@ -147,7 +147,7 @@ impl DiskScanApp {
                     if !path_input_was_focused {
                         let current = current_path
                             .as_ref()
-                            .map(|p| show_path(&p))
+                            .map(|p| show_path(p))
                             .unwrap_or_default();
                         if path_input != current {
                             path_input = current;
@@ -778,22 +778,9 @@ impl DiskScanApp {
         draw_hub_text(&painter, center, hub_radius, &self.partial_root.name, self.partial_root.size);
 
         // Free space is shown once the first folder has arrived.
-        let has_content = !self.partial_root.children.is_empty();
-        let (live_total_capacity, live_free_bytes) = if has_content { self.free_space.unwrap_or((0, 0)) } else { (0, 0) };
-        let mut segs = Vec::new();
-        layout_sunburst(
-            &self.partial_root,
-            vec![],
-            0.0,
-            std::f32::consts::TAU,
-            0,
-            &self.hidden,
-            live_free_bytes,
-            live_total_capacity,
-            &self.settings,
-            self.chart_order,
-            &mut segs,
-        );
+        let free = if self.partial_root.children.is_empty() { None } else { self.free_space };
+        let opts = LayoutOpts { hidden: &self.hidden, settings: &self.settings, order: self.chart_order };
+        let segs = layout_sunburst(&self.partial_root, free, opts);
         for seg in &segs {
             self.draw_segment(&painter, seg, center, hub_radius, ring_thickness, free_color);
         }
@@ -958,14 +945,14 @@ impl DiskScanApp {
                 painter.text(
                     Pos2::new(label_x, label_y[i] + 2.0 + line_h),
                     egui::Align2::LEFT_TOP,
-                    format!("{} · {}", format!("{pct:.1}%"), human_size(row.size)),
+                    format!("{pct:.1}% · {}", human_size(row.size)),
                     font.clone(),
                     ui.visuals().weak_text_color(),
                 );
 
                 let hit = hit.on_hover_ui(|ui| {
                     ui.strong(self.cats.label(row.cat));
-                    ui.label(format!("{} · {} · {} {}", human_size(row.size), format!("{pct:.1}%"), format_count(row.files), tr("CAT_FILES")));
+                    ui.label(format!("{} · {pct:.1}% · {} {}", human_size(row.size), format_count(row.files), tr("CAT_FILES")));
                     let exts: Vec<String> = row
                         .exts
                         .iter()
@@ -991,10 +978,10 @@ impl DiskScanApp {
 
     /// Draws one slice of the chart in its color.
     fn draw_segment(&self, painter: &egui::Painter, seg: &Segment, center: Pos2, hub_radius: f32, ring_thickness: f32, free_color: Color32) {
-        let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
+        let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
         let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
         let color = if seg.is_free { free_color } else { segment_color(seg, top_hue, &self.settings) };
-        draw_arc_mesh(painter, center, r0, r1, seg.start_angle, seg.end_angle, color, &self.settings);
+        draw_arc_mesh(painter, center, radii, (seg.start_angle, seg.end_angle), color, &self.settings);
     }
 
     /// The sunburst for the folder being viewed, with hover details,
@@ -1019,24 +1006,12 @@ impl DiskScanApp {
 
         // The hub; clicking it goes up a level.
         painter.circle_filled(center, hub_radius, bg);
-        draw_hub_text(&painter, center, hub_radius, &view_node.name, view_node.size);
+        draw_hub_text(painter, center, hub_radius, &view_node.name, view_node.size);
 
         // Free space only on the scanned folder's own chart.
-        let (root_total_capacity, root_free_bytes) = if self.view_stack.len() == 1 { self.free_space.unwrap_or((0, 0)) } else { (0, 0) };
-        let mut segs = Vec::new();
-        layout_sunburst(
-            view_node,
-            vec![],
-            0.0,
-            std::f32::consts::TAU,
-            0,
-            &self.hidden,
-            root_free_bytes,
-            root_total_capacity,
-            &self.settings,
-            self.chart_order,
-            &mut segs,
-        );
+        let free = if self.view_stack.len() == 1 { self.free_space } else { None };
+        let opts = LayoutOpts { hidden: &self.hidden, settings: &self.settings, order: self.chart_order };
+        let segs = layout_sunburst(view_node, free, opts);
 
         let pointer = ctx.input(|i| i.pointer.hover_pos());
         let mut new_hover: Option<HoverInfo> = None;
@@ -1099,31 +1074,29 @@ impl DiskScanApp {
             .filter(|s| !s.is_free)
             .map(|s| (s.idx_path.clone(), s.start_angle))
             .collect();
-        if let Some(rel) = self.selected_rel() {
-            if let Some(seg) = segs.iter().find(|s| !s.is_free && s.idx_path == *rel) {
-                let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
-                let stroke = egui::Stroke::new(1.5, ui.visuals().strong_text_color().gamma_multiply(0.85));
-                draw_arc_outline(&painter, center, r0, r1, seg.start_angle, seg.end_angle, stroke);
-            }
+        if let Some(rel) = self.selected_rel()
+            && let Some(seg) = segs.iter().find(|s| !s.is_free && s.idx_path == *rel) {
+            let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
+            let stroke = egui::Stroke::new(1.5, ui.visuals().strong_text_color().gamma_multiply(0.85));
+            draw_arc_outline(painter, center, radii, (seg.start_angle, seg.end_angle), stroke);
         }
 
-        if response.clicked() {
-            if let Some(p) = pointer {
-                let dist = (p - center).length();
-                if dist <= hub_radius {
-                    if self.view_stack.len() > 1 {
-                        self.view_stack.pop();
-                    }
-                } else if let Some(ip) = &hover_idx_path {
-                    if is_other_marker(ip) {
-                        self.open_other_bucket(ip);
-                    } else {
-                        let node = get_node(view_node, ip);
-                        if node.is_dir {
-                            let mut vp = self.view_stack.last().unwrap().clone();
-                            vp.extend(ip.iter());
-                            self.view_stack.push(vp);
-                        }
+        if response.clicked()
+            && let Some(p) = pointer {
+            let dist = (p - center).length();
+            if dist <= hub_radius {
+                if self.view_stack.len() > 1 {
+                    self.view_stack.pop();
+                }
+            } else if let Some(ip) = &hover_idx_path {
+                if is_other_marker(ip) {
+                    self.open_other_bucket(ip);
+                } else {
+                    let node = get_node(view_node, ip);
+                    if node.is_dir {
+                        let mut vp = self.view_stack.last().unwrap().clone();
+                        vp.extend(ip.iter());
+                        self.view_stack.push(vp);
                     }
                 }
             }
@@ -1143,7 +1116,7 @@ impl DiskScanApp {
                 return;
             };
             if ui.button(tr("MENU_ZOOM")).clicked() {
-                if let Some(vp) = index_path_to(&root, &target) {
+                if let Some(vp) = index_path_to(root, &target) {
                     self.view_stack.push(vp);
                 }
                 ui.close();

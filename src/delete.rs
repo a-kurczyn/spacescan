@@ -61,8 +61,8 @@ fn mount_guard(path: &Path) -> Result<(), String> {
     if mounts.is_empty() {
         return Ok(());
     }
-    let list: Vec<String> = mounts.iter().map(|m| show_path(&m)).collect();
-    Err(trf("ERR_CONTAINS_MOUNT", &[&show_path(&path), &list.join(", ")]))
+    let list: Vec<String> = mounts.iter().map(|m| show_path(m)).collect();
+    Err(trf("ERR_CONTAINS_MOUNT", &[&show_path(path), &list.join(", ")]))
 }
 
 /// Err (for the Issues log) if `path` is inside a trash folder or contains
@@ -77,7 +77,7 @@ fn trash_guard(path: &Path) -> Result<(), String> {
         // parent is checked too.
         let inside = canonical.starts_with(&f) || canonical_parent.as_ref().is_some_and(|p| p.starts_with(&f));
         if inside || f.starts_with(&canonical) {
-            return Err(trf("ERR_TRASH_IN_TRASH", &[&show_path(&path)]));
+            return Err(trf("ERR_TRASH_IN_TRASH", &[&show_path(path)]));
         }
     }
     Ok(())

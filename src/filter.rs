@@ -69,15 +69,13 @@ impl CompiledFilter {
             return false;
         }
         // A file whose date is unknown fails any limit on that date.
-        if self.min_modified.is_some() || self.max_modified.is_some() {
-            if n.mtime == NO_TIME || !in_range(n.mtime, self.min_modified, self.max_modified) {
-                return false;
-            }
+        if (self.min_modified.is_some() || self.max_modified.is_some())
+            && (n.mtime == NO_TIME || !in_range(n.mtime, self.min_modified, self.max_modified)) {
+            return false;
         }
-        if self.min_created.is_some() || self.max_created.is_some() {
-            if n.btime == 0 || !in_range(n.btime, self.min_created, self.max_created) {
-                return false;
-            }
+        if (self.min_created.is_some() || self.max_created.is_some())
+            && (n.btime == 0 || !in_range(n.btime, self.min_created, self.max_created)) {
+            return false;
         }
         if !self.names.is_empty() {
             let name = if self.case_sensitive { n.name.clone() } else { n.name.to_lowercase() };
@@ -218,7 +216,7 @@ pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) ->
     if children.is_empty() {
         return None;
     }
-    children.sort_by(|a, b| b.size.cmp(&a.size));
+    children.sort_by_key(|c| std::cmp::Reverse(c.size));
     Some(Node {
         name: n.name.clone(),
         path: n.path.clone(),

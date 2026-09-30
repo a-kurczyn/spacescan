@@ -316,7 +316,7 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
     };
     let (mut lo, mut hi) = (0, chars.len());
     while lo < hi {
-        let mid = (lo + hi + 1) / 2;
+        let mid = (lo + hi).div_ceil(2);
         if fits(&cut(mid)) { lo = mid } else { hi = mid - 1 }
     }
     cut(lo)

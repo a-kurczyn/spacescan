@@ -88,22 +88,37 @@ pub(crate) fn cmp_names(a: &Node, b: &Node) -> std::cmp::Ordering {
     natural_cmp(&a.name, &b.name)
 }
 
-/// Lays out the rings below `node` between `start_angle` and `end_angle`,
-/// appending one Segment per slice to `out`. On the first ring, free space
-/// (`extra_free_bytes` of `total_capacity`) takes its share at the end.
-pub(crate) fn layout_sunburst(
+/// What the chart layout needs besides the tree.
+#[derive(Clone, Copy)]
+pub(crate) struct LayoutOpts<'a> {
+    /// Items hidden from the chart.
+    pub(crate) hidden: &'a HashSet<PathBuf>,
+    pub(crate) settings: &'a Settings,
+    pub(crate) order: ChartOrder,
+}
+
+/// The slices of the chart of `node`, around the full circle. `free` is the
+/// drive's (capacity, free bytes), shown as a free-space slice.
+pub(crate) fn layout_sunburst(node: &Node, free: Option<(u64, u64)>, opts: LayoutOpts) -> Vec<Segment> {
+    let mut out = Vec::new();
+    layout_ring(node, vec![], (0.0, std::f32::consts::TAU), 0, free.unwrap_or((0, 0)), opts, &mut out);
+    out
+}
+
+/// Lays out ring `ring` (and the rings beyond it) for `node`'s children
+/// between two angles, appending one Segment per slice to `out`. On the
+/// first ring, free space (`free` = capacity, free bytes) takes its share
+/// at the end.
+fn layout_ring(
     node: &Node,
     idx_path: Vec<usize>,
-    start_angle: f32,
-    end_angle: f32,
+    (start_angle, end_angle): (f32, f32),
     ring: usize,
-    hidden: &HashSet<PathBuf>,
-    extra_free_bytes: u64,
-    total_capacity: u64,
-    settings: &Settings,
-    order: ChartOrder,
+    (total_capacity, extra_free_bytes): (u64, u64),
+    opts: LayoutOpts,
     out: &mut Vec<Segment>,
 ) {
+    let LayoutOpts { hidden, settings, order } = opts;
     if ring >= settings.max_render_depth {
         return;
     }
@@ -192,7 +207,7 @@ pub(crate) fn layout_sunburst(
             mode: Some(child.mode),
         });
         if child.is_dir && !child.children.is_empty() {
-            layout_sunburst(child, cp, a0, a1, ring + 1, hidden, 0, 0, settings, order, out);
+            layout_ring(child, cp, (a0, a1), ring + 1, (0, 0), opts, out);
         }
     }
     if rest_size > 0 {
@@ -331,10 +346,9 @@ pub(crate) fn arc_dir(t: f32) -> Vec2 {
     Vec2::new(s, -c)
 }
 
-/// Outline of a slice between radii `r0` and `r1` and angles `a0` and
-/// `a1`: the outer arc forward, then the inner arc back, `steps` segments
-/// each.
-fn slice_outline(center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, steps: usize) -> Vec<Pos2> {
+/// Outline of a slice between two radii and two angles: the outer arc
+/// forward, then the inner arc back, `steps` segments each.
+fn slice_outline(center: Pos2, (r0, r1): (f32, f32), (a0, a1): (f32, f32), steps: usize) -> Vec<Pos2> {
     let arc = |r: f32| (0..=steps).map(move |i| center + arc_dir(a0 + (a1 - a0) * (i as f32 / steps as f32)) * r);
     let mut pts: Vec<Pos2> = arc(r1).collect();
     let mut inner: Vec<Pos2> = arc(r0).collect();
@@ -344,22 +358,14 @@ fn slice_outline(center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, steps: usize)
 }
 
 /// Draws the outline of one slice.
-pub(crate) fn draw_arc_outline(painter: &egui::Painter, center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, stroke: egui::Stroke) {
-    let steps = (((a1 - a0).abs() * r1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
-    painter.add(egui::Shape::closed_line(slice_outline(center, r0, r1, a0, a1, steps), stroke));
+pub(crate) fn draw_arc_outline(painter: &egui::Painter, center: Pos2, radii: (f32, f32), angles: (f32, f32), stroke: egui::Stroke) {
+    let steps = (((angles.1 - angles.0).abs() * radii.1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
+    painter.add(egui::Shape::closed_line(slice_outline(center, radii, angles, steps), stroke));
 }
 
 /// Draws one slice, filled with `color` and with a thin dark border.
-pub(crate) fn draw_arc_mesh(
-    painter: &egui::Painter,
-    center: Pos2,
-    r0: f32,
-    r1: f32,
-    a0: f32,
-    a1: f32,
-    color: Color32,
-    settings: &Settings,
-) {
+pub(crate) fn draw_arc_mesh(painter: &egui::Painter, center: Pos2, radii: (f32, f32), angles: (f32, f32), color: Color32, settings: &Settings) {
+    let ((r0, r1), (a0, a1)) = (radii, angles);
     let span = (a1 - a0).abs();
     // One segment every few pixels of the outer arc, so curves stay smooth.
     let arc_len_px = span * r1.max(1.0);
@@ -392,7 +398,7 @@ pub(crate) fn draw_arc_mesh(
     painter.add(egui::Shape::mesh(mesh));
 
     let stroke = egui::Stroke::new(settings.stroke_width, Color32::from_black_alpha(settings.stroke_alpha));
-    painter.add(egui::Shape::closed_line(slice_outline(center, r0, r1, a0, a1, steps), stroke));
+    painter.add(egui::Shape::closed_line(slice_outline(center, radii, angles, steps), stroke));
 }
 
 #[cfg(test)]
@@ -400,8 +406,13 @@ mod tests {
     use super::*;
 
     fn layout(root: &Node, span: f32) -> Vec<Segment> {
+        layout_with(root, span, &Settings::default())
+    }
+
+    fn layout_with(root: &Node, span: f32, settings: &Settings) -> Vec<Segment> {
         let mut segs = Vec::new();
-        layout_sunburst(root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &Settings::default(), ChartOrder::Size, &mut segs);
+        let opts = LayoutOpts { hidden: &HashSet::new(), settings, order: ChartOrder::Size };
+        layout_ring(root, vec![], (0.0, span), 0, (0, 0), opts, &mut segs);
         segs
     }
 
@@ -420,8 +431,7 @@ mod tests {
         settings.min_segment_angle_deg = 1.0;
         settings.max_children_shown = 360;
         let span = 160f32.to_radians();
-        let mut segs = Vec::new();
-        layout_sunburst(&root, vec![], 0.0, span, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
+        let segs = layout_with(&root, span, &settings);
         let shown: Vec<&Segment> = segs.iter().filter(|s| !s.is_other).collect();
         // 159 slots, but the 30-GB movies would be drawn under 1° by then.
         let w = |s: &Segment| s.end_angle - s.start_angle;
@@ -479,8 +489,7 @@ mod tests {
         settings.max_children_shown = usize::MAX;
         let n = 5000;
         let root = test_node("/m", n, true, (0..n).map(|i| test_node(&format!("/m/{i}"), 1, false, vec![])).collect());
-        let mut segs = Vec::new();
-        layout_sunburst(&root, vec![], 0.0, std::f32::consts::TAU, 0, &HashSet::new(), 0, 0, &settings, ChartOrder::Size, &mut segs);
+        let segs = layout_with(&root, std::f32::consts::TAU, &settings);
         assert_eq!(segs.len(), 360);
     }
 }
