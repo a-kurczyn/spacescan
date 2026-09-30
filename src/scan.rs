@@ -1097,3 +1097,37 @@ mod live_category_tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+#[cfg(test)]
+mod scan_perf {
+    use super::*;
+
+    /// Scan timing on the folder in $SPACEMAP_BENCH (run with
+    /// `SPACEMAP_BENCH=<dir> cargo test --release scan_perf -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn scan_bench() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").expect("set SPACEMAP_BENCH"));
+        for run in 0..5 {
+            let (tx, rx) = channel();
+            let drain = std::thread::spawn(move || rx.into_iter().count());
+            let ctx = ScanCtx {
+                root_dev: std::fs::metadata(&dir).unwrap().dev(),
+                progress: &tx,
+                counter: &Default::default(),
+                cancel: &Default::default(),
+                progress_interval: 512,
+                apparent_size: false,
+                hard_links: Default::default(),
+                saw_hangul: &Default::default(),
+            };
+            let t = Instant::now();
+            let tree = scan_dir(&dir, &ctx);
+            let took = t.elapsed();
+            drop(tx);
+            let msgs = drain.join().unwrap();
+            eprintln!("run {run}: {took:?}, {} files, {msgs} messages", tree.file_count);
+        }
+    }
+}
