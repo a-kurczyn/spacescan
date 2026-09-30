@@ -101,6 +101,9 @@ Bug reports and pull requests are welcome. Please read
 sign-off (`git commit -s`), and changes reach `main` after review by the
 maintainer.
 
+spacemap is developed with the help of AI coding tools; every change is
+reviewed by the maintainer.
+
 ## License
 
 Copyright (C) 2026 Alejandro Kurczyn
