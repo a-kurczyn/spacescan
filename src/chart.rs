@@ -2,6 +2,8 @@
 
 use super::*;
 
+/// The node at `idx_path` (child indices from `root`), stopping early at an
+/// index that doesn't exist.
 pub(crate) fn get_node<'a>(root: &'a Node, idx_path: &[usize]) -> &'a Node {
     let mut n = root;
     for &i in idx_path {
@@ -12,6 +14,7 @@ pub(crate) fn get_node<'a>(root: &'a Node, idx_path: &[usize]) -> &'a Node {
     n
 }
 
+/// One slice of the sunburst.
 pub(crate) struct Segment {
     pub(crate) idx_path: Vec<usize>,
     pub(crate) start_angle: f32,
@@ -32,15 +35,15 @@ pub(crate) struct ChartSel {
     pub(crate) rel: Vec<usize>,
 }
 
-/// Trailing "index" tagging an "other"-bucket idx_path — see where it's
-/// pushed in `layout_sunburst`.
+/// Last entry of an "other" slice's `idx_path` (it has no child index).
 pub(crate) const OTHER_MARKER: usize = usize::MAX;
 
+/// True if `idx_path` is an "other" slice's.
 pub(crate) fn is_other_marker(idx_path: &[usize]) -> bool {
     idx_path.last() == Some(&OTHER_MARKER)
 }
 
-/// Like get_node, but None instead of panicking on a stale index path.
+/// The node at `idx_path`, or None if the path no longer exists.
 pub(crate) fn try_get_node<'a>(root: &'a Node, idx_path: &[usize]) -> Option<&'a Node> {
     idx_path.iter().try_fold(root, |n, &i| n.children.get(i))
 }
@@ -80,10 +83,14 @@ pub(crate) enum ChartOrder {
     Name,
 }
 
+/// Natural name order ("file2" before "file10").
 pub(crate) fn cmp_names(a: &Node, b: &Node) -> std::cmp::Ordering {
     natural_cmp(&a.name, &b.name)
 }
 
+/// Lays out the rings below `node` between `start_angle` and `end_angle`,
+/// appending one Segment per slice to `out`. On the first ring, free space
+/// (`extra_free_bytes` of `total_capacity`) takes its share at the end.
 pub(crate) fn layout_sunburst(
     node: &Node,
     idx_path: Vec<usize>,
@@ -107,13 +114,8 @@ pub(crate) fn layout_sunburst(
         .filter(|(_, c)| !hidden.contains(&c.path))
         .collect();
 
-    // Free space gets a *fixed* share of the span, from known filesystem
-    // capacity — it doesn't grow or shrink as the scan progresses. Whatever
-    // has been discovered so far always divides up the *entire* remaining
-    // "content" span among itself (proportional to each other, not to some
-    // eventual/unknown final total): otherwise there'd be an unrendered gap
-    // between "what's mapped" and "known free space" while a scan is still
-    // in progress, since discovered-so-far starts small and grows.
+    // Free space takes its share of the drive's capacity; the content found
+    // so far fills the rest of the ring (also while a scan is running).
     let full_span = end_angle - start_angle;
     let content_end_angle = if extra_free_bytes > 0 && total_capacity > 0 {
         let free_frac = extra_free_bytes as f32 / total_capacity as f32;
@@ -125,15 +127,10 @@ pub(crate) fn layout_sunburst(
     let span_abs = (content_end_angle - start_angle).abs().max(0.0001);
     let min_frac = (settings.min_segment_angle_deg.to_radians() / span_abs).max(0.0);
 
-    // Children are pre-sorted largest-first. The ring has room for
-    // span / min-angle slices: if every child fits, each gets one;
-    // otherwise the largest take all slots but the last, which is "other".
-    // Shown slices are stretched to fill the ring (see below), so in a
-    // folder of 1200 similar movies filling 160° at 1° per slice, 159
-    // movies get comparable slices — as long as each is drawn at least
-    // the min angle wide (see below). `unlimited_slices` gives every child
-    // its own slice regardless — zoom (Ctrl+wheel) is the only way to make
-    // sliver-thin ones clickable then.
+    // How many children (largest first) get their own slice. The ring has
+    // room for span / min-angle slices: if all children fit, each gets one;
+    // otherwise the largest fill all slots but the last, which is "other".
+    // `unlimited_slices` shows every child.
     let split = if settings.unlimited_slices {
         visible_children.len()
     } else {
@@ -141,11 +138,9 @@ pub(crate) fn layout_sunburst(
         let slots = ((span_abs / settings.min_segment_angle_deg.to_radians().max(1e-6)) as usize)
             .min((360.0 * span_abs / std::f32::consts::TAU) as usize);
         let n = if visible_children.len() <= slots { visible_children.len() } else { slots.saturating_sub(1) };
-        // Uneven sizes can still leave the tail of those slots narrower than
-        // the min angle (a stack of 1-px slivers): stop at the first item
-        // that would be drawn that thin, and let "other" take it and the
-        // rest. Adding a smaller item only makes the smallest drawn slice
-        // narrower, so the first misfit ends the run.
+        // Shown slices are stretched to fill the ring. Stop at the first
+        // child that would still be drawn narrower than the min angle;
+        // "other" takes it and the rest.
         let n = n.min(settings.max_children_shown);
         let mut shown_sum = 0u64;
         visible_children
@@ -160,19 +155,15 @@ pub(crate) fn layout_sunburst(
             .count()
     };
     let mut shown: Vec<(usize, &Node)> = visible_children.iter().take(split).cloned().collect();
-    // Which children get their own slice is always decided by size (above),
-    // so A–Z order never pushes a big folder into "other"; only the drawing
-    // order of the shown slices changes. "Other" stays last either way.
+    // A–Z order only changes the drawing order; "other" stays last.
     if order == ChartOrder::Name {
         shown.sort_by(|(_, a), (_, b)| cmp_names(a, b));
     }
     let rest: Vec<(usize, &Node)> = visible_children.iter().skip(split).cloned().collect();
     let rest_size: u64 = rest.iter().map(|(_, c)| c.size).fold(0u64, u64::saturating_add);
 
-    // "Other" is a "there's more, but no room to show it individually"
-    // marker, not a value-proportional bucket: it gets a fixed minimum
-    // width (the min slice angle), and the shown slices split the rest in
-    // proportion to each other.
+    // "Other" is one min-angle slot; the shown slices split the rest in
+    // proportion to their sizes.
     let other_frac = if rest_size > 0 { min_frac.min(0.5) } else { 0.0 };
     let available_frac = (1.0 - other_frac).max(0.0);
     let shown_total = shown.iter().map(|(_, c)| c.size as f32).sum::<f32>().max(1.0);
@@ -205,19 +196,11 @@ pub(crate) fn layout_sunburst(
         }
     }
     if rest_size > 0 {
-        // content_end_angle, not cursor + span*other_frac: the exact
-        // remaining boundary, so there's no float-drift gap between the
-        // last shown slice and "other".
+        // Ends exactly at content_end_angle, so rounding leaves no gap.
         let a0 = cursor;
         let a1 = content_end_angle;
-        // Tagged with OTHER_MARKER as a trailing "index" so its idx_path is
-        // the same length as its visual sibling slices (real children get
-        // idx_path + their own index appended) — that's what lets arrow-key
-        // navigation treat it as a normal sibling to move between. It's not
-        // a real child index (get_node silently no-ops on the out-of-range
-        // lookup and resolves to the parent, which is what the hover
-        // tooltip wants anyway); is_other_marker() is the strict check used
-        // wherever code needs to tell it apart from an actual node.
+        // OTHER_MARKER in place of a child index keeps its idx_path as long
+        // as its siblings', so arrow keys move onto it like any slice.
         let mut other_path = idx_path.clone();
         other_path.push(OTHER_MARKER);
         out.push(Segment {
@@ -235,8 +218,6 @@ pub(crate) fn layout_sunburst(
         });
     }
     if extra_free_bytes > 0 {
-        // Use the precomputed fixed boundary, not `cursor`, so there's no
-        // float-drift gap between mapped content and the free-space slice.
         out.push(Segment {
             idx_path: idx_path.clone(),
             start_angle: content_end_angle,
@@ -253,11 +234,13 @@ pub(crate) fn layout_sunburst(
     }
 }
 
+/// Hue (degrees) of top-level slice `i`: golden-angle steps, so neighbors
+/// differ clearly.
 pub(crate) fn hue_for_branch(i: usize) -> f32 {
-    // evenly distributed hues using the golden angle
     ((i as f32) * 137.50776_f32) % 360.0
 }
 
+/// HSV (hue in degrees, saturation and value 0–1) as a color.
 pub(crate) fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
     let c = v * s;
     let hp = h / 60.0;
@@ -283,17 +266,16 @@ pub(crate) fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
     )
 }
 
-/// Brightens `c` with a gamma curve (gamma < 1 lightens) while keeping its
-/// character, instead of flatly blending toward white.
+/// `c` with a gamma curve applied: gamma < 1 lightens it.
 pub(crate) fn gamma_lighten(c: Color32, gamma: f32) -> Color32 {
     let f = |v: u8| ((v as f32 / 255.0).powf(gamma) * 255.0).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgb(f(c.r()), f(c.g()), f(c.b()))
 }
 
+/// A slice's color: its top-level slice's hue, darker on outer rings.
 pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Settings) -> Color32 {
     if seg.is_other {
-        // A pale tint of the *same* branch hue, so the aggregate bucket
-        // reads as "more of this folder", not an unrelated color/glitch.
+        // A pale tint of the same hue.
         return hsv_to_rgb(top_branch_hue, settings.other_sat, settings.other_val);
     }
     let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff)
@@ -301,10 +283,9 @@ pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Setti
     hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
 }
 
-
+/// Folder name and size in the center hub, wrapped to fit inside it.
 pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f32, name: &str, size: u64) {
-    // Width of a rectangle comfortably inscribed in the circle, with a
-    // little margin so wrapped lines don't touch the ring.
+    // About the width of a rectangle inside the circle, with a margin.
     let wrap_width = (hub_radius * 1.3).max(24.0);
 
     let display_name = if name.is_empty() { "/" } else { name };
@@ -338,24 +319,31 @@ pub(crate) fn draw_hub_text(painter: &egui::Painter, center: Pos2, hub_radius: f
     painter.galley(size_pos, size_galley.clone(), Color32::WHITE);
 }
 
-/// Arc outline points, traced outer-arc-forward then inner-arc-backward,
-/// suitable for both mesh fill (as a triangle strip) and a closed stroke.
+/// Unit vector at angle `t`: 0 points straight up, angles grow clockwise.
 pub(crate) fn arc_dir(t: f32) -> Vec2 {
     let (s, c) = t.sin_cos();
-    Vec2::new(s, -c) // angle 0 = straight up, increasing clockwise
+    Vec2::new(s, -c)
 }
 
-/// Outline of one sunburst slice (same geometry as draw_arc_mesh).
-pub(crate) fn draw_arc_outline(painter: &egui::Painter, center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, stroke: egui::Stroke) {
-    let steps = (((a1 - a0).abs() * r1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
+/// Outline of a slice between radii `r0` and `r1` and angles `a0` and
+/// `a1`: the outer arc forward, then the inner arc back, `steps` segments
+/// each.
+fn slice_outline(center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, steps: usize) -> Vec<Pos2> {
     let arc = |r: f32| (0..=steps).map(move |i| center + arc_dir(a0 + (a1 - a0) * (i as f32 / steps as f32)) * r);
     let mut pts: Vec<Pos2> = arc(r1).collect();
     let mut inner: Vec<Pos2> = arc(r0).collect();
     inner.reverse();
     pts.extend(inner);
-    painter.add(egui::Shape::closed_line(pts, stroke));
+    pts
 }
 
+/// Draws the outline of one slice.
+pub(crate) fn draw_arc_outline(painter: &egui::Painter, center: Pos2, r0: f32, r1: f32, a0: f32, a1: f32, stroke: egui::Stroke) {
+    let steps = (((a1 - a0).abs() * r1.max(1.0) / 3.0).ceil() as usize).clamp(1, 512);
+    painter.add(egui::Shape::closed_line(slice_outline(center, r0, r1, a0, a1, steps), stroke));
+}
+
+/// Draws one slice, filled with `color` and with a thin dark border.
 pub(crate) fn draw_arc_mesh(
     painter: &egui::Painter,
     center: Pos2,
@@ -367,8 +355,7 @@ pub(crate) fn draw_arc_mesh(
     settings: &Settings,
 ) {
     let span = (a1 - a0).abs();
-    // Tessellate based on actual on-screen arc length (at the outer radius)
-    // so outer rings stay smooth instead of getting faceted/pixelated.
+    // One segment every few pixels of the outer arc, so curves stay smooth.
     let arc_len_px = span * r1.max(1.0);
     let px_per_step = settings.tess_px_per_step.max(0.5);
     let steps = ((arc_len_px / px_per_step).ceil() as usize).clamp(1, 512);
@@ -398,22 +385,8 @@ pub(crate) fn draw_arc_mesh(
     }
     painter.add(egui::Shape::mesh(mesh));
 
-    // Crisp, consistent border regardless of theme/background, instead
-    // of relying on a radial gap that only sometimes shows through.
-    let stroke = egui::Stroke::new(
-        settings.stroke_width,
-        Color32::from_black_alpha(settings.stroke_alpha),
-    );
-    let mut outline = Vec::with_capacity(2 * steps + 2);
-    for i in 0..=steps {
-        let t = a0 + (a1 - a0) * (i as f32 / steps as f32);
-        outline.push(center + arc_dir(t) * r1);
-    }
-    for i in (0..=steps).rev() {
-        let t = a0 + (a1 - a0) * (i as f32 / steps as f32);
-        outline.push(center + arc_dir(t) * r0);
-    }
-    painter.add(egui::Shape::closed_line(outline, stroke));
+    let stroke = egui::Stroke::new(settings.stroke_width, Color32::from_black_alpha(settings.stroke_alpha));
+    painter.add(egui::Shape::closed_line(slice_outline(center, r0, r1, a0, a1, steps), stroke));
 }
 
 #[cfg(test)]
