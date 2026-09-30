@@ -149,10 +149,16 @@ fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()
 /// What the confirmation dialog is asking about.
 #[derive(Clone)]
 enum Confirm {
+    /// Deleting (`permanent`) or moving to the trash.
     Delete {
         paths: Vec<PathBuf>,
+        permanent: bool,
+        /// Real totals of what goes, including files the filter hides.
         size: u64,
         file_count: u64,
+        /// (files, size) inside the targets that the active filter or
+        /// category hides: they go too.
+        hidden: (u64, u64),
         /// Folders inside that the scan couldn't read: their size is
         /// unknown and deleting them may fail partway.
         unreadable: usize,
@@ -170,6 +176,21 @@ pub(crate) struct Removal {
     pending: Option<(Vec<PathBuf>, bool)>,
     /// The result of emptying the trash, which runs on its own thread.
     purge_rx: Option<Receiver<Result<(), String>>>,
+}
+
+/// The dialog's warning that files hidden by the active filter go too
+/// (`key` names the delete or trash wording); nothing if none are hidden.
+fn hidden_warning(ui: &mut egui::Ui, key: &str, (files, size): (u64, u64)) {
+    if files == 0 {
+        return;
+    }
+    ui.add_space(6.0);
+    let text = trf(key, &[&format_count(files), &human_size(size)]);
+    ui.label(
+        egui::RichText::new(text)
+            .strong()
+            .color(ui.visuals().warn_fg_color),
+    );
 }
 
 /// Removes the node at `target` from the tree, subtracting its size and
@@ -237,27 +258,48 @@ impl DiskScanApp {
         if !self.mount_check(&paths) {
             return;
         }
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        let nodes: Vec<&Node> = paths.iter().filter_map(|p| find_node(&root, p)).collect();
-        if nodes.is_empty() {
-            return;
+        if let Some(confirm) = self.removal_confirm(&paths, true) {
+            self.removal.confirm = Some(confirm);
         }
-        self.removal.confirm = Some(Confirm::Delete {
-            paths: nodes.iter().map(|n| n.path.clone()).collect(),
-            size: nodes.iter().map(|n| n.size).fold(0u64, u64::saturating_add),
-            file_count: nodes.iter().map(|n| n.file_count).sum(),
+    }
+
+    /// The confirmation for removing `paths`, with their real totals (from
+    /// the unfiltered scan) and what the filter hides inside them. None if
+    /// none of them is in the tree.
+    fn removal_confirm(&self, paths: &[PathBuf], permanent: bool) -> Option<Confirm> {
+        let root = self.root.as_ref()?;
+        let full = self.full_root.as_ref().unwrap_or(root);
+        let shown: Vec<&Node> = paths.iter().filter_map(|p| find_node(root, p)).collect();
+        if shown.is_empty() {
+            return None;
+        }
+        let real: Vec<&Node> = shown
+            .iter()
+            .map(|n| find_node(full, &n.path).unwrap_or(n))
+            .collect();
+        let total = |nodes: &[&Node]| {
+            let size = nodes.iter().map(|n| n.size).fold(0u64, u64::saturating_add);
+            (nodes.iter().map(|n| n.file_count).sum::<u64>(), size)
+        };
+        let ((shown_files, shown_size), (files, size)) = (total(&shown), total(&real));
+        Some(Confirm::Delete {
+            paths: shown.iter().map(|n| n.path.clone()).collect(),
+            permanent,
+            size,
+            file_count: files,
+            hidden: (
+                files.saturating_sub(shown_files),
+                size.saturating_sub(shown_size),
+            ),
             unreadable: self
                 .unreadable
                 .iter()
-                .filter(|u| nodes.iter().any(|n| u.starts_with(&n.path)))
+                .filter(|u| shown.iter().any(|n| u.starts_with(&n.path)))
                 .count(),
-            single_is_dir: (nodes.len() == 1).then(|| nodes[0].is_dir),
-        });
+            single_is_dir: (shown.len() == 1).then(|| shown[0].is_dir),
+        })
     }
 
-    /// Moves `paths` to the trash at the start of the next frame.
     pub(crate) fn queue_trash(&mut self, paths: Vec<PathBuf>) {
         let mut ok = self.mount_check(&paths);
         for p in &paths {
@@ -266,8 +308,20 @@ impl DiskScanApp {
                 ok = false;
             }
         }
-        if !paths.is_empty() && ok {
-            self.removal.pending = Some((paths, false));
+        if paths.is_empty() || !ok {
+            return;
+        }
+        // With files hidden by a filter inside, ask first: they go too.
+        match self.removal_confirm(&paths, false) {
+            Some(
+                confirm @ Confirm::Delete {
+                    hidden: (hidden_files, _),
+                    ..
+                },
+            ) if hidden_files > 0 => {
+                self.removal.confirm = Some(confirm);
+            }
+            _ => self.removal.pending = Some((paths, false)),
         }
     }
 
@@ -313,10 +367,32 @@ impl DiskScanApp {
             let yes_label = match &confirm {
                 Confirm::Delete {
                     paths,
+                    permanent: false,
                     size,
                     file_count,
+                    hidden,
+                    ..
+                } => {
+                    ui.heading(tr("TRASH_FILTER_TITLE"));
+                    ui.add_space(6.0);
+                    for p in paths.iter().take(8) {
+                        ui.label(egui::RichText::new(short_path(p)).monospace());
+                    }
+                    ui.label(trf(
+                        "REMOVE_TOTALS",
+                        &[&human_size(*size), &format_count(*file_count)],
+                    ));
+                    hidden_warning(ui, "TRASH_HIDDEN_WARNING", *hidden);
+                    tr("MENU_TRASH")
+                }
+                Confirm::Delete {
+                    paths,
+                    size,
+                    file_count,
+                    hidden,
                     unreadable,
                     single_is_dir,
+                    ..
                 } => {
                     ui.heading(tr("DELETE_CONFIRM_TITLE"));
                     ui.add_space(6.0);
@@ -357,6 +433,7 @@ impl DiskScanApp {
                             }
                         }
                     }
+                    hidden_warning(ui, "DELETE_HIDDEN_WARNING", *hidden);
                     if *unreadable > 0 {
                         ui.add_space(4.0);
                         ui.colored_label(
@@ -407,7 +484,9 @@ impl DiskScanApp {
             Some(true) => {
                 self.removal.confirm = None;
                 match confirm {
-                    Confirm::Delete { paths, .. } => self.removal.pending = Some((paths, true)),
+                    Confirm::Delete {
+                        paths, permanent, ..
+                    } => self.removal.pending = Some((paths, permanent)),
                     Confirm::EmptyTrash(items) => {
                         // Checked again: something may have been mounted meanwhile.
                         if let Ok(folders) = trash::os_limited::trash_folders() {
@@ -595,6 +674,61 @@ mod tests {
         assert!(!top.exists());
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep me");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// With a category picked, removing a folder covers the files the
+    /// filter hides: the dialog gives the real totals and warns about the
+    /// hidden ones, and trash asks first instead of acting at once.
+    #[test]
+    fn removing_under_a_filter_warns_about_hidden_files() {
+        let mut app = DiskScanApp::default();
+        let folder = test_node(
+            "/nonexistent-qa/mixed",
+            0,
+            true,
+            vec![
+                test_node("/nonexistent-qa/mixed/a.mkv", 6000, false, vec![]),
+                test_node("/nonexistent-qa/mixed/b.pdf", 900, false, vec![]),
+            ],
+        );
+        let mut full = test_node("/nonexistent-qa", 0, true, vec![folder]);
+        full.children[0].size = 6900;
+        full.children[0].file_count = 2;
+        app.full_root = Some(Arc::new(full));
+        app.category = Some(app.cats.of_name("x.mkv"));
+        app.rebuild_view_tree();
+        let target = vec![PathBuf::from("/nonexistent-qa/mixed")];
+
+        app.ask_delete(target.clone());
+        assert!(matches!(
+            app.removal.confirm,
+            Some(Confirm::Delete {
+                permanent: true,
+                size: 6900,
+                file_count: 2,
+                hidden: (1, 900),
+                ..
+            })
+        ));
+        app.removal.confirm = None;
+
+        app.queue_trash(target.clone());
+        assert!(app.removal.pending.is_none());
+        assert!(matches!(
+            app.removal.confirm,
+            Some(Confirm::Delete {
+                permanent: false,
+                hidden: (1, 900),
+                ..
+            })
+        ));
+        app.removal.confirm = None;
+
+        // Without a filter, trash acts at once as before.
+        app.category = None;
+        app.rebuild_view_tree();
+        app.queue_trash(target);
+        assert!(app.removal.confirm.is_none() && app.removal.pending.is_some());
     }
 
     #[test]
