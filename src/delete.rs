@@ -1,23 +1,16 @@
-//! Deleting, trashing and emptying the trash — shared by the chart and the
-//! Summary table. Everything removed is dropped from the scanned tree in
-//! place (the folders above shrink accordingly) instead of rescanning.
-//! Permanent deletes and emptying the trash go through a confirmation
-//! dialog first; moving to the trash doesn't, since it can be undone.
+//! Deleting, moving to the trash and emptying the trash, for the chart and
+//! the table. What's removed is dropped from the scanned tree, and the
+//! folders above shrink, without a rescan. Permanent deletes and emptying
+//! the trash ask for confirmation first; moving to the trash doesn't.
 
 use super::*;
 use std::os::unix::fs::MetadataExt;
 use std::sync::mpsc::channel;
 
-// ---------------- Mount safety ----------------
-//
-// Deleting or trashing must never reach into another mounted filesystem (a
-// NAS share, a USB drive, a bind mount): `remove_dir_all` would happily
-// empty it, and trashing a folder renames it — mounts inside included —
-// into the Trash. So every delete/trash is refused up front if the target
-// is, or contains, a mount point (checked against the kernel's mount table,
-// which also catches bind mounts of the same filesystem), and the recursive
-// delete itself stops at any folder on a different device, in case
-// something gets mounted between the check and the delete.
+// Mount safety: deleting or trashing must never reach into another mounted
+// filesystem (a network share, a USB drive, a bind mount). A target that
+// is or contains a mount point is refused, and the recursive delete also
+// stops at any folder on another device.
 
 /// Mount points at or below `path`, from /proc/self/mountinfo.
 fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
@@ -60,7 +53,7 @@ fn mount_guard(path: &Path) -> Result<(), String> {
         Ok(m) if m.file_type().is_symlink() => return Ok(()),
         Ok(m) if !m.is_dir() => return Ok(()),
         Ok(_) => {}
-        Err(_) => return Ok(()), // gone or unreadable: the delete itself reports it
+        Err(_) => return Ok(()), // the delete itself reports this
     }
     // Compare against the mount table in its own (canonical) form.
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -72,9 +65,8 @@ fn mount_guard(path: &Path) -> Result<(), String> {
     Err(trf("ERR_CONTAINS_MOUNT", &[&show_path(&path), &list.join(", ")]))
 }
 
-/// Err (for the Issues log) if `path` shouldn't be moved to the trash: it's
-/// already inside a trash folder (trashing it again would bury its restore
-/// information, see the freedesktop.org trash spec), or it contains one.
+/// Err (for the Issues log) if `path` is inside a trash folder or contains
+/// one: trashing it would lose the trash's restore information.
 fn trash_guard(path: &Path) -> Result<(), String> {
     let Ok(folders) = trash::os_limited::trash_folders() else { return Ok(()) };
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -91,8 +83,7 @@ fn trash_guard(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Plain-language reason a move to the trash failed, rather than the trash
-/// library's internal error text.
+/// Plain-language reason a move to the trash failed.
 fn trash_reason(e: &trash::Error) -> String {
     match e {
         trash::Error::FileSystem { source, .. } => io_reason(source),
@@ -102,10 +93,8 @@ fn trash_reason(e: &trash::Error) -> String {
     }
 }
 
-/// Like `remove_dir_all`, but never crosses into another filesystem: a
-/// folder on a different device than `dir` stops the delete with an error.
-/// Also works in trees deeper than the kernel's path length limit, the same
-/// way the scanner reads them (see `DirHandle`).
+/// Like `remove_dir_all`, but stops with an error at a folder on another
+/// filesystem, and works in trees deeper than the path length limit.
 fn remove_dir_one_fs(dir: &Path, dev: u64) -> std::io::Result<()> {
     remove_dir_in(dir, &None, dev)
 }
@@ -159,13 +148,10 @@ enum Confirm {
 #[derive(Default)]
 pub(crate) struct Removal {
     confirm: Option<Confirm>,
-    /// Deletes (true = permanent, false = to trash) confirmed or requested
-    /// this frame, carried out at the start of the next one — before that
-    /// frame's clones of the tree exist, so it can be edited in place
-    /// instead of copied.
+    /// Deletes (true = permanent, false = to the trash) to carry out at the
+    /// start of the next frame, when the tree can be edited in place.
     pending: Option<(Vec<PathBuf>, bool)>,
-    /// Emptying the trash runs on its own thread (it can be a lot of
-    /// files); this delivers the outcome.
+    /// The result of emptying the trash, which runs on its own thread.
     purge_rx: Option<Receiver<Result<(), String>>>,
 }
 
@@ -260,8 +246,8 @@ impl DiskScanApp {
         }
     }
 
-    /// Logs why each of `paths` can't be deleted/trashed (see
-    /// `mount_guard`); true if none is blocked.
+    /// Logs why any of `paths` can't be deleted or trashed; true if none is
+    /// blocked.
     fn mount_check(&mut self, paths: &[PathBuf]) -> bool {
         let mut ok = true;
         for p in paths {
@@ -273,8 +259,8 @@ impl DiskScanApp {
         ok
     }
 
-    /// The toolbar's 🗑: asks to empty every trash folder (home and other
-    /// drives alike) — unless something is mounted inside one.
+    /// The toolbar's 🗑: asks to empty every trash folder, on every drive,
+    /// unless something is mounted inside one.
     pub(crate) fn ask_empty_trash(&mut self) {
         if self.removal.purge_rx.is_some() {
             return; // already emptying
@@ -345,8 +331,7 @@ impl DiskScanApp {
             ui.add_space(10.0);
             let mut choice = None;
             ui.horizontal(|ui| {
-                // Cancel first and focused, so a stray Enter/Space never
-                // deletes anything.
+                // Cancel comes first and has focus, so Enter never deletes.
                 let cancel = ui.button(tr("MENU_CANCEL"));
                 if !ui.memory(|m| m.focused().is_some()) {
                     cancel.request_focus();
@@ -370,8 +355,7 @@ impl DiskScanApp {
                 match confirm {
                     Confirm::Delete { paths, .. } => self.removal.pending = Some((paths, true)),
                     Confirm::EmptyTrash(items) => {
-                        // Checked again: something may have been mounted
-                        // while the dialog was open.
+                        // Checked again: something may have been mounted meanwhile.
                         if let Ok(folders) = trash::os_limited::trash_folders() {
                             let files: Vec<PathBuf> = folders.iter().map(|f| f.join("files")).collect();
                             if !self.mount_check(&files) {
@@ -398,14 +382,12 @@ impl DiskScanApp {
     fn remove_paths(&mut self, paths: Vec<PathBuf>, permanent: bool) {
         let mut done: Vec<PathBuf> = Vec::new();
         for p in paths {
-            // Checked again right before acting: the dialog may have been
-            // open while something got mounted.
+            // Checked again: something may have been mounted meanwhile.
             if let Err(e) = mount_guard(&p).and_then(|()| if permanent { Ok(()) } else { trash_guard(&p) }) {
                 self.log_issue(e);
                 continue;
             }
-            // Already gone (deleted outside the app since the scan): that's
-            // the goal reached, so it just leaves the tree.
+            // Already gone from disk: just drop it from the tree.
             if std::fs::symlink_metadata(&p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
                 done.push(p);
                 continue;
@@ -424,8 +406,7 @@ impl DiskScanApp {
                 Err(e) => {
                     let key = if permanent { "ERR_DELETE_FAILED" } else { "ERR_TRASH_FAILED" };
                     self.log_issue(trf(key, &[&show_path(&p), &e]));
-                    // A folder may be half gone now: say so, since the
-                    // chart/table still show it as scanned.
+                    // A folder may now be partly deleted: say so.
                     if permanent && std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir()) {
                         self.log_issue(trf("ERR_DELETE_PARTIAL", &[&show_path(&p)]));
                     }
@@ -435,8 +416,8 @@ impl DiskScanApp {
         self.drop_from_tree(&done);
     }
 
-    /// After emptying the trash: drops whatever the scan holds of the
-    /// trash folders' contents.
+    /// After emptying the trash: drops the trash folders' contents from the
+    /// tree.
     fn drop_trash_from_tree(&mut self) {
         self.status = tr("STATUS_TRASH_EMPTIED");
         let (Some(full), Ok(folders)) = (self.full_root.clone(), trash::os_limited::trash_folders()) else { return };
@@ -554,7 +535,7 @@ mod tests {
 
     /// Builds a chain of `levels` nested folders named "d" (files every
     /// 500 levels and at the bottom), then runs every tree operation over
-    /// it: scan, live-preview graft, extension breakdown, filter, clone,
+    /// it: scan, live-preview graft, category breakdown, filter, clone,
     /// find, replace, remove, drop, and the delete from disk.
     fn deep_chain(levels: usize) {
         use std::os::unix::fs::MetadataExt;
