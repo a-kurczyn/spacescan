@@ -995,7 +995,7 @@ impl DiskScanApp {
             ui.heading(tr("SUMMARY_CATEGORIES"));
             if self.category.is_some()
                 && ui
-                    .small_button("✕")
+                    .small_button("×")
                     .on_hover_text(tr("CAT_CLEAR"))
                     .clicked()
             {
