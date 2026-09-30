@@ -71,7 +71,7 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-49 | S4 | Category panel: labels pile up in short windows; panel doesn't shrink in narrow windows | OPEN | | |
 | SM-50 | S4 | Spanish UI: the category panel and tooltips stay English with the installed language file | OPEN | | |
 | SM-51 | S4 | Category names and extensions: display oddities | OPEN | | |
-| SM-52 | S3 | Light KDE colour scheme: highlighted text is white on white (category names, current folder, chart hub) | OPEN | | |
+| SM-52 | S3 | Light KDE colour scheme: highlighted text is white on white (category names, current folder, chart hub) | FIXED | 20808f2 | With a light KDE scheme the whole UI uses a light style: highlighted, selected and hovered text, table headers, the chart hub and path are dark on light; category colors use their light-background shades; the free-space slice is a little darker than the background instead of invisible. | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
