@@ -71,6 +71,7 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-49 | S4 | Category panel: labels pile up in short windows; panel doesn't shrink in narrow windows | OPEN | | |
 | SM-50 | S4 | Spanish UI: the category panel and tooltips stay English with the installed language file | OPEN | | |
 | SM-51 | S4 | Category names and extensions: display oddities | OPEN | | |
+| SM-52 | S3 | Light KDE colour scheme: highlighted text is white on white (category names, current folder, chart hub) | OPEN | | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -361,6 +362,11 @@ Expected:
 - A file whose extension has a trailing space ("x.mkv ") is listed in Other's tooltip as ".mkv", which reads like a contradiction. Expected: show the space, e.g. quoted.
 - For the user to decide: the default list puts `.ts` in Video (so TypeScript source shows as Video) and `.idx` in Video (so git pack indexes show as Video).
 - Note (not a bug): `r` (rescan folder) does reread the categories file and clears a picked category if the list changed. The coder's description said it doesn't.
+
+### SM-52 · S3 · Light KDE colour scheme: highlighted text is white on white
+- Scenario: a light KDE colour scheme (e.g. Breeze Light) in the user's kdeglobals, which spacemap follows.
+- Actual: every text drawn in the "strong/highlight" colour is invisible or nearly so: the category names in the bar (only "48.0% · 17 MiB" can be read), the tooltip's title line, the picked category's label (white on light blue), the hovered label (dark box, dark text), the current folder in the breadcrumbs (the path ends at "cat /"), and in the chart the path line and the hub's name and size. Table header labels are very faint too.
+- Expected: text readable against the scheme's background (use the scheme's text colour for strong text), for all of the above.
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.
