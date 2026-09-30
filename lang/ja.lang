@@ -253,6 +253,9 @@ HELP_HELP=このヘルプ
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=カテゴリー
+SUMMARY_EXTENSIONS=拡張子
+COL_EXTENSION=拡張子
+EXT_OTHER_COUNT=(ほか %s 種類の拡張子)
 CAT_VIDEO=動画
 CAT_AUDIO=音声
 CAT_IMAGES=画像
@@ -279,5 +282,5 @@ ERR_CATEGORIES_NO_LIST="categories" リストが必要です
 ERR_CATEGORIES_NO_NAME=%s に名前がありません
 ERR_CATEGORIES_ENTRY=%s: "%s" の無効な項目: %s
 ERR_CATEGORIES_TWICE=%s はすでに「%s」にあります
-ERR_CATEGORIES_OTHER=%s: 「その他」は組み込みのため、スキップしました
+ERR_CATEGORIES_OTHER=%s: 「その他」は組み込みです
 ERR_CATEGORIES_MANY=%s カテゴリー: %s を超えると色の区別が難しくなります

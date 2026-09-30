@@ -6,7 +6,7 @@ use super::*;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use table::TableCol;
+use table::{SidePanel, TableCol};
 
 /// Everything in settings.json.
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -37,6 +37,8 @@ pub(crate) struct TablePrefs {
     /// Left-to-right order of the optional columns (Name is always last).
     pub column_order: Vec<TableCol>,
     pub dirs_first: bool,
+    /// What the Summary view's left panel shows.
+    pub side: SidePanel,
 }
 
 impl Default for TablePrefs {
@@ -47,6 +49,7 @@ impl Default for TablePrefs {
             hidden_columns: Vec::new(),
             column_order: TableCol::ALL.to_vec(),
             dirs_first: false,
+            side: SidePanel::Categories,
         }
     }
 }

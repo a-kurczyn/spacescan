@@ -28,7 +28,7 @@ use config::Config;
 use filter::*;
 use lang::*;
 use scan::*;
-use table::{Graft, TableState};
+use table::{Graft, SidePanel, TableState};
 use theme::*;
 use widgets::*;
 
@@ -304,6 +304,8 @@ struct DiskScanApp {
     path_input: String,
     path_input_focused: bool,
     contents_sort: SortState,
+    /// Sort order of the left panel's extensions table.
+    ext_sort: SortState,
     /// File types detected from content, for the hovered file only, on a
     /// background thread. `None` = looked up, but unknown.
     mime_cache: std::collections::HashMap<PathBuf, Option<String>>,
@@ -378,6 +380,10 @@ impl Default for DiskScanApp {
             cat_breakdown_for: None,
             // Largest first, like the chart.
             contents_sort: SortState {
+                column: SortColumn::Size,
+                ascending: false,
+            },
+            ext_sort: SortState {
                 column: SortColumn::Size,
                 ascending: false,
             },

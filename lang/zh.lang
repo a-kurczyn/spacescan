@@ -253,6 +253,9 @@ HELP_HELP=本帮助
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=分类
+SUMMARY_EXTENSIONS=扩展名
+COL_EXTENSION=扩展名
+EXT_OTHER_COUNT=（其他 %s 种扩展名）
 CAT_VIDEO=视频
 CAT_AUDIO=音频
 CAT_IMAGES=图片
@@ -279,5 +282,5 @@ ERR_CATEGORIES_NO_LIST=需要一个 "categories" 列表
 ERR_CATEGORIES_NO_NAME=%s 没有名称
 ERR_CATEGORIES_ENTRY=%s："%s" 中的条目无效：%s
 ERR_CATEGORIES_TWICE=%s 已在“%s”中
-ERR_CATEGORIES_OTHER=%s：“其他”为内置分类，已跳过
+ERR_CATEGORIES_OTHER=%s：“其他”为内置分类
 ERR_CATEGORIES_MANY=%s 个分类：超过 %s 个后颜色难以区分

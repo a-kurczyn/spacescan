@@ -253,6 +253,9 @@ HELP_HELP=Эта справка
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=Категории
+SUMMARY_EXTENSIONS=Расширения
+COL_EXTENSION=Расширение
+EXT_OTHER_COUNT=(ещё расширений: %s)
 CAT_VIDEO=Видео
 CAT_AUDIO=Аудио
 CAT_IMAGES=Изображения
@@ -279,5 +282,5 @@ ERR_CATEGORIES_NO_LIST=нужен список "categories"
 ERR_CATEGORIES_NO_NAME=у %s нет имени
 ERR_CATEGORIES_ENTRY=%s: недопустимая запись в "%s": %s
 ERR_CATEGORIES_TWICE=%s уже есть в «%s»
-ERR_CATEGORIES_OTHER=%s: «Прочее» встроено; пропущено
+ERR_CATEGORIES_OTHER=%s: «Прочее» встроено
 ERR_CATEGORIES_MANY=категорий: %s; больше %s — цвета трудно различить

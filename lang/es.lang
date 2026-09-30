@@ -257,6 +257,9 @@ HELP_HELP=Esta ayuda
 
 # ---- Categorías (barra junto a la tabla de contenido) ----
 SUMMARY_CATEGORIES=Categorías
+SUMMARY_EXTENSIONS=Extensiones
+COL_EXTENSION=Extensión
+EXT_OTHER_COUNT=(%s otras extensiones)
 # Nombres de categoría: los tokens usados como "name" en categories.json.
 CAT_VIDEO=Vídeo
 CAT_AUDIO=Audio
@@ -284,5 +287,5 @@ ERR_CATEGORIES_NO_LIST=necesita una lista "categories"
 ERR_CATEGORIES_NO_NAME=%s no tiene nombre
 ERR_CATEGORIES_ENTRY=%s: entrada no válida en "%s": %s
 ERR_CATEGORIES_TWICE=%s ya está en "%s"
-ERR_CATEGORIES_OTHER=%s: "Otros" ya existe; se omite
+ERR_CATEGORIES_OTHER=%s: "Otros" ya existe
 ERR_CATEGORIES_MANY=%s categorías: a partir de %s, sus colores son difíciles de distinguir

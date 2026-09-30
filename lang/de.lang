@@ -253,6 +253,9 @@ HELP_HELP=Diese Hilfe
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=Kategorien
+SUMMARY_EXTENSIONS=Endungen
+COL_EXTENSION=Endung
+EXT_OTHER_COUNT=(%s weitere Endungen)
 CAT_VIDEO=Video
 CAT_AUDIO=Audio
 CAT_IMAGES=Bilder
@@ -279,5 +282,5 @@ ERR_CATEGORIES_NO_LIST=sie braucht eine Liste "categories"
 ERR_CATEGORIES_NO_NAME=%s hat keinen Namen
 ERR_CATEGORIES_ENTRY=%s: ungültiger Eintrag in "%s": %s
 ERR_CATEGORIES_TWICE=%s ist bereits in „%s“
-ERR_CATEGORIES_OTHER=%s: „Sonstige“ ist eingebaut; übersprungen
+ERR_CATEGORIES_OTHER=%s: „Sonstige“ ist eingebaut
 ERR_CATEGORIES_MANY=%s Kategorien: über %s hinaus sind ihre Farben schwer zu unterscheiden

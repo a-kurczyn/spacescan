@@ -972,8 +972,12 @@ impl DiskScanApp {
     }
 
     /// Keys 1–9: picks the category at that position in the bar, or shows
-    /// all files again if it's already picked. 0: shows all files.
+    /// all files again if it's already picked. 0: shows all files. Only
+    /// while the bar is the panel shown.
     pub(crate) fn pick_category_key(&mut self, n: usize) {
+        if self.table.side != SidePanel::Categories {
+            return;
+        }
         let pick = match n {
             0 => None,
             _ => match self.cat_breakdown.get(n - 1) {
@@ -985,6 +989,105 @@ impl DiskScanApp {
         if pick != self.category {
             self.category_pending = Some(pick);
         }
+    }
+
+    /// The extensions table's rows (extension, size, files, category), in
+    /// the chosen order: all extensions, or the picked category's. Beyond
+    /// the first 40, rare extensions are summed up in one row (no category).
+    fn extension_rows(&self) -> Vec<(String, u64, u64, Option<Category>)> {
+        const SHOWN: usize = 40;
+        let mut rows: Vec<(String, u64, u64, Option<Category>)> = self
+            .cat_breakdown
+            .iter()
+            .filter(|r| self.category.is_none_or(|c| c == r.cat))
+            .flat_map(|r| {
+                r.exts
+                    .iter()
+                    .map(move |(e, size, files)| (ext_label(e), *size, *files, Some(r.cat)))
+            })
+            .collect();
+        // The rare ones are always the smallest, whatever the sort order.
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+        if rows.len() > SHOWN {
+            let rest = rows.split_off(SHOWN);
+            let size = rest.iter().map(|r| r.1).fold(0u64, u64::saturating_add);
+            let files = rest.iter().map(|r| r.2).sum();
+            let label = trf("EXT_OTHER_COUNT", &[&format_count(rest.len() as u64)]);
+            rows.push((label, size, files, None));
+        }
+        let sort = self.ext_sort;
+        rows.sort_by(|a, b| {
+            let order = match sort.column {
+                SortColumn::Files => a.2.cmp(&b.2),
+                SortColumn::Name => natural_cmp(&a.0, &b.0),
+                _ => a.1.cmp(&b.1),
+            };
+            if sort.ascending {
+                order
+            } else {
+                order.reverse()
+            }
+        });
+        rows
+    }
+
+    /// The left panel's table of sizes by file extension (see
+    /// `extension_rows`), sortable by its headers.
+    fn extension_table_ui(&mut self, ui: &mut egui::Ui, height: f32) {
+        let rows = self.extension_rows();
+        let dark = ui.visuals().dark_mode;
+        egui::ScrollArea::vertical()
+            .id_salt("ext_scroll")
+            .max_height(height.max(40.0))
+            .show(ui, |ui| {
+                egui::Grid::new("summary_ext_grid")
+                    .num_columns(3)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        sortable_header(
+                            ui,
+                            &tr("COL_EXTENSION"),
+                            SortColumn::Name,
+                            &mut self.ext_sort,
+                        );
+                        sortable_header(ui, &tr("COL_SIZE"), SortColumn::Size, &mut self.ext_sort);
+                        sortable_header(
+                            ui,
+                            &tr("COL_FILES"),
+                            SortColumn::Files,
+                            &mut self.ext_sort,
+                        );
+                        ui.end_row();
+                        for (ext, size, files, cat) in &rows {
+                            ui.horizontal(|ui| {
+                                // A swatch in the extension's category color.
+                                let (swatch, _) =
+                                    ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                                if let Some(cat) = cat {
+                                    ui.painter().rect_filled(
+                                        swatch,
+                                        2.0,
+                                        self.cats.color(*cat, dark),
+                                    );
+                                }
+                                ui.label(ext);
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(human_size(*size));
+                                },
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(format_count(*files));
+                                },
+                            );
+                            ui.end_row();
+                        }
+                    });
+            });
     }
 
     /// The category bar on the left, the contents table of `view_node` on
@@ -1031,8 +1134,17 @@ impl DiskScanApp {
         let mut clicked: Option<Category> = None;
         let mut clear = false;
         ui.horizontal(|ui| {
+            // Toggle: category bar or extensions table.
             if !compact {
-                ui.heading(tr("SUMMARY_CATEGORIES"));
+                for (side, key) in [
+                    (SidePanel::Categories, "SUMMARY_CATEGORIES"),
+                    (SidePanel::Extensions, "SUMMARY_EXTENSIONS"),
+                ] {
+                    let text = egui::RichText::new(tr(key)).strong();
+                    if ui.selectable_label(self.table.side == side, text).clicked() {
+                        self.table.side = side;
+                    }
+                }
             }
             if self.category.is_some()
                 && ui
@@ -1064,6 +1176,14 @@ impl DiskScanApp {
                     .wrap(),
             );
             height -= label.rect.height() + ui.spacing().item_spacing.y;
+        }
+
+        if !compact && self.table.side == SidePanel::Extensions {
+            self.extension_table_ui(ui, height);
+            if clear {
+                self.category_pending = Some(None);
+            }
+            return;
         }
 
         let rows = &self.cat_breakdown;
@@ -1302,20 +1422,7 @@ impl DiskScanApp {
                         .exts
                         .iter()
                         .take(6)
-                        .map(|(e, sz, _)| {
-                            format!(
-                                "{} {}",
-                                if e.is_empty() {
-                                    tr("EXT_NO_EXTENSION")
-                                } else if e.chars().any(|c| c.is_whitespace() || c.is_control()) {
-                                    // Quoted, so a trailing space shows.
-                                    format!("\".{}\"", e.escape_debug())
-                                } else {
-                                    format!(".{e}")
-                                },
-                                human_size(*sz)
-                            )
-                        })
+                        .map(|(e, sz, _)| format!("{} {}", ext_label(e), human_size(*sz)))
                         .collect();
                     ui.weak(exts.join("  ·  "));
                     ui.weak(tr(if picked {
@@ -1744,6 +1851,18 @@ impl DiskScanApp {
     }
 }
 
+/// An extension as shown: ".mkv", quoted if it has spaces or control
+/// characters (so a trailing space shows), or "(no extension)".
+fn ext_label(ext: &str) -> String {
+    if ext.is_empty() {
+        tr("EXT_NO_EXTENSION")
+    } else if ext.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        format!("\".{}\"", ext.escape_debug())
+    } else {
+        format!(".{ext}")
+    }
+}
+
 #[cfg(test)]
 mod category_bar_tests {
     use super::*;
@@ -1821,5 +1940,82 @@ mod category_bar_tests {
         assert_eq!(app.category, Some(docs));
         press(&mut app, 0);
         assert_eq!(app.category, None);
+    }
+
+    /// The extensions table lists the picked category's extensions only,
+    /// folds rare ones past 40 into one row, and sorts by its headers.
+    #[test]
+    fn extension_rows_follow_category_and_sort() {
+        let mut app = DiskScanApp::default();
+        let (video, docs) = (app.cats.of_name("a.mkv"), app.cats.of_name("a.pdf"));
+        let exts = |list: &[(&str, u64, u64)]| {
+            list.iter()
+                .map(|(e, s, f)| (e.to_string(), *s, *f))
+                .collect()
+        };
+        app.cat_breakdown = vec![
+            CategoryRow {
+                cat: video,
+                size: 30,
+                files: 3,
+                exts: exts(&[("mkv", 20, 1), ("srt", 10, 2)]),
+            },
+            CategoryRow {
+                cat: docs,
+                size: 5,
+                files: 9,
+                exts: exts(&[("pdf", 5, 9)]),
+            },
+        ];
+        let names = |rows: Vec<(String, u64, u64, Option<Category>)>| {
+            rows.into_iter().map(|r| r.0).collect::<Vec<_>>()
+        };
+        assert_eq!(names(app.extension_rows()), [".mkv", ".srt", ".pdf"]);
+        app.ext_sort = SortState {
+            column: SortColumn::Files,
+            ascending: false,
+        };
+        assert_eq!(names(app.extension_rows()), [".pdf", ".srt", ".mkv"]);
+        app.category = Some(video);
+        assert_eq!(names(app.extension_rows()).len(), 2);
+
+        app.category = None;
+        app.ext_sort = SortState {
+            column: SortColumn::Size,
+            ascending: false,
+        };
+        let many: Vec<(String, u64, u64)> = (0..45)
+            .map(|i| (format!("e{i}"), 100 - i as u64, 1))
+            .collect();
+        app.cat_breakdown = vec![CategoryRow {
+            cat: app.cats.other(),
+            size: 0,
+            files: 45,
+            exts: many,
+        }];
+        let rows = app.extension_rows();
+        assert_eq!(rows.len(), 41);
+        assert!(rows.iter().any(|r| r.3.is_none() && r.2 == 5));
+    }
+
+    /// The Extensions panel draws, and the choice is saved with the table's
+    /// settings.
+    #[test]
+    fn extensions_panel_draws_and_is_saved() {
+        let mut app = DiskScanApp::default();
+        app.summary_view = true;
+        app.full_root = Some(Arc::new(test_node(
+            "/t",
+            10,
+            true,
+            vec![test_node("/t/a.mkv", 10, false, vec![])],
+        )));
+        app.rebuild_view_tree();
+        app.table.side = SidePanel::Extensions;
+        frame(&mut app);
+        let prefs = app.table_prefs();
+        assert!(prefs.side == SidePanel::Extensions);
+        let json = serde_json::to_string(&prefs).unwrap();
+        assert!(json.contains("\"side\":\"extensions\""), "{json}");
     }
 }

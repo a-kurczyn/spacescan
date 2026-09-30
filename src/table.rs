@@ -12,6 +12,17 @@ use egui_extras::{Column, TableBuilder};
 const INFO_PANEL_WIDTH: f32 = 340.0;
 
 /// Columns that can be shown or hidden (Name is always shown).
+/// What the Summary view's left panel shows.
+#[derive(Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SidePanel {
+    /// The category bar.
+    #[default]
+    Categories,
+    /// The table of sizes by file extension.
+    Extensions,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum TableCol {
@@ -139,6 +150,8 @@ pub(crate) struct TableState {
     /// Rows that fit on screen, for PageUp/PageDown.
     page_rows: usize,
     pub dirs_first: bool,
+    /// What the left panel shows.
+    pub side: SidePanel,
     /// Off only until the app is closed ("e"); never saved.
     show_dotfiles: bool,
     hidden_cols: HashSet<TableCol>,
@@ -166,6 +179,7 @@ impl Default for TableState {
             scroll_pending: false,
             page_rows: 10,
             dirs_first: false,
+            side: SidePanel::Categories,
             show_dotfiles: true,
             hidden_cols: HashSet::new(),
             col_order: TableCol::ALL.to_vec(),
@@ -271,6 +285,7 @@ impl DiskScanApp {
                 .collect(),
             column_order: self.table.col_order.clone(),
             dirs_first: self.table.dirs_first,
+            side: self.table.side,
         }
     }
 
@@ -289,6 +304,7 @@ impl DiskScanApp {
         }
         self.table.col_order = order;
         self.table.dirs_first = p.dirs_first;
+        self.table.side = p.side;
     }
 
     /// Start of every frame: keeps keyboard focus off the table's buttons,
