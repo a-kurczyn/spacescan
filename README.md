@@ -96,10 +96,9 @@ are welcome.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Please read
-[CONTRIBUTING.md](CONTRIBUTING.md) first: every commit needs a DCO
-sign-off (`git commit -s`), and changes reach `main` after review by the
-maintainer.
+Ideas, suggestions and bug reports are welcome: please open an issue.
+Code contributions are by invitation only; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 spacemap is developed with the help of AI coding tools; every change is
 reviewed by the maintainer.
