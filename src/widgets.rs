@@ -306,7 +306,16 @@ pub(crate) fn draw_sort_order_icon(
     draw_chevron(painter, chevron_center, rect.width() * 0.17, false, color);
 }
 
-/// A toolbar button showing an icon painted by `draw`, in the color the
+/// What a square button is, for screen readers.
+#[derive(Clone, Copy)]
+pub(crate) enum ButtonRole {
+    /// A one-shot action; `lit` highlights it (e.g. the current scan target).
+    Action { lit: bool },
+    /// An on/off control, announced as a toggle.
+    Toggle { on: bool },
+}
+
+/// A toolbar toggle showing an icon painted by `draw`, in the color the
 /// button would give its text. `name` is its tooltip and its name for
 /// screen readers.
 pub(crate) fn icon_toolbar_button(
@@ -316,16 +325,37 @@ pub(crate) fn icon_toolbar_button(
     name: &str,
     draw: impl FnOnce(&egui::Painter, egui::Rect, Color32),
 ) -> egui::Response {
-    let resp = ui.add_enabled(
-        enabled,
-        egui::Button::new("")
-            .selected(selected)
-            .min_size(tool_button_size(ui)),
-    );
-    let color = ui.style().interact_selectable(&resp, selected).text_color();
+    square_button(ui, ButtonRole::Toggle { on: selected }, enabled, name, draw)
+}
+
+/// A square button of `tool_button_size` with an icon painted by `draw`.
+fn square_button(
+    ui: &mut egui::Ui,
+    role: ButtonRole,
+    enabled: bool,
+    name: &str,
+    draw: impl FnOnce(&egui::Painter, egui::Rect, Color32),
+) -> egui::Response {
+    let (lit, toggle_state) = match role {
+        ButtonRole::Action { lit } => (lit, None),
+        ButtonRole::Toggle { on } => (on, Some(on)),
+    };
+    // Only a toggle has a selected state (screen readers announce it as a
+    // toggle button); a lit action is highlighted by hand instead.
+    let mut button = egui::Button::new("").min_size(tool_button_size(ui));
+    if let Some(on) = toggle_state {
+        button = button.selected(on);
+    }
+    let resp = ui.add_enabled(enabled, button);
+    if lit && toggle_state.is_none() {
+        let fill = ui.visuals().selection.bg_fill;
+        let radius = ui.visuals().widgets.active.corner_radius;
+        ui.painter().rect_filled(resp.rect, radius, fill);
+    }
+    let color = ui.style().interact_selectable(&resp, lit).text_color();
     let icon_rect = resp.rect.shrink(resp.rect.width() * 0.24);
     draw(ui.painter(), icon_rect, color);
-    name_for_screen_readers(&resp, name, Some(selected));
+    name_for_screen_readers(&resp, name, toggle_state);
     resp.on_hover_text(name)
 }
 
@@ -342,13 +372,13 @@ pub(crate) fn tool_button_size(ui: &egui::Ui) -> Vec2 {
 /// readers.
 pub(crate) fn glyph_toolbar_button(
     ui: &mut egui::Ui,
-    selected: bool,
+    role: ButtonRole,
     enabled: bool,
     glyph: &str,
     name: &str,
 ) -> egui::Response {
     let font = egui::TextStyle::Button.resolve(ui.style());
-    icon_toolbar_button(ui, selected, enabled, name, |painter, rect, color| {
+    square_button(ui, role, enabled, name, |painter, rect, color| {
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -505,7 +535,7 @@ mod tests {
             ctx.run_ui(Default::default(), |ui| {
                 sortable_header(ui, "Size", SortColumn::Size, &mut state);
                 icon_toolbar_button(ui, true, true, "Chart view", draw_chart_icon);
-                let _ = ui.button("⟳").named("Rescan");
+                glyph_toolbar_button(ui, ButtonRole::Action { lit: true }, true, "⟳", "Rescan");
             })
         };
         let _ = run();
@@ -527,5 +557,16 @@ mod tests {
         );
         assert!(labels.iter().any(|l| l == "Chart view"));
         assert!(labels.iter().any(|l| l == "Rescan"));
+        // Toggles report their state; actions (even lit ones) don't.
+        let node = |label: &str| {
+            update
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label() == Some(label))
+                .map(|(_, n)| n.clone())
+                .unwrap()
+        };
+        assert!(node("Chart view").toggled().is_some());
+        assert!(node("Rescan").toggled().is_none());
     }
 }

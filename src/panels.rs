@@ -124,7 +124,7 @@ impl DiskScanApp {
                     // Starting points: folder dialog, root, home (lit while scanned).
                     if glyph_toolbar_button(
                         ui,
-                        false,
+                        ButtonRole::Action { lit: false },
                         !picking_folder,
                         "🔍",
                         &tr("TOOLBAR_PICK_FOLDER"),
@@ -134,18 +134,38 @@ impl DiskScanApp {
                         open_picker = true;
                     }
                     let at_root = current_path.as_deref() == Some(Path::new("/"));
-                    if glyph_toolbar_button(ui, at_root, true, "/", &tr("TOOLBAR_SCAN_ROOT"))
-                        .clicked()
+                    if glyph_toolbar_button(
+                        ui,
+                        ButtonRole::Action { lit: at_root },
+                        true,
+                        "/",
+                        &tr("TOOLBAR_SCAN_ROOT"),
+                    )
+                    .clicked()
                     {
                         start_at = Some(PathBuf::from("/"));
                     }
                     let at_home = current_path.as_deref() == Some(home.as_path());
                     let home_name = trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]);
-                    if glyph_toolbar_button(ui, at_home, true, "🏠", &home_name).clicked() {
+                    if glyph_toolbar_button(
+                        ui,
+                        ButtonRole::Action { lit: at_home },
+                        true,
+                        "🏠",
+                        &home_name,
+                    )
+                    .clicked()
+                    {
                         start_at = Some(home.clone());
                     }
-                    if glyph_toolbar_button(ui, false, can_reload, "⟳", &tr("TOOLBAR_RESCAN"))
-                        .clicked()
+                    if glyph_toolbar_button(
+                        ui,
+                        ButtonRole::Action { lit: false },
+                        can_reload,
+                        "⟳",
+                        &tr("TOOLBAR_RESCAN"),
+                    )
+                    .clicked()
                     {
                         rescan = true;
                     }
@@ -230,8 +250,14 @@ impl DiskScanApp {
                 // Right to left: settings, filters, then empty trash and the view
                 // buttons.
                 |ui| {
-                    if glyph_toolbar_button(ui, settings_open, true, "⚙", &tr("SETTINGS_TITLE"))
-                        .clicked()
+                    if glyph_toolbar_button(
+                        ui,
+                        ButtonRole::Toggle { on: settings_open },
+                        true,
+                        "⚙",
+                        &tr("SETTINGS_TITLE"),
+                    )
+                    .clicked()
                     {
                         settings_toggled = true;
                     }
@@ -253,8 +279,14 @@ impl DiskScanApp {
                     }
                     ui.separator();
 
-                    if glyph_toolbar_button(ui, false, true, "🗑", &tr("TOOLBAR_EMPTY_TRASH"))
-                        .clicked()
+                    if glyph_toolbar_button(
+                        ui,
+                        ButtonRole::Action { lit: false },
+                        true,
+                        "🗑",
+                        &tr("TOOLBAR_EMPTY_TRASH"),
+                    )
+                    .clicked()
                     {
                         empty_bin = true;
                     }
@@ -1208,12 +1240,7 @@ impl DiskScanApp {
                     }
                 }
             }
-            if self.pick.is_some()
-                && ui
-                    .small_button("×")
-                    .on_hover_text(tr("CAT_CLEAR"))
-                    .clicked()
-            {
+            if self.pick.is_some() && ui.small_button("×").named(&tr("CAT_CLEAR")).clicked() {
                 clear = true;
             }
         });
