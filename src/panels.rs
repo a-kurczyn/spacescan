@@ -1059,10 +1059,12 @@ impl DiskScanApp {
 
     /// The left panel's table of sizes by file extension, sortable by its
     /// headers. Clicking a row shows only that extension's files (again:
-    /// all files); the picked one is highlighted and the others dimmed.
-    /// Only the visible rows are drawn, so thousands of extensions are fine.
+    /// all files); the picked one is highlighted and the others dimmed. Each
+    /// row is a named button for screen readers. Only the visible rows are
+    /// drawn, so thousands of extensions are fine.
     fn extension_table_ui(&mut self, ui: &mut egui::Ui, height: f32) {
         let rows = self.extension_rows();
+        let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);
         let dark = ui.visuals().dark_mode;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         let mut clicked: Option<String> = None;
@@ -1151,8 +1153,22 @@ impl DiskScanApp {
                             );
                         });
                     });
-                    let hit = table_row
-                        .response()
+                    let hit = table_row.response();
+                    // The name screen readers announce, as for the category bar.
+                    let pct = row.size as f64 * 100.0 / total.max(1) as f64;
+                    let spoken = trf(
+                        "A11Y_CATEGORY",
+                        &[
+                            &row.label,
+                            &format!("{pct:.1}%"),
+                            &human_size(row.size),
+                            &format_count(row.files),
+                        ],
+                    );
+                    hit.widget_info(|| {
+                        egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, &spoken)
+                    });
+                    let hit = hit
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .on_hover_text(tr(if picked {
                             "CAT_CLICK_AGAIN"
@@ -1184,7 +1200,7 @@ impl DiskScanApp {
         let cat_w = if compact {
             40.0
         } else {
-            (full_w * 0.3).clamp(150.0, 210.0)
+            (full_w * 0.3).clamp(150.0, 260.0)
         };
         let table_w = (full_w - cat_w - 16.0).max(200.0);
         ui.horizontal_top(|ui| {
@@ -2120,5 +2136,43 @@ mod category_bar_tests {
         assert!(prefs.side == SidePanel::Extensions);
         let json = serde_json::to_string(&prefs).unwrap();
         assert!(json.contains("\"side\":\"extensions\""), "{json}");
+    }
+
+    /// Extension rows are named buttons for screen readers, marked
+    /// selected when picked.
+    #[test]
+    fn extension_rows_are_named_for_screen_readers() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        app.full_root = Some(Arc::new(test_node(
+            "/t",
+            10,
+            true,
+            vec![test_node("/t/a.mkv", 10, false, vec![])],
+        )));
+        app.rebuild_view_tree();
+        app.table.side = SidePanel::Extensions;
+        app.pick = Some(Pick::Extension("mkv".into()));
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let root = app.root.clone().unwrap();
+                let view = get_node(&root, app.view_stack.last().unwrap());
+                app.summary_ui(ui, view);
+            });
+            update = out.platform_output.accesskit_update;
+        }
+        let update = update.expect("accesskit output");
+        let row = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label().is_some_and(|l| l.starts_with(".mkv,")))
+            .map(|(_, n)| n.clone())
+            .expect("a named .mkv row");
+        assert!(row.toggled().is_some());
     }
 }
