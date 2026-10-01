@@ -1207,12 +1207,22 @@ impl DiskScanApp {
         ui.horizontal(|ui| {
             // Toggle: category bar or extensions table.
             if !compact {
-                for (side, key) in [
-                    (SidePanel::Categories, "SUMMARY_CATEGORIES"),
-                    (SidePanel::Extensions, "SUMMARY_EXTENSIONS"),
-                ] {
-                    let text = egui::RichText::new(tr(key)).strong();
-                    if ui.selectable_label(self.table.side == side, text).clicked() {
+                let views: [(SidePanel, &str, DrawIcon); 2] = [
+                    (
+                        SidePanel::Categories,
+                        "SUMMARY_CATEGORIES",
+                        draw_category_bar_icon,
+                    ),
+                    (
+                        SidePanel::Extensions,
+                        "SUMMARY_EXTENSIONS",
+                        draw_extension_icon,
+                    ),
+                ];
+                for (side, key, icon) in views {
+                    if icon_toolbar_button(ui, self.table.side == side, true, &tr(key), icon)
+                        .clicked()
+                    {
                         self.table.side = side;
                     }
                 }
@@ -1776,7 +1786,7 @@ impl DiskScanApp {
             let is_real_folder = h.is_dir && !h.is_other;
             let is_real_file = !h.is_dir && !h.is_free;
             // No icon for "other" or free space.
-            let icon: Option<fn(&egui::Painter, egui::Rect, Color32)> = if is_real_file {
+            let icon: Option<DrawIcon> = if is_real_file {
                 Some(draw_file_icon)
             } else if is_real_folder {
                 Some(draw_folder_icon)

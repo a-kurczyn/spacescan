@@ -126,6 +126,48 @@ pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: C
     }
 }
 
+/// A function that paints an icon into a rectangle in a color.
+pub(crate) type DrawIcon = fn(&egui::Painter, egui::Rect, Color32);
+
+/// Categories icon: a narrow bar split into three uneven segments, the top
+/// one filled, like a small category bar.
+pub(crate) fn draw_category_bar_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.3, color);
+    let w = rect.width() * 0.45;
+    let bar = egui::Rect::from_center_size(rect.center(), Vec2::new(w, rect.height()));
+    let split1 = bar.top() + bar.height() * 0.45;
+    let split2 = bar.top() + bar.height() * 0.75;
+    painter.rect_filled(
+        egui::Rect::from_min_max(bar.left_top(), Pos2::new(bar.right(), split1)),
+        egui::CornerRadius::from(1u8),
+        color,
+    );
+    painter.rect_stroke(
+        bar,
+        egui::CornerRadius::from(1u8),
+        stroke,
+        egui::StrokeKind::Inside,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(bar.left(), split2),
+            Pos2::new(bar.right(), split2),
+        ],
+        stroke,
+    );
+}
+
+/// Extensions icon: a file with a round tag on its corner.
+pub(crate) fn draw_extension_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let file = egui::Rect::from_min_max(rect.left_top(), rect.right_bottom() - rect.size() * 0.15);
+    draw_file_icon(painter, file, color);
+    painter.circle_filled(
+        rect.right_bottom() - rect.size() * 0.12,
+        rect.width() * 0.2,
+        color,
+    );
+}
+
 /// Folder icon.
 pub(crate) fn draw_folder_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);
