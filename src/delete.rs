@@ -772,6 +772,7 @@ mod tests {
             apparent_size: true,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
+            in_file_order: false,
         };
         let tree = scan_dir(&top, &ctx);
         assert_eq!(tree.file_count, files);

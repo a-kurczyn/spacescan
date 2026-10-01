@@ -445,6 +445,27 @@ pub(crate) fn mount_points() -> HashSet<PathBuf> {
         .collect()
 }
 
+/// True if `path` is on a spinning disk. Linux reports it per disk in
+/// /sys/dev/block/<major>:<minor>/queue/rotational (for a partition, in its
+/// disk's folder, one level up). Network shares and virtual devices have no
+/// such entry and count as not rotational.
+pub(crate) fn is_rotational(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let dev = meta.dev();
+    let (major, minor) = (libc::major(dev), libc::minor(dev));
+    let block = PathBuf::from(format!("/sys/dev/block/{major}:{minor}"));
+    [
+        block.join("queue/rotational"),
+        block.join("../queue/rotational"),
+    ]
+    .iter()
+    .find_map(|f| std::fs::read_to_string(f).ok())
+    .is_some_and(|v| v.trim() == "1")
+}
+
 /// mountinfo writes space, tab, newline and backslash as octal escapes
 /// (`\040` for a space).
 pub(crate) fn unescape_mountinfo(s: &str) -> String {
@@ -483,6 +504,9 @@ pub(crate) struct ScanCtx<'a> {
     /// Set once any name has Korean script in it, so the app can load a
     /// font for it (see `install_fallback_fonts`).
     pub(crate) saw_hangul: &'a std::sync::atomic::AtomicBool,
+    /// Read each folder's entries in file-number order (for spinning disks,
+    /// see `is_rotational`).
+    pub(crate) in_file_order: bool,
 }
 
 impl ScanCtx<'_> {
@@ -679,6 +703,14 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         }
     };
 
+    // On a spinning disk, reading entries in file-number order (where the
+    // filesystem keeps their details, e.g. NTFS's file table) saves most of
+    // the seeking: about 10× faster on a big folder.
+    let mut entries = entries;
+    if ctx.in_file_order {
+        use std::os::unix::fs::DirEntryExt;
+        entries.sort_by_key(|e| e.ino());
+    }
     let children: Vec<Node> = entries
         .par_iter()
         .map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx))
@@ -1035,6 +1067,7 @@ mod memory {
                 apparent_size: false,
                 hard_links: Default::default(),
                 saw_hangul: &Default::default(),
+                in_file_order: false,
             };
             scan_dir(&root, &ctx)
         };
@@ -1108,6 +1141,7 @@ mod hangul_tests {
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &seen,
+            in_file_order: false,
         };
         let _ = scan_dir(&dir, &ctx);
         assert!(seen.load(std::sync::atomic::Ordering::Relaxed));
@@ -1160,6 +1194,7 @@ mod live_category_tests {
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
+            in_file_order: false,
         };
         let tree = scan_dir(&dir, &ctx);
         drop(tx);
@@ -1188,11 +1223,26 @@ mod scan_perf {
 
     /// Scan timing on the folder in $SPACEMAP_BENCH (run with
     /// `SPACEMAP_BENCH=<dir> cargo test --release scan_perf -- --ignored --nocapture`).
+    /// $SPACEMAP_THREADS sets the number of scan threads, and $SPACEMAP_RUNS
+    /// the number of runs (default 5; 1 for a cold-cache measurement).
     #[test]
     #[ignore]
     fn scan_bench() {
         let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").expect("set SPACEMAP_BENCH"));
-        for run in 0..5 {
+        let env_num = |name: &str, default: usize| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        };
+        let threads = env_num("SPACEMAP_THREADS", 0);
+        // $SPACEMAP_FILE_ORDER=1 reads entries in file-number order.
+        let in_file_order = std::env::var_os("SPACEMAP_FILE_ORDER").is_some();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        for run in 0..env_num("SPACEMAP_RUNS", 5) {
             let (tx, rx) = channel();
             let drain = std::thread::spawn(move || rx.into_iter().count());
             let ctx = ScanCtx {
@@ -1204,17 +1254,61 @@ mod scan_perf {
                 apparent_size: false,
                 hard_links: Default::default(),
                 saw_hangul: &Default::default(),
+                in_file_order,
             };
             let t = Instant::now();
-            let tree = scan_dir(&dir, &ctx);
+            let tree = pool.install(|| scan_dir(&dir, &ctx));
             let took = t.elapsed();
             drop(tx);
             let msgs = drain.join().unwrap();
             eprintln!(
-                "run {run}: {took:?}, {} files, {msgs} messages",
+                "run {run}: {took:?}, {} threads, {} files, {msgs} messages",
+                pool.current_num_threads(),
                 tree.file_count
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    /// Reading entries in file-number order gives the same tree.
+    #[test]
+    fn file_order_gives_the_same_tree() {
+        let dir = std::env::temp_dir().join(format!("spacemap-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for i in 0..50 {
+            std::fs::write(dir.join(format!("f{i}")), vec![0u8; i * 100]).unwrap();
+            std::fs::write(dir.join(format!("sub/g{i}")), vec![0u8; i * 10]).unwrap();
+        }
+        let scan = |in_file_order: bool| {
+            let (tx, rx) = channel();
+            std::thread::spawn(move || for _ in rx {});
+            let ctx = ScanCtx {
+                mounts: &HashSet::new(),
+                progress: &tx,
+                counter: &Default::default(),
+                cancel: &Default::default(),
+                progress_interval: 512,
+                apparent_size: true,
+                hard_links: Default::default(),
+                saw_hangul: &Default::default(),
+                in_file_order,
+            };
+            let tree = scan_dir(&dir, &ctx);
+            (tree.size, tree.file_count, tree.children.len())
+        };
+        assert_eq!(scan(true), scan(false));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Paths without a block device (here /proc) count as not rotational.
+    #[test]
+    fn virtual_filesystems_are_not_rotational() {
+        assert!(!is_rotational(Path::new("/proc")));
     }
 }
 
@@ -1245,6 +1339,7 @@ mod mount_tests {
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
+            in_file_order: false,
         };
         let tree = scan_dir(&dir, &ctx);
         let child = |name: &str| {

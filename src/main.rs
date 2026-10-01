@@ -525,6 +525,7 @@ impl DiskScanApp {
                 apparent_size,
                 hard_links: Default::default(),
                 saw_hangul: &saw_hangul,
+                in_file_order: is_rotational(&path),
             };
             let root = scan_dir(&path, &ctx);
             scan_finished.store(true, std::sync::atomic::Ordering::Relaxed);
