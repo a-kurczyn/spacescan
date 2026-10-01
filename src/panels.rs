@@ -1527,6 +1527,14 @@ impl DiskScanApp {
         }
     }
 
+    /// How far slice colors have faded in after the last scan: 0 (grey) to
+    /// 1 (full color) over 0.8 s.
+    fn color_fade(&self) -> f32 {
+        const FADE: f32 = 0.8;
+        self.colored_at
+            .map_or(1.0, |t| (t.elapsed().as_secs_f32() / FADE).min(1.0))
+    }
+
     /// Draws one slice of the chart in its color. `geom` is (center, hub
     /// radius, ring thickness).
     fn draw_segment(
@@ -1543,6 +1551,8 @@ impl DiskScanApp {
             now,
         } = *colors;
         let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
+        let dark = painter.ctx().global_style().visuals.dark_mode;
+        let gray = self.cats.color(self.cats.other(), dark);
         let color = if seg.is_free {
             free_color
         } else {
@@ -1555,16 +1565,18 @@ impl DiskScanApp {
                     } else {
                         looks.of(get_node(view, &seg.idx_path), &self.cats)
                     };
-                    let dark = painter.ctx().global_style().visuals.dark_mode;
                     let color = look_color(&look, now, self.settings.age_weeks, &self.cats, dark);
                     // "Other" is paler, to read as a group.
-                    if seg.is_other {
+                    let color = if seg.is_other {
                         color.lerp_to_gamma(free_color, 0.35)
                     } else {
                         color
-                    }
+                    };
+                    // Right after a scan, colors fade in from grey.
+                    gray.lerp_to_gamma(color, self.color_fade())
                 }
-                _ => branch_color(seg),
+                // While scanning: grey until the colors are known.
+                _ => gray,
             }
         };
         draw_arc_mesh(
@@ -1633,6 +1645,9 @@ impl DiskScanApp {
             self.looks = Some((self.tree_gen, Looks::build(root, &self.cats)));
         }
         let now = now_secs();
+        if self.color_fade() < 1.0 {
+            ui.ctx().request_repaint();
+        }
 
         let pointer = ctx.input(|i| i.pointer.hover_pos());
         let mut new_hover: Option<HoverInfo> = None;

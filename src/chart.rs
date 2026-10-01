@@ -342,18 +342,6 @@ pub(crate) fn free_space_color(visuals: &egui::Visuals, gamma: f32) -> Color32 {
     gamma_lighten(visuals.panel_fill, gamma)
 }
 
-/// A slice's color while a scan runs (before categories and ages are
-/// known): its top-level slice's hue, darker on outer rings, paler for
-/// "other".
-pub(crate) fn branch_color(seg: &Segment) -> Color32 {
-    let hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
-    if seg.is_other {
-        return hsv_to_rgb(hue, 0.38, 0.8);
-    }
-    let val = (0.95 - seg.ring as f32 * 0.08).max(0.45);
-    hsv_to_rgb(hue, 0.55, val)
-}
-
 /// Folder name and size in the center hub, in `color`, wrapped to fit
 /// inside it.
 pub(crate) fn draw_hub_text(

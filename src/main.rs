@@ -185,6 +185,8 @@ struct DiskScanApp {
     cats: Arc<CategoryModel>,
     /// Slice looks of the displayed tree, for the tree_gen they were built for.
     looks: Option<(u64, Looks)>,
+    /// When the last scan finished: slice colors fade in from then.
+    colored_at: Option<Instant>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -347,6 +349,7 @@ impl Default for DiskScanApp {
             path_input_focused: false,
             cats: Arc::new(CategoryModel::defaults()),
             looks: None,
+            colored_at: None,
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::new(),
@@ -857,6 +860,7 @@ impl DiskScanApp {
                         self.partial_gen += 1;
                     }
                     Ok(ScanMsg::Done(node, secs)) => {
+                        self.colored_at = Some(Instant::now());
                         if self.graft.is_some() {
                             self.finish_graft(node);
                         } else {
@@ -947,7 +951,11 @@ impl eframe::App for DiskScanApp {
                     ui.strong(short_path(&n.path));
                     folder_stats_ui(ui, n);
                 });
-            // The category colors, in the bottom-left corner.
+        }
+
+        // Chart view, also while scanning: the category colors in the
+        // bottom-left corner.
+        if !self.summary_view && (self.root.is_some() || self.scanning) {
             let dark = ctx.global_style().visuals.dark_mode;
             egui::Area::new("category_legend".into())
                 .order(egui::Order::Foreground)
