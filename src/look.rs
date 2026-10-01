@@ -15,42 +15,10 @@ pub(crate) struct Look {
     pub(crate) size: u64,
 }
 
-/// What a folder's own files (not its subfolders') add to its look: size
-/// and file count per extension (`ext_key`), and their size-weighted
-/// Changed times. The scanner sends this with each finished folder.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct DirectFiles {
-    pub(crate) exts: Vec<(String, u64, u64)>,
-    pub(crate) ctime_sum: f64,
-    pub(crate) ctime_weight: f64,
-}
-
-impl DirectFiles {
-    /// The files among `children`.
-    pub(crate) fn of_children(children: &[Node]) -> Self {
-        let mut d = DirectFiles::default();
-        for c in children.iter().filter(|c| !c.is_dir) {
-            let key = ext_key(&c.name);
-            match d.exts.iter_mut().find(|e| e.0 == key) {
-                Some(e) => {
-                    e.1 = e.1.saturating_add(c.size);
-                    e.2 += c.file_count.max(1);
-                }
-                None => d.exts.push((key, c.size, c.file_count.max(1))),
-            }
-            if c.ctime != NO_TIME {
-                let weight = c.size.max(1) as f64;
-                d.ctime_sum += c.ctime as f64 * weight;
-                d.ctime_weight += weight;
-            }
-        }
-        d
-    }
-}
-
-/// The look of every folder in a tree, by path.
+/// The look of every folder in a tree, keyed by the folder node's address
+/// (valid until the tree is rebuilt).
 pub(crate) struct Looks {
-    folders: HashMap<PathBuf, Look>,
+    folders: HashMap<usize, Look>,
 }
 
 /// Running totals for one folder: bytes and files per category, and the
@@ -83,16 +51,6 @@ impl Totals {
         self.ctime_weight += other.ctime_weight;
     }
 
-    fn add_direct(&mut self, d: &DirectFiles, cats: &CategoryModel) {
-        for (ext, size, files) in &d.exts {
-            let cat = cats.of_ext(ext);
-            self.bytes[cat.0] = self.bytes[cat.0].saturating_add(*size);
-            self.files[cat.0] += files;
-        }
-        self.ctime_sum += d.ctime_sum;
-        self.ctime_weight += d.ctime_weight;
-    }
-
     fn add_file(&mut self, cat: Category, size: u64, ctime: i64) {
         self.bytes[cat.0] = self.bytes[cat.0].saturating_add(size);
         self.files[cat.0] += 1;
@@ -123,16 +81,9 @@ impl Totals {
 }
 
 impl Looks {
-    /// No looks yet.
-    pub(crate) fn empty() -> Looks {
-        Looks {
-            folders: HashMap::new(),
-        }
-    }
-
     /// Works out the look of every folder under `root`, in one pass.
     pub(crate) fn build(root: &Node, cats: &CategoryModel) -> Looks {
-        fn walk(n: &Node, cats: &CategoryModel, out: &mut HashMap<PathBuf, Look>) -> Totals {
+        fn walk(n: &Node, cats: &CategoryModel, out: &mut HashMap<usize, Look>) -> Totals {
             let mut totals = Totals::new(cats.other().0 + 1);
             for c in &n.children {
                 if c.is_dir {
@@ -142,7 +93,7 @@ impl Looks {
                     totals.add_file(cats.of_name(&c.name), c.size, c.ctime);
                 }
             }
-            out.insert(n.path.clone(), totals.look(n.size));
+            out.insert(n as *const Node as usize, totals.look(n.size));
             totals
         }
         let mut folders = HashMap::new();
@@ -150,44 +101,12 @@ impl Looks {
         Looks { folders }
     }
 
-    /// The same for the live tree of a running scan, which has folders but
-    /// no files: each folder's own files come from `direct`, by path.
-    pub(crate) fn build_live(
-        root: &Node,
-        direct: &HashMap<PathBuf, DirectFiles>,
-        cats: &CategoryModel,
-    ) -> Looks {
-        fn walk(
-            n: &Node,
-            direct: &HashMap<PathBuf, DirectFiles>,
-            cats: &CategoryModel,
-            out: &mut HashMap<PathBuf, Look>,
-        ) -> Totals {
-            let mut totals = Totals::new(cats.other().0 + 1);
-            if let Some(d) = direct.get(&n.path) {
-                totals.add_direct(d, cats);
-            }
-            for c in n.children.iter().filter(|c| c.is_dir) {
-                let sub = deep(|| walk(c, direct, cats, out));
-                totals.add(&sub);
-            }
-            out.insert(n.path.clone(), totals.look(n.size));
-            totals
-        }
-        let mut folders = HashMap::new();
-        walk(root, direct, cats, &mut folders);
-        Looks { folders }
-    }
-
     /// The look of node `n`: a file's own, or its folder's.
     pub(crate) fn of(&self, n: &Node, cats: &CategoryModel) -> Look {
-        if n.is_dir {
-            // A folder not worked out yet (the live tree just grew) is grey.
-            return self.folders.get(&n.path).copied().unwrap_or(Look {
-                cat: cats.other(),
-                avg_ctime: NO_TIME,
-                size: n.size,
-            });
+        if n.is_dir
+            && let Some(look) = self.folders.get(&(n as *const Node as usize))
+        {
+            return *look;
         }
         let mut totals = Totals::new(cats.other().0 + 1);
         totals.add_file(cats.of_name(&n.name), n.size, n.ctime);
@@ -313,47 +232,6 @@ mod tests {
         assert_eq!(cats.label(file.cat), "Documents");
     }
 
-    /// The live tree (folders plus each folder's own files) gives the same
-    /// looks as the finished tree.
-    #[test]
-    fn live_looks_match_finished_looks() {
-        let cats = CategoryModel::defaults();
-        let file = |p: &str, size: u64, ctime: i64| {
-            let mut n = test_node(p, size, false, vec![]);
-            n.ctime = ctime;
-            n
-        };
-        let sub = test_node(
-            "/r/s",
-            3000,
-            true,
-            vec![file("/r/s/a.mkv", 2000, 100), file("/r/s/b.txt", 1000, 900)],
-        );
-        let root = test_node("/r", 3500, true, vec![sub, file("/r/c.flac", 500, 50)]);
-        let finished = Looks::build(&root, &cats);
-        let mut direct = HashMap::new();
-        direct.insert(
-            PathBuf::from("/r"),
-            DirectFiles::of_children(&root.children),
-        );
-        direct.insert(
-            PathBuf::from("/r/s"),
-            DirectFiles::of_children(&root.children[0].children),
-        );
-        let live_root = test_node(
-            "/r",
-            3500,
-            true,
-            vec![test_node("/r/s", 3000, true, vec![])],
-        );
-        let live = Looks::build_live(&live_root, &direct, &cats);
-        assert_eq!(live.of(&live_root, &cats), finished.of(&root, &cats));
-        assert_eq!(
-            live.of(&live_root.children[0], &cats),
-            finished.of(&root.children[0], &cats)
-        );
-    }
-
     #[test]
     fn shades_get_darker_with_age() {
         let c = Color32::from_rgb(200, 100, 50);
@@ -392,40 +270,6 @@ mod perf {
         for _ in 0..3 {
             let t = Instant::now();
             let looks = Looks::build(&root, &cats);
-            eprintln!("{:?} for {} folders", t.elapsed(), looks.folders.len());
-        }
-    }
-
-    /// Time to rebuild the live looks of a 300,000-folder scan (run with
-    /// `cargo test --release live_looks_300k -- --ignored --nocapture`).
-    #[test]
-    #[ignore]
-    fn live_looks_300k() {
-        let cats = CategoryModel::defaults();
-        let mut direct = HashMap::new();
-        let tops: Vec<Node> = (0..300)
-            .map(|t| {
-                let subs: Vec<Node> = (0..1000)
-                    .map(|f| {
-                        let path = format!("/r/t{t}/s{f}");
-                        direct.insert(
-                            PathBuf::from(&path),
-                            DirectFiles {
-                                exts: vec![("mkv".into(), 4096, 3), ("txt".into(), 100, 2)],
-                                ctime_sum: 1.0,
-                                ctime_weight: 1.0,
-                            },
-                        );
-                        test_node(&path, 4196, true, vec![])
-                    })
-                    .collect();
-                test_node(&format!("/r/t{t}"), 0, true, subs)
-            })
-            .collect();
-        let root = test_node("/r", 0, true, tops);
-        for _ in 0..3 {
-            let t = Instant::now();
-            let looks = Looks::build_live(&root, &direct, &cats);
             eprintln!("{:?} for {} folders", t.elapsed(), looks.folders.len());
         }
     }

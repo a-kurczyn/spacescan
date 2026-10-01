@@ -916,19 +916,6 @@ impl DiskScanApp {
 
         let bg = ui.visuals().panel_fill;
         let free_color = free_space_color(ui.visuals(), self.settings.free_space_gamma);
-        // Slice looks of the live tree, rebuilt as folders finish, so the
-        // colors are already the final ones. At most every 250 ms, and not
-        // more often than 5× the last rebuild's time, so huge scans stay
-        // smooth.
-        let interval = (self.live_looks_took * 5).max(std::time::Duration::from_millis(250));
-        if self.live_looks_gen != self.partial_gen && self.live_looks_at.elapsed() >= interval {
-            let started = Instant::now();
-            self.live_looks = Looks::build_live(&self.partial_root, &self.live_files, &self.cats);
-            self.live_looks_took = started.elapsed();
-            self.live_looks_gen = self.partial_gen;
-            self.live_looks_at = Instant::now();
-        }
-        let now = now_secs();
         painter.circle_filled(center, hub_radius, bg);
         draw_hub_text(
             &painter,
@@ -954,9 +941,8 @@ impl DiskScanApp {
         for seg in &segs {
             let colors = SliceColoring {
                 free_color,
-                view: Some(&self.partial_root),
-                looks: Some(&self.live_looks),
-                now,
+                view: None,
+                now: 0,
             };
             self.draw_segment(&painter, seg, (center, hub_radius, ring_thickness), &colors);
         }
@@ -1554,15 +1540,14 @@ impl DiskScanApp {
         let SliceColoring {
             free_color,
             view,
-            looks,
             now,
         } = *colors;
         let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
         let color = if seg.is_free {
             free_color
         } else {
-            match (view, looks) {
-                (Some(view), Some(looks)) => {
+            match (view, &self.looks) {
+                (Some(view), Some((_, looks))) => {
                     let look = if seg.is_other {
                         let parent = get_node(view, &seg.idx_path[..seg.idx_path.len() - 1]);
                         let rest = seg.rest.iter().filter_map(|&i| parent.children.get(i));
@@ -1659,7 +1644,6 @@ impl DiskScanApp {
             let colors = SliceColoring {
                 free_color,
                 view: Some(view_node),
-                looks: self.looks.as_ref().map(|(_, l)| l),
                 now,
             };
             self.draw_segment(painter, seg, geom, &colors);
@@ -1997,13 +1981,11 @@ struct ExtRow {
 }
 
 /// How slices are colored: by category and age when `view` (the folder the
-/// chart shows) and its tree's `looks` are given, else by branch.
+/// chart shows) is given, else by branch (during a scan).
 #[derive(Clone, Copy)]
 struct SliceColoring<'a> {
     free_color: Color32,
     view: Option<&'a Node>,
-    /// The looks of the tree `view` belongs to.
-    looks: Option<&'a Looks>,
     /// The current time, for slice ages.
     now: i64,
 }
