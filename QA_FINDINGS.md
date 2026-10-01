@@ -72,6 +72,12 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-50 | S4 | Spanish UI: the category panel and tooltips stay English with the installed language file | VERIFIED | b8155cd | All languages are built into the app; a language file in the user's folder only overrides the lines it contains, so anything it lacks shows in the built-in translation (Spanish here), not English. Adds French, German, Italian, Portuguese, Russian, Japanese, Chinese and Korean. | **QA ✔ with the older installed es.lang the whole category panel, tooltips and heading are Spanish.** |
 | SM-51 | S4 | Category names and extensions: display oddities | VERIFIED | 9557834 | A category named like the built-in Other (in any case, or the CAT_OTHER token) is skipped with a note in Issues. Long names end in "…" (full name in the tooltip). An extension with spaces or control characters is shown quoted in the tooltip, e.g. ".mkv ". .ts is now Code (user decision); .idx stays in Video. Also (round-11 nit): the tooltip and spoken name say "files: N" instead of "N files". | **QA ✔ "oThEr" and CAT_OTHER skipped with an Issue (one grey Other); 300-char name ends in "…"; ".mkv " quoted in the tooltip; "Files: N". Nit: the Issue reads "…is built in; skipped; "Other": …" — slightly repetitive.** |
 | SM-52 | S3 | Light KDE colour scheme: highlighted text is white on white (category names, current folder, chart hub) | VERIFIED | 20808f2 | With a light KDE scheme the whole UI uses a light style: highlighted, selected and hovered text, table headers, the chart hub and path are dark on light; category colors use their light-background shades; the free-space slice is a little darker than the background instead of invisible. | **QA ✔ Breeze Light: category names, tooltip titles, picked label, current breadcrumb, chart path and hub text readable.** |
+| SM-53 | S1 | btrfs: Delete on a subvolume/snapshot removes all of it while the dialog says "0 B, file count: 0" | OPEN | | |
+| SM-54 | S2 | btrfs: subvolumes and snapshots shown as "[other filesystem]", 0 B, not scanned | OPEN | | |
+| SM-55 | S3 | A user language file that is a FIFO or a link to /dev/zero hangs startup / eats memory (13 GB in 2 s) | OPEN | | |
+| SM-56 | S4 | Action buttons (Rescan, Empty trash, Choose folder) are announced as toggle buttons | OPEN | | |
+| SM-57 | S4 | Extensions table: "(no extension)" is cut to "(no extens…" at the default panel width | OPEN | | |
+| SM-58 | S4 | Extensions table rows can't be picked with a screen reader (exposed as plain text) | OPEN | | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -367,6 +373,37 @@ Expected:
 - Scenario: a light KDE colour scheme (e.g. Breeze Light) in the user's kdeglobals, which spacemap follows.
 - Actual: every text drawn in the "strong/highlight" colour is invisible or nearly so: the category names in the bar (only "48.0% · 17 MiB" can be read), the tooltip's title line, the picked category's label (white on light blue), the hovered label (dark box, dark text), the current folder in the breadcrumbs (the path ends at "cat /"), and in the chart the path line and the hub's name and size. Table header labels are very faint too.
 - Expected: text readable against the scheme's background (use the scheme's text colour for strong text), for all of the above.
+
+### SM-53 · S1 · btrfs: Delete on a subvolume or snapshot removes all of it; the dialog says it is empty
+- Scenario: on btrfs (the default on Fedora and openSUSE), a folder contains a subvolume or a snapshot (snapper snapshots, container or VM storage, a user's own subvolume). Select it and press D.
+- Actual: the row reads "[other filesystem]", 0 B. The dialog says "The folder and everything in it (0 B, file count: 0)". Confirming permanently deletes the whole snapshot and all its files (tens of MB in our case), and reports nothing in Issues.
+- Expected: the dialog states what will really be deleted (it isn't empty), or delete refuses as it does for other-device folders ("permanent delete also stops at any other-device folder" — SM-00), with a clear message. Trash should behave consistently.
+
+### SM-54 · S2 · btrfs: subvolumes and snapshots are not counted
+- Scenario: scan a btrfs folder that contains subvolumes or snapshots (not separate mounts).
+- Actual: they're listed as "[other filesystem]" with 0 B and 0 files; opening one shows it empty; totals leave them out (e.g. 250 MiB where du reports 371 MiB). On a Fedora/openSUSE disk this can hide snapshots and container storage, often the biggest space users.
+- Expected: a subvolume that isn't a mount point is part of the scanned filesystem: scan and count it (du does). If snapshots share data with their source, say so (e.g. a note), rather than showing 0.
+- Related, informational: on compressed btrfs, sizes are the uncompressed sizes (like du); real usage can be far smaller.
+
+### SM-55 · S3 · User language file that never ends: startup hang or runaway memory
+- Scenario: ~/.config/spacemap/lang/<code>.lang is a FIFO, or a symlink to a device such as /dev/zero (a mistake, a sync tool, or a hostile config).
+- Actual: FIFO → startup blocks ~10+ s and the window stays unusable. /dev/zero → memory grows to 13 GB within 2 s (our guard killed it); on a normal desktop this can freeze the machine. categories.json and settings.json are already safe against the same files.
+- Expected: same rules as categories.json: regular files only, a size cap, non-blocking open; report in Issues and fall back to the built-in language.
+
+### SM-56 · S4 · One-shot action buttons are announced as toggle buttons
+- Scenario: screen reader on the toolbar, since the buttons were made the same square size.
+- Actual: "Rescan this folder", "Empty trash" and "Choose any drive, mount point or folder to scan" are exposed as toggle buttons (read as "toggle button, not pressed").
+- Expected: plain buttons for actions; toggle buttons only for on/off controls (views, Filters, Chart settings).
+
+### SM-57 · S4 · "(no extension)" is cut off in the Extensions table
+- Scenario: Extensions view at the default panel width.
+- Actual: the row reads "(no extens…".
+- Expected: the label fits (wider column or a shorter label such as "(none)"), with the full text in the tooltip.
+
+### SM-58 · S4 · Extension rows can't be picked with a screen reader
+- Scenario: screen reader in the Extensions view (picking an extension became possible in 53b33ee).
+- Actual: each row is exposed as three plain text labels (extension, size, files); nothing is a button, so the pick can't be reached or announced. The category bar got this right in SM-47.
+- Expected: each row is a named, selectable button (e.g. ".mkv, 11 MiB, files: 6"), marked selected when picked.
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.
