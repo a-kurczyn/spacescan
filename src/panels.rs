@@ -122,36 +122,29 @@ impl DiskScanApp {
                 ui,
                 |ui| {
                     // Starting points: folder dialog, root, home (lit while scanned).
-                    if ui
-                        .add_enabled(!picking_folder, egui::Button::new("🔍"))
-                        .named(&tr("TOOLBAR_PICK_FOLDER"))
-                        .clicked()
+                    if glyph_toolbar_button(
+                        ui,
+                        false,
+                        !picking_folder,
+                        "🔍",
+                        &tr("TOOLBAR_PICK_FOLDER"),
+                    )
+                    .clicked()
                     {
                         open_picker = true;
                     }
-                    if ui
-                        .add(
-                            egui::Button::new("/")
-                                .selected(current_path.as_deref() == Some(Path::new("/"))),
-                        )
-                        .named(&tr("TOOLBAR_SCAN_ROOT"))
+                    let at_root = current_path.as_deref() == Some(Path::new("/"));
+                    if glyph_toolbar_button(ui, at_root, true, "/", &tr("TOOLBAR_SCAN_ROOT"))
                         .clicked()
                     {
                         start_at = Some(PathBuf::from("/"));
                     }
-                    if ui
-                        .add(
-                            egui::Button::new("🏠")
-                                .selected(current_path.as_deref() == Some(home.as_path())),
-                        )
-                        .named(&trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]))
-                        .clicked()
-                    {
+                    let at_home = current_path.as_deref() == Some(home.as_path());
+                    let home_name = trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]);
+                    if glyph_toolbar_button(ui, at_home, true, "🏠", &home_name).clicked() {
                         start_at = Some(home.clone());
                     }
-                    if ui
-                        .add_enabled(can_reload, egui::Button::new("⟳"))
-                        .named(&tr("TOOLBAR_RESCAN"))
+                    if glyph_toolbar_button(ui, false, can_reload, "⟳", &tr("TOOLBAR_RESCAN"))
                         .clicked()
                     {
                         rescan = true;
@@ -237,9 +230,7 @@ impl DiskScanApp {
                 // Right to left: settings, filters, then empty trash and the view
                 // buttons.
                 |ui| {
-                    if ui
-                        .add(egui::Button::new("⚙").selected(settings_open))
-                        .named(&tr("SETTINGS_TITLE"))
+                    if glyph_toolbar_button(ui, settings_open, true, "⚙", &tr("SETTINGS_TITLE"))
                         .clicked()
                     {
                         settings_toggled = true;
@@ -262,7 +253,9 @@ impl DiskScanApp {
                     }
                     ui.separator();
 
-                    if ui.button("🗑").named(&tr("TOOLBAR_EMPTY_TRASH")).clicked() {
+                    if glyph_toolbar_button(ui, false, true, "🗑", &tr("TOOLBAR_EMPTY_TRASH"))
+                        .clicked()
+                    {
                         empty_bin = true;
                     }
                     if icon_toolbar_button(

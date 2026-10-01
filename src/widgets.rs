@@ -316,18 +316,47 @@ pub(crate) fn icon_toolbar_button(
     name: &str,
     draw: impl FnOnce(&egui::Painter, egui::Rect, Color32),
 ) -> egui::Response {
-    let size = ui.spacing().interact_size.y;
     let resp = ui.add_enabled(
         enabled,
         egui::Button::new("")
             .selected(selected)
-            .min_size(Vec2::splat(size)),
+            .min_size(tool_button_size(ui)),
     );
     let color = ui.style().interact_selectable(&resp, selected).text_color();
     let icon_rect = resp.rect.shrink(resp.rect.width() * 0.24);
     draw(ui.painter(), icon_rect, color);
     name_for_screen_readers(&resp, name, Some(selected));
     resp.on_hover_text(name)
+}
+
+/// The size of every toolbar and panel button: a square as tall as a
+/// text button, so glyph and painted icons line up.
+pub(crate) fn tool_button_size(ui: &egui::Ui) -> Vec2 {
+    Vec2::splat(
+        ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y,
+    )
+}
+
+/// A toolbar button showing `glyph` (🔍, ⚙, …) centered in the same square
+/// as the painted icons. `name` is its tooltip and its name for screen
+/// readers.
+pub(crate) fn glyph_toolbar_button(
+    ui: &mut egui::Ui,
+    selected: bool,
+    enabled: bool,
+    glyph: &str,
+    name: &str,
+) -> egui::Response {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    icon_toolbar_button(ui, selected, enabled, name, |painter, rect, color| {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            font,
+            color,
+        );
+    })
 }
 
 /// `.named(x)` on a glyph button (🔍, ⟳, ⚙ …): `x` becomes its tooltip and
