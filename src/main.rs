@@ -947,6 +947,25 @@ impl eframe::App for DiskScanApp {
                     ui.strong(short_path(&n.path));
                     folder_stats_ui(ui, n);
                 });
+            // The category colors, in the bottom-left corner.
+            let dark = ctx.global_style().visuals.dark_mode;
+            egui::Area::new("category_legend".into())
+                .order(egui::Order::Foreground)
+                .interactable(false)
+                .pivot(egui::Align2::LEFT_BOTTOM)
+                .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
+                .show(&ctx, |ui| {
+                    for i in 0..=self.cats.other().0 {
+                        let cat = Category(i);
+                        ui.horizontal(|ui| {
+                            let (swatch, _) =
+                                ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                            ui.painter()
+                                .rect_filled(swatch, 2.0, self.cats.color(cat, dark));
+                            ui.label(egui::RichText::new(self.cats.label(cat)).small());
+                        });
+                    }
+                });
         }
 
         // Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
