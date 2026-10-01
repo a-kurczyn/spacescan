@@ -989,7 +989,7 @@ impl DiskScanApp {
 
     /// The extensions table's rows: every extension in the folder (also
     /// while something is picked, so each stays clickable), in the chosen
-    /// order, with "(no extension)" always last.
+    /// order.
     fn extension_rows(&self) -> Vec<ExtRow> {
         let mut rows: Vec<ExtRow> = self
             .cat_breakdown
@@ -1011,12 +1011,11 @@ impl DiskScanApp {
                 SortColumn::Name => natural_cmp(&a.label, &b.label),
                 _ => a.size.cmp(&b.size),
             };
-            let order = if sort.ascending {
+            if sort.ascending {
                 order
             } else {
                 order.reverse()
-            };
-            a.ext.is_empty().cmp(&b.ext.is_empty()).then(order)
+            }
         });
         rows
     }
@@ -2004,7 +2003,7 @@ mod category_bar_tests {
     }
 
     /// The extensions table lists every extension (also while something is
-    /// picked), sorts by its headers, and keeps "(no extension)" last.
+    /// picked) and sorts by its headers, "(no extension)" included.
     #[test]
     fn extension_rows_follow_category_and_sort() {
         let mut app = DiskScanApp::default();
@@ -2044,8 +2043,8 @@ mod category_bar_tests {
             column: SortColumn::Size,
             ascending: false,
         };
-        // Every extension is listed (no limit), and "(no extension)" stays
-        // last whatever the order.
+        // Every extension is listed (no limit), and "(no extension)" sorts
+        // like any other row.
         let mut many: Vec<(String, u64, u64)> = (0..45)
             .map(|i| (format!("e{i}"), 100 - i as u64, 1))
             .collect();
@@ -2063,7 +2062,8 @@ mod category_bar_tests {
             };
             let rows = app.extension_rows();
             assert_eq!(rows.len(), 46);
-            assert!(rows.last().unwrap().ext.is_empty());
+            let no_ext = if ascending { rows.last() } else { rows.first() };
+            assert!(no_ext.unwrap().ext.is_empty());
         }
     }
 
