@@ -203,6 +203,7 @@ ERR_SETTINGS_UNREADABLE=Configurações não carregadas de %s (%s); usando padr�
 ERR_SETTINGS_NOT_FILE=não é um arquivo comum
 ERR_SETTINGS_TOO_BIG=maior que 1 MiB
 ERR_SETTINGS_FIELDS=Configurações inválidas ignoradas (usados os padrões): %s. O arquivo original foi copiado para %s.
+ERR_LANG_FILE=Não foi possível usar o arquivo de idioma %s (%s); usando o idioma embutido.
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Atalhos de teclado

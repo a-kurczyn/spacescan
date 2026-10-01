@@ -219,6 +219,7 @@ ERR_SETTINGS_UNREADABLE=Settings not loaded from %s (%s); using defaults, and no
 ERR_SETTINGS_NOT_FILE=not a regular file
 ERR_SETTINGS_TOO_BIG=larger than 1 MiB
 ERR_SETTINGS_FIELDS=Ignored invalid settings (defaults used for them): %s. The original file was copied to %s.
+ERR_LANG_FILE=Couldn't use the language file %s (%s); using the built-in language.
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Keyboard shortcuts

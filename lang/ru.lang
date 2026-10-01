@@ -203,6 +203,7 @@ ERR_SETTINGS_UNREADABLE=Настройки не загружены из %s (%s);
 ERR_SETTINGS_NOT_FILE=не обычный файл
 ERR_SETTINGS_TOO_BIG=больше 1 МиБ
 ERR_SETTINGS_FIELDS=Недопустимые настройки пропущены (использованы значения по умолчанию): %s. Исходный файл скопирован в %s.
+ERR_LANG_FILE=Не удалось использовать языковой файл %s (%s); используется встроенный язык.
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Клавиши

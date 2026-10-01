@@ -207,6 +207,7 @@ ERR_SETTINGS_UNREADABLE=No se cargaron los ajustes de %s (%s); se usan los valor
 ERR_SETTINGS_NOT_FILE=no es un archivo normal
 ERR_SETTINGS_TOO_BIG=mayor de 1 MiB
 ERR_SETTINGS_FIELDS=Se ignoraron ajustes no válidos (se usan sus valores predeterminados): %s. El archivo original se copió a %s.
+ERR_LANG_FILE=No se pudo usar el archivo de idioma %s (%s); se usa el idioma integrado.
 
 # ---- Atajos de teclado (?) ----
 HELP_TITLE=Atajos de teclado

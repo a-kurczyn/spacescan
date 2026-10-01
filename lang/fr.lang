@@ -203,6 +203,7 @@ ERR_SETTINGS_UNREADABLE=Paramètres non chargés depuis %s (%s) ; valeurs par d�
 ERR_SETTINGS_NOT_FILE=ce n'est pas un fichier ordinaire
 ERR_SETTINGS_TOO_BIG=plus de 1 Mio
 ERR_SETTINGS_FIELDS=Paramètres invalides ignorés (valeurs par défaut utilisées) : %s. Le fichier d'origine a été copié vers %s.
+ERR_LANG_FILE=Impossible d'utiliser le fichier de langue %s (%s) ; langue intégrée utilisée.
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Raccourcis clavier

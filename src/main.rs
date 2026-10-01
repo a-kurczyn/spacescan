@@ -404,6 +404,9 @@ impl Default for DiskScanApp {
             if let Some(p) = problem {
                 app.log_issue(p);
             }
+            if let Some(p) = lang_file_problem(&current_lang_code()) {
+                app.log_issue(p);
+            }
         }
         app.reload_categories();
         app

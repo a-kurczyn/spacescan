@@ -203,6 +203,7 @@ ERR_SETTINGS_UNREADABLE=%s から設定を読み込みませんでした (%s)。
 ERR_SETTINGS_NOT_FILE=通常のファイルではありません
 ERR_SETTINGS_TOO_BIG=1 MiB より大きい
 ERR_SETTINGS_FIELDS=無効な設定を無視しました (既定値を使用): %s。元のファイルは %s にコピーしました。
+ERR_LANG_FILE=言語ファイル %s を使えません (%s)。組み込みの言語を使用します。
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=キーボードショートカット

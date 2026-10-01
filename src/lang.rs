@@ -77,7 +77,7 @@ impl Lang {
         {
             map.extend(parse_kv_file(text));
         }
-        if let Ok(text) = std::fs::read_to_string(lang_dir().join(format!("{code}.lang"))) {
+        if let Some(text) = read_small_file(&lang_dir().join(format!("{code}.lang"))) {
             map.extend(parse_kv_file(&text));
         }
         Lang {
@@ -160,14 +160,49 @@ pub(crate) fn available_languages() -> Vec<(String, String)> {
             if built_in(&code).is_some() {
                 continue;
             }
-            let name = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|text| display_name(&text))
-                .unwrap_or_else(|| code.clone());
+            // Files that can't be read (not regular, too big) aren't offered.
+            let Some(text) = read_small_file(&path) else {
+                continue;
+            };
+            let name = display_name(&text).unwrap_or_else(|| code.clone());
             out.push((code, name));
         }
     }
     out
+}
+
+/// Why the user's file for language `code` can't be used, for the Issues
+/// log; None if it's fine or there is none.
+pub(crate) fn lang_file_problem(code: &str) -> Option<String> {
+    let path = lang_dir().join(format!("{code}.lang"));
+    let meta = std::fs::metadata(&path).ok()?;
+    let why = if !meta.is_file() {
+        tr("ERR_SETTINGS_NOT_FILE")
+    } else if meta.len() > 1 << 20 {
+        tr("ERR_SETTINGS_TOO_BIG")
+    } else {
+        return None;
+    };
+    Some(trf("ERR_LANG_FILE", &[&show_path(&path), &why]))
+}
+
+/// The text of a user file, if it's a regular file of at most 1 MiB. A
+/// FIFO, a device (a link to /dev/zero) or a huge file is never read: it
+/// could block or fill memory.
+pub(crate) fn read_small_file(path: &Path) -> Option<String> {
+    use std::io::Read;
+    const MAX: u64 = 1 << 20;
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX {
+        return None;
+    }
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX)
+        .read_to_string(&mut text)
+        .ok()?;
+    Some(text)
 }
 
 pub(crate) fn home_dir() -> PathBuf {
@@ -179,6 +214,32 @@ pub(crate) fn home_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIFOs, devices and huge files are skipped at once instead of being
+    /// read.
+    #[test]
+    fn only_small_regular_files_are_read() {
+        let dir = std::env::temp_dir().join(format!("spacemap-langfile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("fifo.lang");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: `c` is a valid C string that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        std::os::unix::fs::symlink("/dev/zero", dir.join("zero.lang")).unwrap();
+        std::fs::write(dir.join("big.lang"), vec![b'#'; (1 << 20) + 1]).unwrap();
+        std::fs::write(dir.join("ok.lang"), "# name: Test\nA=b\n").unwrap();
+        let start = Instant::now();
+        assert!(read_small_file(&fifo).is_none());
+        assert!(read_small_file(&dir.join("zero.lang")).is_none());
+        assert!(read_small_file(&dir.join("big.lang")).is_none());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(
+            read_small_file(&dir.join("ok.lang")).as_deref(),
+            Some("# name: Test\nA=b\n")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// Every built-in language has a name and exactly English's keys, each
     /// with as many `%s` placeholders as in English.

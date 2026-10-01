@@ -591,6 +591,7 @@ impl DiskScanApp {
 
     /// Chart settings panel (right side), while open.
     pub(crate) fn settings_panel_ui(&mut self, ui: &mut egui::Ui) {
+        let mut lang_problem = None;
         if self.show_settings {
             egui::Panel::right("settings_panel")
                 .resizable(true)
@@ -722,11 +723,15 @@ impl DiskScanApp {
                                 for (code, name) in &langs {
                                     if ui.selectable_label(*code == current, name).clicked() {
                                         set_language(code);
+                                        lang_problem = lang_file_problem(code);
                                     }
                                 }
                             });
                     });
                 });
+        }
+        if let Some(p) = lang_problem {
+            self.log_issue(p);
         }
     }
 

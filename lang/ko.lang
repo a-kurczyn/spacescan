@@ -203,6 +203,7 @@ ERR_SETTINGS_UNREADABLE=%s에서 설정을 불러오지 않았습니다 (%s). �
 ERR_SETTINGS_NOT_FILE=일반 파일이 아님
 ERR_SETTINGS_TOO_BIG=1 MiB보다 큼
 ERR_SETTINGS_FIELDS=잘못된 설정을 무시했습니다 (기본값 사용): %s. 원래 파일은 %s(으)로 복사했습니다.
+ERR_LANG_FILE=언어 파일 %s을(를) 쓸 수 없습니다 (%s). 내장 언어를 사용합니다.
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=단축키

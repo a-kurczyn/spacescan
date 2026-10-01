@@ -203,6 +203,7 @@ ERR_SETTINGS_UNREADABLE=未从 %s 加载设置 (%s)；使用默认值，且不�
 ERR_SETTINGS_NOT_FILE=不是普通文件
 ERR_SETTINGS_TOO_BIG=大于 1 MiB
 ERR_SETTINGS_FIELDS=已忽略无效设置（改用默认值）：%s。原文件已复制到 %s。
+ERR_LANG_FILE=无法使用语言文件 %s（%s）；改用内置语言。
 
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=键盘快捷键
