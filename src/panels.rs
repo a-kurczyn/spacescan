@@ -861,7 +861,17 @@ impl DiskScanApp {
                 (center, hub_radius, ring_thickness),
             );
             ui.add_space(6.0);
-            age_legend_ui(ui, self.settings.age_weeks);
+            // Hidden while scanning (its space kept, so the chart stays put),
+            // then fading in with the slice colors.
+            let fade = if self.scanning {
+                0.0
+            } else {
+                self.color_fade()
+            };
+            ui.scope(|ui| {
+                ui.set_opacity(fade);
+                age_legend_ui(ui, self.settings.age_weeks);
+            });
         });
         central.response.rect
     }
