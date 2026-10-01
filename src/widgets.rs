@@ -341,9 +341,6 @@ pub(crate) fn details_grid(
             }
 
             if let Some(m) = h.mode {
-                ui.label(tr("HOVER_PERMS"));
-                ui.label(format_perms(m));
-                ui.end_row();
                 // Symbolic link: where it points (not counted in sizes).
                 if m & 0o170000 == 0o120000 {
                     ui.label(tr("HOVER_LINK"));
@@ -362,6 +359,11 @@ pub(crate) fn details_grid(
             if let Some(ct) = h.ctime {
                 ui.label(tr("HOVER_CHANGED"));
                 ui.label(format_epoch(ct));
+                ui.end_row();
+            }
+            if let Some(m) = h.mode {
+                ui.label(tr("HOVER_PERMS"));
+                ui.label(format_perms(m));
                 ui.end_row();
             }
             if let (Some(uid), Some(gid)) = (h.uid, h.gid) {
