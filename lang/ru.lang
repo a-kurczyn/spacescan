@@ -95,7 +95,7 @@ CENTRAL_EMPTY_STATE=Выберите отправную точку: 🔍 (люб
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=Анализ прерван
-STATUS_SCANNING=Анализ… (Esc — отмена)
+STATUS_SCANNING=Анализ…
 STATUS_SCAN_COMPLETED=Анализ завершён за %s с
 ERR_PATH_NOT_FOUND=Путь не найден: %s
 ERR_CANNOT_STAT=Не удалось получить сведения о %s: %s

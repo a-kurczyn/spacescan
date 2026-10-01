@@ -96,7 +96,7 @@ CENTRAL_EMPTY_STATE=Elige un punto de partida con 🔍 (cualquier unidad, punto 
 
 # ---- Estado y errores del escaneo ----
 STATUS_SCAN_ABORTED=Escaneo cancelado
-STATUS_SCANNING=Escaneando… (Esc para cancelar)
+STATUS_SCANNING=Escaneando…
 STATUS_SCAN_COMPLETED=Escaneo completado en %ss
 ERR_PATH_NOT_FOUND=Ruta no encontrada: %s
 ERR_CANNOT_STAT=No se puede obtener información de %s: %s

@@ -95,7 +95,7 @@ CENTRAL_EMPTY_STATE=시작 위치를 고르세요: 🔍 (아무 드라이브, �
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=검사를 중단했습니다
-STATUS_SCANNING=검사 중… (Esc로 취소)
+STATUS_SCANNING=검사 중…
 STATUS_SCAN_COMPLETED=%s초 만에 검사 완료
 ERR_PATH_NOT_FOUND=경로를 찾을 수 없음: %s
 ERR_CANNOT_STAT=%s의 정보를 읽을 수 없음: %s

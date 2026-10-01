@@ -95,7 +95,7 @@ CENTRAL_EMPTY_STATE=Escolha um ponto de partida com 🔍 (qualquer disco, montag
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=Análise interrompida
-STATUS_SCANNING=Analisando… (Esc para cancelar)
+STATUS_SCANNING=Analisando…
 STATUS_SCAN_COMPLETED=Análise concluída em %s s
 ERR_PATH_NOT_FOUND=Caminho não encontrado: %s
 ERR_CANNOT_STAT=Não foi possível ler as informações de %s: %s

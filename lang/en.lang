@@ -109,7 +109,7 @@ CENTRAL_EMPTY_STATE=Choose a starting point with 🔍 (any drive, mount or folde
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=Scan aborted
-STATUS_SCANNING=Scanning… (Esc to cancel)
+STATUS_SCANNING=Scanning…
 STATUS_SCAN_COMPLETED=Scan completed in %ss
 ERR_PATH_NOT_FOUND=Path not found: %s
 ERR_CANNOT_STAT=Cannot stat %s: %s

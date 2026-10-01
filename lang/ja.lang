@@ -95,7 +95,7 @@ CENTRAL_EMPTY_STATE=開始点を選んでください: 🔍 (任意のドライ�
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=スキャンを中止しました
-STATUS_SCANNING=スキャン中… (Esc で中止)
+STATUS_SCANNING=スキャン中…
 STATUS_SCAN_COMPLETED=%s 秒でスキャン完了
 ERR_PATH_NOT_FOUND=パスが見つかりません: %s
 ERR_CANNOT_STAT=%s の情報を取得できません: %s

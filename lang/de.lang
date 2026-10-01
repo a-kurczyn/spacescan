@@ -95,7 +95,7 @@ CENTRAL_EMPTY_STATE=Wählen Sie einen Startpunkt mit 🔍 (beliebiges Laufwerk, 
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=Durchsuchen abgebrochen
-STATUS_SCANNING=Durchsuchen… (Esc zum Abbrechen)
+STATUS_SCANNING=Durchsuchen…
 STATUS_SCAN_COMPLETED=Durchsuchen in %s s abgeschlossen
 ERR_PATH_NOT_FOUND=Pfad nicht gefunden: %s
 ERR_CANNOT_STAT=Informationen zu %s nicht lesbar: %s

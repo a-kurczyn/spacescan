@@ -95,7 +95,7 @@ CENTRAL_EMPTY_STATE=选择起点：🔍（任意驱动器、挂载点或文件�
 
 # ---- Scan status / errors ----
 STATUS_SCAN_ABORTED=扫描已中止
-STATUS_SCANNING=正在扫描…（按 Esc 取消）
+STATUS_SCANNING=正在扫描…
 STATUS_SCAN_COMPLETED=扫描完成，用时 %s 秒
 ERR_PATH_NOT_FOUND=找不到路径：%s
 ERR_CANNOT_STAT=无法读取 %s 的信息：%s
