@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=La boîte de dialogue des dossiers n'a pas pu s'ouvrir 
 SCAN_PROGRESS_ITEMS_SCANNED=%s éléments analysés
 SCAN_PROGRESS_OF_TOTAL=%s éléments sur %s
 SCAN_PROGRESS_ITEMS=%s éléments
-SCAN_PROGRESS_CANCEL_HINT=%s · Échap pour annuler
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=introuvable (aucun fichier ou dossier de ce nom)

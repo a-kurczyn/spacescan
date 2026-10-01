@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=Der Ordnerdialog ließ sich nicht öffnen (läuft xdg-d
 SCAN_PROGRESS_ITEMS_SCANNED=%s Elemente durchsucht
 SCAN_PROGRESS_OF_TOTAL=%s von %s Elementen
 SCAN_PROGRESS_ITEMS=%s Elemente
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc zum Abbrechen
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=nicht gefunden (keine solche Datei und kein solcher Ordner)

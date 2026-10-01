@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=Não foi possível abrir a janela de pastas (o xdg-desk
 SCAN_PROGRESS_ITEMS_SCANNED=%s itens analisados
 SCAN_PROGRESS_OF_TOTAL=%s de %s itens
 SCAN_PROGRESS_ITEMS=%s itens
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc para cancelar
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=não encontrado (não existe arquivo ou pasta com esse nome)

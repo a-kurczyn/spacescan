@@ -1936,8 +1936,8 @@ impl DiskScanApp {
         }
     }
 
-    /// Scan progress bar, `width` wide, labelled with the count so far and
-    /// how to cancel. Shared by the chart preview and the live table.
+    /// Scan progress bar, `width` wide, labelled with the count so far.
+    /// Shared by the chart preview and the live table.
     pub(crate) fn scan_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
         // A whole drive: bytes scanned out of its used space. Any other folder:
         // entries scanned out of the counting pass's total.
@@ -1984,7 +1984,6 @@ impl DiskScanApp {
         self.progress_shown = self.progress_shown.max(raw.clamp(0.0, 1.0) as f32);
         let fraction = self.progress_shown;
 
-        let label = trf("SCAN_PROGRESS_CANCEL_HINT", &[&label]);
         let bar_resp = ui.add(egui::ProgressBar::new(fraction).desired_width(width));
         // Centered on the bar. (egui's built-in ProgressBar text sits at the
         // left edge instead.)

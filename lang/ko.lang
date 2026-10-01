@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=폴더 선택 창을 열 수 없습니다 (xdg-desktop-
 SCAN_PROGRESS_ITEMS_SCANNED=항목 %s개 검사함
 SCAN_PROGRESS_OF_TOTAL=항목 %s / %s개
 SCAN_PROGRESS_ITEMS=항목 %s개
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc로 취소
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=찾을 수 없음 (그런 파일이나 폴더가 없음)

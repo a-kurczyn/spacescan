@@ -119,7 +119,6 @@ ERR_FOLDER_DIALOG_FAILED=Folder dialog failed to open (is xdg-desktop-portal run
 SCAN_PROGRESS_ITEMS_SCANNED=%s items scanned
 SCAN_PROGRESS_OF_TOTAL=%s of %s items
 SCAN_PROGRESS_ITEMS=%s items
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc to cancel
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=not found (no such file or folder)

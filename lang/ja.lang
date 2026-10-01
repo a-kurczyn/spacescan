@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=フォルダー選択ダイアログを開けません�
 SCAN_PROGRESS_ITEMS_SCANNED=%s 項目をスキャン済み
 SCAN_PROGRESS_OF_TOTAL=%s / %s 項目
 SCAN_PROGRESS_ITEMS=%s 項目
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc で中止
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=見つかりません (そのファイルやフォルダーはありません)

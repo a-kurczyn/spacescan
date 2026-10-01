@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=Не удалось открыть окно выбор�
 SCAN_PROGRESS_ITEMS_SCANNED=Проанализировано элементов: %s
 SCAN_PROGRESS_OF_TOTAL=%s из %s элементов
 SCAN_PROGRESS_ITEMS=Элементов: %s
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc — отмена
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=не найдено (нет такого файла или папки)

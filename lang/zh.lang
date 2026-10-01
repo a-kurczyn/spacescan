@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=无法打开文件夹对话框（xdg-desktop-portal 是
 SCAN_PROGRESS_ITEMS_SCANNED=已扫描 %s 项
 SCAN_PROGRESS_OF_TOTAL=%s / %s 项
 SCAN_PROGRESS_ITEMS=%s 项
-SCAN_PROGRESS_CANCEL_HINT=%s · 按 Esc 取消
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=找不到（没有该文件或文件夹）

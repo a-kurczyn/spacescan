@@ -105,7 +105,6 @@ ERR_FOLDER_DIALOG_FAILED=Impossibile aprire la finestra delle cartelle (xdg-desk
 SCAN_PROGRESS_ITEMS_SCANNED=%s elementi analizzati
 SCAN_PROGRESS_OF_TOTAL=%s elementi su %s
 SCAN_PROGRESS_ITEMS=%s elementi
-SCAN_PROGRESS_CANCEL_HINT=%s · Esc per annullare
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=non trovato (nessun file o cartella con questo nome)
