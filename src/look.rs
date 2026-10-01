@@ -1,7 +1,7 @@
 //! Slice colors in the finished chart. The category taking the most space
 //! in a slice sets its hue (the category bar's colors); the size-weighted
 //! average age of its contents, by Changed time (when the data arrived on
-//! this disk), sets its brightness in ten steps: this week is brightest,
+//! this disk), sets its brightness in five steps: this week is brightest,
 //! `age_weeks` and older is darkest.
 
 use super::*;
@@ -137,12 +137,16 @@ impl Looks {
     }
 }
 
-/// Brightness step of an average Changed time: 0 for this week, 9 for
-/// `age_weeks` or older (or unknown), evenly spread in between.
+/// Number of brightness steps.
+pub(crate) const AGE_STEPS: u8 = 5;
+
+/// Brightness step of an average Changed time: 0 for this week, the last
+/// step for `age_weeks` or older (or unknown), evenly spread in between.
 pub(crate) fn age_step(avg_ctime: i64, now: i64, age_weeks: u32) -> u8 {
     const WEEK: f64 = 7.0 * 24.0 * 3600.0;
+    const LAST: u8 = AGE_STEPS - 1;
     if avg_ctime == NO_TIME {
-        return 9;
+        return LAST;
     }
     let weeks = (now - avg_ctime).max(0) as f64 / WEEK;
     if weeks < 1.0 {
@@ -150,16 +154,17 @@ pub(crate) fn age_step(avg_ctime: i64, now: i64, age_weeks: u32) -> u8 {
     }
     let oldest = age_weeks.max(2) as f64;
     if weeks >= oldest {
-        return 9;
+        return LAST;
     }
-    // Steps 1 to 8 share the time between one week and `age_weeks`.
-    1 + ((weeks - 1.0) / (oldest - 1.0) * 8.0) as u8
+    // The middle steps share the time between one week and `age_weeks`.
+    1 + ((weeks - 1.0) / (oldest - 1.0) * (LAST - 1) as f64) as u8
 }
 
 /// `color` at brightness step `step`: 0 is the color as is, each step
-/// darker, down to 25% brightness at 9.
+/// darker, down to 25% brightness at the last.
 pub(crate) fn shade(color: Color32, step: u8) -> Color32 {
-    let factor = 1.0 - 0.75 * step.min(9) as f32 / 9.0;
+    let last = (AGE_STEPS - 1) as f32;
+    let factor = 1.0 - 0.75 * (step as f32).min(last) / last;
     let scale = |v: u8| (v as f32 * factor).round() as u8;
     Color32::from_rgb(scale(color.r()), scale(color.g()), scale(color.b()))
 }
@@ -196,10 +201,11 @@ mod tests {
         let now = 1_000_000_000;
         assert_eq!(age_step(now - DAY, now, 52), 0);
         assert_eq!(age_step(now - 8 * DAY, now, 52), 1);
-        assert_eq!(age_step(now - 51 * 7 * DAY, now, 52), 8);
-        assert_eq!(age_step(now - 52 * 7 * DAY, now, 52), 9);
-        assert_eq!(age_step(now - 500 * 7 * DAY, now, 52), 9);
-        assert_eq!(age_step(NO_TIME, now, 52), 9);
+        assert_eq!(age_step(now - 26 * 7 * DAY, now, 52), 2);
+        assert_eq!(age_step(now - 51 * 7 * DAY, now, 52), 3);
+        assert_eq!(age_step(now - 52 * 7 * DAY, now, 52), 4);
+        assert_eq!(age_step(now - 500 * 7 * DAY, now, 52), 4);
+        assert_eq!(age_step(NO_TIME, now, 52), 4);
         // Steps never go down as files get older.
         let steps: Vec<u8> = (0..60)
             .map(|w| age_step(now - w * 7 * DAY, now, 52))
@@ -236,7 +242,8 @@ mod tests {
     fn shades_get_darker_with_age() {
         let c = Color32::from_rgb(200, 100, 50);
         assert_eq!(shade(c, 0), c);
-        assert!(shade(c, 9).r() < shade(c, 5).r() && shade(c, 5).r() < c.r());
+        assert!(shade(c, 4).r() < shade(c, 2).r() && shade(c, 2).r() < c.r());
+        assert_eq!(shade(c, 4), Color32::from_rgb(50, 25, 13));
     }
 }
 

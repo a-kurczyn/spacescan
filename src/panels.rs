@@ -956,11 +956,11 @@ impl DiskScanApp {
         });
     }
 
-    /// Summary view: the category bar on the left, the contents table
-    /// (table.rs) on the right.
-    fn summary_ui(&mut self, ui: &mut egui::Ui, view_node: &Node) {
-        // Broken down from the tree without the category filter, so every
-        // category stays visible (and clickable) while one is picked.
+    /// Works out the categories of `view_node`, largest first, unless they
+    /// are already known. Broken down from the tree without the category
+    /// filter, so every category stays visible (and clickable) while one is
+    /// picked.
+    pub(crate) fn refresh_cat_breakdown(&mut self, view_node: &Node) {
         let key = (view_node.path.clone(), self.tree_gen);
         if self.cat_breakdown_for.as_ref() != Some(&key) {
             let base = self
@@ -970,7 +970,12 @@ impl DiskScanApp {
             self.cat_breakdown = category_breakdown(base.unwrap_or(view_node), &self.cats);
             self.cat_breakdown_for = Some(key);
         }
+    }
 
+    /// Summary view: the category bar on the left, the contents table
+    /// (table.rs) on the right.
+    fn summary_ui(&mut self, ui: &mut egui::Ui, view_node: &Node) {
+        self.refresh_cat_breakdown(view_node);
         let avail = ui.available_height();
         let heading_h = ui.text_style_height(&egui::TextStyle::Heading) * 2.0 + 16.0;
         self.bar_and_table(ui, avail, heading_h, view_node);
@@ -1529,7 +1534,7 @@ impl DiskScanApp {
 
     /// How far slice colors have faded in after the last scan: 0 (grey) to
     /// 1 (full color) over 0.8 s.
-    fn color_fade(&self) -> f32 {
+    pub(crate) fn color_fade(&self) -> f32 {
         const FADE: f32 = 0.8;
         self.colored_at
             .map_or(1.0, |t| (t.elapsed().as_secs_f32() / FADE).min(1.0))
@@ -2005,7 +2010,7 @@ struct SliceColoring<'a> {
     now: i64,
 }
 
-/// The legend for slice brightness: ten swatches from this week (bright)
+/// The legend for slice brightness: five swatches from this week (bright)
 /// to `age_weeks` or older (dark), centered under the chart.
 fn age_legend_ui(ui: &mut egui::Ui, age_weeks: u32) {
     let base = ui.visuals().strong_text_color();
@@ -2020,11 +2025,12 @@ fn age_legend_ui(ui: &mut egui::Ui, age_weeks: u32) {
             .x
     };
     let spacing = ui.spacing().item_spacing.x;
-    let width = text_w(&new_text) + text_w(&old_text) + 10.0 * (swatch.x + 2.0) + 2.0 * spacing;
+    let width =
+        text_w(&new_text) + text_w(&old_text) + AGE_STEPS as f32 * (swatch.x + 2.0) + 2.0 * spacing;
     ui.horizontal(|ui| {
         ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
         ui.label(egui::RichText::new(&new_text).small());
-        for step in 0..10u8 {
+        for step in 0..AGE_STEPS {
             let (rect, _) = ui.allocate_exact_size(swatch, egui::Sense::hover());
             ui.painter().rect_filled(rect, 1.0, shade(base, step));
             ui.add_space(2.0 - spacing);

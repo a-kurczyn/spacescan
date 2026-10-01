@@ -954,24 +954,29 @@ impl eframe::App for DiskScanApp {
                 });
         }
 
-        // Chart view, also while scanning: the category colors in the
-        // bottom-left corner.
-        if !self.summary_view && (self.root.is_some() || self.scanning) {
+        // Chart view, once the scan is done: the categories of the folder on
+        // screen in the category bar's order, fading in with the slice colors.
+        if !self.summary_view
+            && !self.scanning
+            && let Some(root) = self.root.clone()
+        {
+            self.refresh_cat_breakdown(self.current_view_node(&root));
             let dark = ctx.global_style().visuals.dark_mode;
+            let fade = self.color_fade();
             egui::Area::new("category_legend".into())
                 .order(egui::Order::Foreground)
                 .interactable(false)
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
                 .show(&ctx, |ui| {
-                    for i in 0..=self.cats.other().0 {
-                        let cat = Category(i);
+                    ui.set_opacity(fade);
+                    for row in &self.cat_breakdown {
                         ui.horizontal(|ui| {
                             let (swatch, _) =
                                 ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
                             ui.painter()
-                                .rect_filled(swatch, 2.0, self.cats.color(cat, dark));
-                            ui.label(egui::RichText::new(self.cats.label(cat)).small());
+                                .rect_filled(swatch, 2.0, self.cats.color(row.cat, dark));
+                            ui.label(egui::RichText::new(self.cats.label(row.cat)).small());
                         });
                     }
                 });
