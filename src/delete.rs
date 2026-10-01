@@ -695,7 +695,7 @@ mod tests {
         full.children[0].size = 6900;
         full.children[0].file_count = 2;
         app.full_root = Some(Arc::new(full));
-        app.category = Some(app.cats.of_name("x.mkv"));
+        app.pick = Some(Pick::Category(app.cats.of_name("x.mkv")));
         app.rebuild_view_tree();
         let target = vec![PathBuf::from("/nonexistent-qa/mixed")];
 
@@ -725,7 +725,7 @@ mod tests {
         app.removal.confirm = None;
 
         // Without a filter, trash acts at once as before.
-        app.category = None;
+        app.pick = None;
         app.rebuild_view_tree();
         app.queue_trash(target);
         assert!(app.removal.confirm.is_none() && app.removal.pending.is_some());

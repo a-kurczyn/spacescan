@@ -211,17 +211,17 @@ struct DiskScanApp {
     filter_error: Option<String>,
     /// The categories from categories.json (reloaded at each new scan).
     cats: Arc<CategoryModel>,
-    /// A click in the category bar, applied once the frame's table is drawn
+    /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
-    category_pending: Option<Option<Category>>,
+    pick_pending: Option<Option<Pick>>,
     /// Extension totals of the files found so far in the running scan, so
     /// the category bar grows live like the table.
     live_exts: ExtTotals,
-    /// Category picked in the summary view's category bar (None = all).
-    /// Applied on top of `filter`.
-    category: Option<Category>,
-    /// The tree with `filter` applied but not `category`: what the category
-    /// bar breaks down, so every category stays visible and clickable.
+    /// The category or extension picked in the left panel (None = all
+    /// files). Applied on top of `filter`.
+    pick: Option<Pick>,
+    /// The tree with `filter` applied but not `pick`: what the left panel
+    /// breaks down, so every category and extension stays clickable.
     cat_base: Option<Arc<Node>>,
     /// Category breakdown of the viewed folder, cached per (folder, tree_gen).
     cat_breakdown: Vec<CategoryRow>,
@@ -372,8 +372,8 @@ impl Default for DiskScanApp {
             path_input: String::new(),
             path_input_focused: false,
             cats: Arc::new(CategoryModel::defaults()),
-            category: None,
-            category_pending: None,
+            pick: None,
+            pick_pending: None,
             live_exts: ExtTotals::new(),
             cat_base: None,
             cat_breakdown: Vec::new(),
@@ -437,7 +437,7 @@ impl DiskScanApp {
         let (model, problem) = CategoryModel::load();
         if *self.cats != model {
             self.cats = Arc::new(model);
-            self.category = None;
+            self.pick = None;
             self.cat_breakdown_for = None;
         }
         if let Some(p) = problem {
@@ -574,11 +574,11 @@ impl DiskScanApp {
             Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| empty(&full))),
             None => full.clone(),
         };
-        let new_root = match self.category {
-            Some(cat) => {
+        let new_root = match &self.pick {
+            Some(pick) => {
                 let cats = self.cats.clone();
                 Arc::new(
-                    filter_tree_by(&base, &|n: &Node| cats.of_name(&n.name) == cat)
+                    filter_tree_by(&base, &|n: &Node| cats.pick_matches(pick, &n.name))
                         .unwrap_or_else(|| empty(&full)),
                 )
             }

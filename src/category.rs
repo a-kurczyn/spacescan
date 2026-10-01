@@ -202,6 +202,52 @@ impl CategoryModel {
     }
 }
 
+/// What the files are narrowed down to: one category, or one extension
+/// (an `ext_key`).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) enum Pick {
+    Category(Category),
+    Extension(String),
+}
+
+impl CategoryModel {
+    /// True if a file called `name` is part of `pick`.
+    pub(crate) fn pick_matches(&self, pick: &Pick, name: &str) -> bool {
+        match pick {
+            Pick::Category(c) => self.of_name(name) == *c,
+            Pick::Extension(e) => ext_key(name) == *e,
+        }
+    }
+
+    /// The category `pick` belongs to.
+    pub(crate) fn pick_category(&self, pick: &Pick) -> Category {
+        match pick {
+            Pick::Category(c) => *c,
+            Pick::Extension(e) => self.of_ext(e),
+        }
+    }
+
+    /// `pick` as shown: the category's name, or the extension.
+    pub(crate) fn pick_label(&self, pick: &Pick) -> String {
+        match pick {
+            Pick::Category(c) => self.label(*c),
+            Pick::Extension(e) => ext_label(e),
+        }
+    }
+}
+
+/// An extension as shown: ".mkv", quoted if it has spaces or control
+/// characters (so a trailing space shows), or "(no extension)".
+pub(crate) fn ext_label(ext: &str) -> String {
+    if ext.is_empty() {
+        tr("EXT_NO_EXTENSION")
+    } else if ext.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        format!("\".{}\"", ext.escape_debug())
+    } else {
+        format!(".{ext}")
+    }
+}
+
 /// One category's share of a folder.
 #[derive(Debug, PartialEq)]
 pub(crate) struct CategoryRow {

@@ -373,8 +373,8 @@ impl DiskScanApp {
         // Heading line: title, what's switched on, and where the keys are.
         ui.horizontal(|ui| {
             ui.heading(tr("SUMMARY_CONTENTS"));
-            if let Some(cat) = self.category.filter(|_| !self.scanning) {
-                let tag = trf("TABLE_TAG_CATEGORY", &[&self.cats.label(cat)]);
+            if let Some(pick) = self.pick.as_ref().filter(|_| !self.scanning) {
+                let tag = trf("TABLE_TAG_CATEGORY", &[&self.cats.pick_label(pick)]);
                 ui.label(egui::RichText::new(format!("· {tag}")).color(ui.visuals().warn_fg_color));
             }
             if self.table.dirs_first {
@@ -1482,11 +1482,13 @@ mod live_tests {
 
     #[test]
     fn live_rows_follow_the_scan_and_the_cursor_stays_put() {
-        let mut app = DiskScanApp::default();
-        app.scanning = true;
-        app.contents_sort = SortState {
-            column: SortColumn::Size,
-            ascending: false,
+        let mut app = DiskScanApp {
+            scanning: true,
+            contents_sort: SortState {
+                column: SortColumn::Size,
+                ascending: false,
+            },
+            ..DiskScanApp::default()
         };
         app.partial_root = test_node("/scan", 0, true, vec![folder("a", 30), folder("b", 20)]);
         refresh(&mut app);

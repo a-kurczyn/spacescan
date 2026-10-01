@@ -276,6 +276,7 @@ CAT_NO_FILES=No hay archivos aquí
 CAT_ACTIVE=Solo se muestra: %s
 TABLE_TAG_CATEGORY=solo %s
 CAT_NONE_HERE=Aquí no hay archivos de la categoría %s (%s archivos más ocultos)
+EXT_NONE_HERE=Aquí no hay archivos %s (%s archivos más ocultos)
 CAT_CLICK=Clic para mostrar solo estos archivos
 CAT_CLICK_AGAIN=Clic de nuevo para mostrar todos los archivos
 A11Y_CATEGORY=%s, %s, %s, archivos: %s
