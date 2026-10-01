@@ -157,9 +157,9 @@ pub(crate) fn age_step(avg_ctime: i64, now: i64, age_weeks: u32) -> u8 {
 }
 
 /// `color` at brightness step `step`: 0 is the color as is, each step
-/// darker, down to 18% brightness at 9.
+/// darker, down to 25% brightness at 9.
 pub(crate) fn shade(color: Color32, step: u8) -> Color32 {
-    let factor = 1.0 - 0.82 * step.min(9) as f32 / 9.0;
+    let factor = 1.0 - 0.75 * step.min(9) as f32 / 9.0;
     let scale = |v: u8| (v as f32 * factor).round() as u8;
     Color32::from_rgb(scale(color.r()), scale(color.g()), scale(color.b()))
 }
