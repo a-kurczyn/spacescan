@@ -667,29 +667,10 @@ impl DiskScanApp {
                         ui.separator();
                         ui.label(tr("SETTINGS_COLORS"));
                         ui.add(
-                            egui::Slider::new(&mut s.ring_sat, Settings::RING_SAT)
-                                .text(tr("SETTINGS_RING_SAT")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.ring_val_base, Settings::RING_VAL_BASE)
-                                .text(tr("SETTINGS_RING_BRIGHT_OUTER")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.ring_val_falloff, Settings::RING_VAL_FALLOFF)
-                                .text(tr("SETTINGS_BRIGHT_FALLOFF")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.ring_val_floor, Settings::RING_VAL_FLOOR)
-                                .text(tr("SETTINGS_BRIGHT_FLOOR")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.other_sat, Settings::OTHER_SAT)
-                                .text(tr("SETTINGS_OTHER_SAT")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.other_val, Settings::OTHER_VAL)
-                                .text(tr("SETTINGS_OTHER_BRIGHT")),
-                        );
+                            egui::Slider::new(&mut s.age_weeks, Settings::AGE_WEEKS)
+                                .text(tr("SETTINGS_AGE_WEEKS")),
+                        )
+                        .on_hover_text(tr("SETTINGS_AGE_WEEKS_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
                                 .text(tr("SETTINGS_FREE_GAMMA")),
@@ -879,6 +860,8 @@ impl DiskScanApp {
                 &painter,
                 (center, hub_radius, ring_thickness),
             );
+            ui.add_space(6.0);
+            age_legend_ui(ui, self.settings.age_weeks);
         });
         central.response.rect
     }
@@ -956,14 +939,12 @@ impl DiskScanApp {
         };
         let segs = layout_sunburst(&self.partial_root, free, opts);
         for seg in &segs {
-            self.draw_segment(
-                &painter,
-                seg,
-                center,
-                hub_radius,
-                ring_thickness,
+            let colors = SliceColoring {
                 free_color,
-            );
+                view: None,
+                now: 0,
+            };
+            self.draw_segment(&painter, seg, (center, hub_radius, ring_thickness), &colors);
         }
 
         // Centered under the chart, as wide as it.
@@ -1546,22 +1527,45 @@ impl DiskScanApp {
         }
     }
 
-    /// Draws one slice of the chart in its color.
+    /// Draws one slice of the chart in its color. `geom` is (center, hub
+    /// radius, ring thickness).
     fn draw_segment(
         &self,
         painter: &egui::Painter,
         seg: &Segment,
-        center: Pos2,
-        hub_radius: f32,
-        ring_thickness: f32,
-        free_color: Color32,
+        geom: (Pos2, f32, f32),
+        colors: &SliceColoring,
     ) {
+        let (center, hub_radius, ring_thickness) = geom;
+        let SliceColoring {
+            free_color,
+            view,
+            now,
+        } = *colors;
         let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
-        let top_hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
         let color = if seg.is_free {
             free_color
         } else {
-            segment_color(seg, top_hue, &self.settings)
+            match (view, &self.looks) {
+                (Some(view), Some((_, looks))) => {
+                    let look = if seg.is_other {
+                        let parent = get_node(view, &seg.idx_path[..seg.idx_path.len() - 1]);
+                        let rest = seg.rest.iter().filter_map(|&i| parent.children.get(i));
+                        looks.of_group(rest, &self.cats)
+                    } else {
+                        looks.of(get_node(view, &seg.idx_path), &self.cats)
+                    };
+                    let dark = painter.ctx().global_style().visuals.dark_mode;
+                    let color = look_color(&look, now, self.settings.age_weeks, &self.cats, dark);
+                    // "Other" is paler, to read as a group.
+                    if seg.is_other {
+                        color.lerp_to_gamma(free_color, 0.35)
+                    } else {
+                        color
+                    }
+                }
+                _ => branch_color(seg),
+            }
         };
         draw_arc_mesh(
             painter,
@@ -1620,6 +1624,15 @@ impl DiskScanApp {
             order: self.chart_order,
         };
         let segs = layout_sunburst(view_node, free, opts);
+        // Slice looks of the whole tree, worked out once per tree.
+        if self
+            .looks
+            .as_ref()
+            .is_none_or(|(generation, _)| *generation != self.tree_gen)
+        {
+            self.looks = Some((self.tree_gen, Looks::build(root, &self.cats)));
+        }
+        let now = now_secs();
 
         let pointer = ctx.input(|i| i.pointer.hover_pos());
         let mut new_hover: Option<HoverInfo> = None;
@@ -1628,7 +1641,12 @@ impl DiskScanApp {
         let mut hover_is_other = false;
 
         for seg in &segs {
-            self.draw_segment(painter, seg, center, hub_radius, ring_thickness, free_color);
+            let colors = SliceColoring {
+                free_color,
+                view: Some(view_node),
+                now,
+            };
+            self.draw_segment(painter, seg, geom, &colors);
             let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
 
             if let Some(p) = pointer {
@@ -1960,6 +1978,45 @@ struct ExtRow {
     size: u64,
     files: u64,
     cat: Category,
+}
+
+/// How slices are colored: by category and age when `view` (the folder the
+/// chart shows) is given, else by branch (during a scan).
+#[derive(Clone, Copy)]
+struct SliceColoring<'a> {
+    free_color: Color32,
+    view: Option<&'a Node>,
+    /// The current time, for slice ages.
+    now: i64,
+}
+
+/// The legend for slice brightness: ten swatches from this week (bright)
+/// to `age_weeks` or older (dark), centered under the chart.
+fn age_legend_ui(ui: &mut egui::Ui, age_weeks: u32) {
+    let base = ui.visuals().strong_text_color();
+    let swatch = Vec2::new(14.0, 10.0);
+    let new_text = tr("AGE_LEGEND_NEW");
+    let old_text = trf("AGE_LEGEND_OLD", &[&age_weeks.to_string()]);
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    let text_w = |t: &str| {
+        ui.painter()
+            .layout_no_wrap(t.to_string(), font.clone(), base)
+            .size()
+            .x
+    };
+    let spacing = ui.spacing().item_spacing.x;
+    let width = text_w(&new_text) + text_w(&old_text) + 10.0 * (swatch.x + 2.0) + 2.0 * spacing;
+    ui.horizontal(|ui| {
+        ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+        ui.label(egui::RichText::new(&new_text).small());
+        for step in 0..10u8 {
+            let (rect, _) = ui.allocate_exact_size(swatch, egui::Sense::hover());
+            ui.painter().rect_filled(rect, 1.0, shade(base, step));
+            ui.add_space(2.0 - spacing);
+        }
+        ui.add_space(spacing);
+        ui.label(egui::RichText::new(&old_text).small());
+    });
 }
 
 #[cfg(test)]

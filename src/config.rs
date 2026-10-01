@@ -324,13 +324,13 @@ mod tests {
         with_home(|_| {
             std::fs::write(
                 settings_file(),
-                r#"{"language":"es","chart":{"ring_sat":0.9,"stroke_alpha":999,"max_render_depth":-1},
+                r#"{"language":"es","chart":{"hub_radius_frac":0.3,"stroke_alpha":999,"max_render_depth":-1},
                     "table":{"sort":"files","dirs_first":true,"hidden_columns":["perms","name","bogus"]}}"#,
             )
             .unwrap();
             let (cfg, needs_save, problem) = Config::load();
             assert_eq!(cfg.language, "es");
-            assert_eq!(cfg.chart.ring_sat, 0.9);
+            assert_eq!(cfg.chart.hub_radius_frac, 0.3);
             assert_eq!(cfg.chart.stroke_alpha, Settings::default().stroke_alpha);
             assert_eq!(
                 cfg.chart.max_render_depth,

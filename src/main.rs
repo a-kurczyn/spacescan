@@ -17,6 +17,7 @@ mod config;
 mod delete;
 mod filter;
 mod lang;
+mod look;
 mod panels;
 mod scan;
 mod table;
@@ -27,6 +28,7 @@ use chart::*;
 use config::Config;
 use filter::*;
 use lang::*;
+use look::*;
 use scan::*;
 use table::{Graft, SidePanel, TableState};
 use theme::*;
@@ -87,12 +89,8 @@ struct Settings {
     /// Every child gets its own slice (no "other"), however thin.
     unlimited_slices: bool,
     hub_radius_frac: f32,
-    ring_sat: f32,
-    ring_val_base: f32,
-    ring_val_falloff: f32,
-    ring_val_floor: f32,
-    other_sat: f32,
-    other_val: f32,
+    /// Weeks of age at which slices reach their darkest shade.
+    age_weeks: u32,
     free_space_gamma: f32,
     stroke_width: f32,
     stroke_alpha: u8,
@@ -111,12 +109,7 @@ impl Settings {
     const MIN_ANGLE: RangeInclusive<f32> = 0.1..=5.0;
     const MAX_CHILDREN: RangeInclusive<usize> = 4..=360;
     const HUB: RangeInclusive<f32> = 0.05..=0.5;
-    const RING_SAT: RangeInclusive<f32> = 0.0..=1.0;
-    const RING_VAL_BASE: RangeInclusive<f32> = 0.3..=1.0;
-    const RING_VAL_FALLOFF: RangeInclusive<f32> = 0.0..=0.3;
-    const RING_VAL_FLOOR: RangeInclusive<f32> = 0.1..=0.9;
-    const OTHER_SAT: RangeInclusive<f32> = 0.0..=1.0;
-    const OTHER_VAL: RangeInclusive<f32> = 0.3..=1.0;
+    const AGE_WEEKS: RangeInclusive<u32> = 2..=520;
     const FREE_GAMMA: RangeInclusive<f32> = 0.2..=1.5;
     const STROKE_WIDTH: RangeInclusive<f32> = 0.0..=3.0;
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
@@ -136,25 +129,9 @@ impl Settings {
         self.hub_radius_frac = self
             .hub_radius_frac
             .clamp(*Self::HUB.start(), *Self::HUB.end());
-        self.ring_sat = self
-            .ring_sat
-            .clamp(*Self::RING_SAT.start(), *Self::RING_SAT.end());
-        self.ring_val_base = self
-            .ring_val_base
-            .clamp(*Self::RING_VAL_BASE.start(), *Self::RING_VAL_BASE.end());
-        self.ring_val_falloff = self.ring_val_falloff.clamp(
-            *Self::RING_VAL_FALLOFF.start(),
-            *Self::RING_VAL_FALLOFF.end(),
-        );
-        self.ring_val_floor = self
-            .ring_val_floor
-            .clamp(*Self::RING_VAL_FLOOR.start(), *Self::RING_VAL_FLOOR.end());
-        self.other_sat = self
-            .other_sat
-            .clamp(*Self::OTHER_SAT.start(), *Self::OTHER_SAT.end());
-        self.other_val = self
-            .other_val
-            .clamp(*Self::OTHER_VAL.start(), *Self::OTHER_VAL.end());
+        self.age_weeks = self
+            .age_weeks
+            .clamp(*Self::AGE_WEEKS.start(), *Self::AGE_WEEKS.end());
         self.free_space_gamma = self
             .free_space_gamma
             .clamp(*Self::FREE_GAMMA.start(), *Self::FREE_GAMMA.end());
@@ -182,12 +159,7 @@ impl Default for Settings {
             max_children_shown: 120,
             unlimited_slices: false,
             hub_radius_frac: 0.22,
-            ring_sat: 0.55,
-            ring_val_base: 0.95,
-            ring_val_falloff: 0.08,
-            ring_val_floor: 0.45,
-            other_sat: 0.38,
-            other_val: 0.80,
+            age_weeks: 52,
             free_space_gamma: 0.7,
             stroke_width: 1.0,
             stroke_alpha: 90,
@@ -211,6 +183,8 @@ struct DiskScanApp {
     filter_error: Option<String>,
     /// The categories from categories.json (reloaded at each new scan).
     cats: Arc<CategoryModel>,
+    /// Slice looks of the displayed tree, for the tree_gen they were built for.
+    looks: Option<(u64, Looks)>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -372,6 +346,7 @@ impl Default for DiskScanApp {
             path_input: String::new(),
             path_input_focused: false,
             cats: Arc::new(CategoryModel::defaults()),
+            looks: None,
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::new(),

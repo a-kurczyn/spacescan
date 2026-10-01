@@ -27,6 +27,8 @@ pub(crate) struct Segment {
     pub(crate) is_other: bool,
     pub(crate) is_free: bool,
     pub(crate) mode: Option<u32>,
+    /// For an "other" slice: indices of the children it groups.
+    pub(crate) rest: Vec<usize>,
 }
 
 /// Slice highlighted in the chart: `rel` is relative to the view `view`.
@@ -240,6 +242,7 @@ fn layout_ring(
             is_other: false,
             is_free: false,
             mode: Some(child.mode),
+            rest: Vec::new(),
         });
         if child.is_dir && !child.children.is_empty() {
             layout_ring(child, cp, (a0, a1), ring + 1, (0, 0), opts, out);
@@ -265,6 +268,7 @@ fn layout_ring(
             is_other: true,
             is_free: false,
             mode: None,
+            rest: rest.iter().map(|(i, _)| *i).collect(),
         });
     }
     if extra_free_bytes > 0 {
@@ -280,6 +284,7 @@ fn layout_ring(
             is_other: false,
             is_free: true,
             mode: None,
+            rest: Vec::new(),
         });
     }
 }
@@ -337,15 +342,16 @@ pub(crate) fn free_space_color(visuals: &egui::Visuals, gamma: f32) -> Color32 {
     gamma_lighten(visuals.panel_fill, gamma)
 }
 
-/// A slice's color: its top-level slice's hue, darker on outer rings.
-pub(crate) fn segment_color(seg: &Segment, top_branch_hue: f32, settings: &Settings) -> Color32 {
+/// A slice's color while a scan runs (before categories and ages are
+/// known): its top-level slice's hue, darker on outer rings, paler for
+/// "other".
+pub(crate) fn branch_color(seg: &Segment) -> Color32 {
+    let hue = hue_for_branch(*seg.idx_path.first().unwrap_or(&0));
     if seg.is_other {
-        // A pale tint of the same hue.
-        return hsv_to_rgb(top_branch_hue, settings.other_sat, settings.other_val);
+        return hsv_to_rgb(hue, 0.38, 0.8);
     }
-    let val = (settings.ring_val_base - (seg.ring as f32) * settings.ring_val_falloff)
-        .max(settings.ring_val_floor);
-    hsv_to_rgb(top_branch_hue, settings.ring_sat, val)
+    let val = (0.95 - seg.ring as f32 * 0.08).max(0.45);
+    hsv_to_rgb(hue, 0.55, val)
 }
 
 /// Folder name and size in the center hub, in `color`, wrapped to fit
