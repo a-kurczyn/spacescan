@@ -255,7 +255,6 @@ HELP_HELP=Эта справка
 SUMMARY_CATEGORIES=Категории
 SUMMARY_EXTENSIONS=Расширения
 COL_EXTENSION=Расширение
-EXT_OTHER_COUNT=(ещё расширений: %s)
 CAT_VIDEO=Видео
 CAT_AUDIO=Аудио
 CAT_IMAGES=Изображения

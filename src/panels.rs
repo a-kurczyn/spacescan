@@ -3,6 +3,7 @@
 //! Summary view.
 
 use super::*;
+use egui_extras::{Column, TableBuilder};
 
 const FILTER_PANEL_WIDTH: f32 = 340.0;
 const SETTINGS_PANEL_WIDTH: f32 = 320.0;
@@ -993,37 +994,23 @@ impl DiskScanApp {
         }
     }
 
-    /// The extensions table's rows, in the chosen order: every extension in
-    /// the folder (also while something is picked, so each stays
-    /// clickable). Beyond the first 40, rare extensions are summed up in one
-    /// row, which has no extension key or category.
+    /// The extensions table's rows: every extension in the folder (also
+    /// while something is picked, so each stays clickable), in the chosen
+    /// order, with "(no extension)" always last.
     fn extension_rows(&self) -> Vec<ExtRow> {
-        const SHOWN: usize = 40;
         let mut rows: Vec<ExtRow> = self
             .cat_breakdown
             .iter()
             .flat_map(|r| {
                 r.exts.iter().map(move |(e, size, files)| ExtRow {
-                    ext: Some(e.clone()),
+                    ext: e.clone(),
                     label: ext_label(e),
                     size: *size,
                     files: *files,
-                    cat: Some(r.cat),
+                    cat: r.cat,
                 })
             })
             .collect();
-        // The rare ones are always the smallest, whatever the sort order.
-        rows.sort_by_key(|r| std::cmp::Reverse(r.size));
-        if rows.len() > SHOWN {
-            let rest = rows.split_off(SHOWN);
-            rows.push(ExtRow {
-                ext: None,
-                label: trf("EXT_OTHER_COUNT", &[&format_count(rest.len() as u64)]),
-                size: rest.iter().map(|r| r.size).fold(0u64, u64::saturating_add),
-                files: rest.iter().map(|r| r.files).sum(),
-                cat: None,
-            });
-        }
         let sort = self.ext_sort;
         rows.sort_by(|a, b| {
             let order = match sort.column {
@@ -1031,11 +1018,12 @@ impl DiskScanApp {
                 SortColumn::Name => natural_cmp(&a.label, &b.label),
                 _ => a.size.cmp(&b.size),
             };
-            if sort.ascending {
+            let order = if sort.ascending {
                 order
             } else {
                 order.reverse()
-            }
+            };
+            a.ext.is_empty().cmp(&b.ext.is_empty()).then(order)
         });
         rows
     }
@@ -1043,113 +1031,109 @@ impl DiskScanApp {
     /// The left panel's table of sizes by file extension, sortable by its
     /// headers. Clicking a row shows only that extension's files (again:
     /// all files); the picked one is highlighted and the others dimmed.
+    /// Only the visible rows are drawn, so thousands of extensions are fine.
     fn extension_table_ui(&mut self, ui: &mut egui::Ui, height: f32) {
         let rows = self.extension_rows();
         let dark = ui.visuals().dark_mode;
+        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         let mut clicked: Option<String> = None;
         // A solid scroll bar, beside the rows rather than over them.
         ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-        egui::ScrollArea::vertical()
-            .id_salt("ext_scroll")
-            .max_height(height.max(40.0))
-            .show(ui, |ui| {
-                egui::Grid::new("summary_ext_grid")
-                    .num_columns(3)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        sortable_header(
-                            ui,
-                            &tr("COL_EXTENSION"),
-                            SortColumn::Name,
-                            &mut self.ext_sort,
-                        );
-                        sortable_header(ui, &tr("COL_SIZE"), SortColumn::Size, &mut self.ext_sort);
-                        sortable_header(
-                            ui,
-                            &tr("COL_FILES"),
-                            SortColumn::Files,
-                            &mut self.ext_sort,
-                        );
-                        ui.end_row();
-                        for row in &rows {
-                            let picked = row.ext.is_some()
-                                && self.pick == row.ext.clone().map(Pick::Extension);
-                            let dimmed = !picked
-                                && self.pick.as_ref().is_some_and(|p| match p {
-                                    Pick::Category(c) => row.cat != Some(*c),
-                                    Pick::Extension(_) => true,
-                                });
-                            let color = if picked {
-                                ui.visuals().strong_text_color()
-                            } else if dimmed {
-                                ui.visuals().weak_text_color()
-                            } else {
-                                ui.visuals().text_color()
-                            };
-                            let text = |s: String| {
-                                let t = egui::RichText::new(s).color(color);
-                                if picked { t.strong() } else { t }
-                            };
-                            let sense = if row.ext.is_some() {
-                                egui::Sense::click()
-                            } else {
-                                egui::Sense::hover()
-                            };
-                            let mut hit = ui
-                                .horizontal(|ui| {
-                                    // A swatch in the extension's category color.
-                                    let (swatch, _) = ui.allocate_exact_size(
-                                        Vec2::splat(10.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    if let Some(cat) = row.cat {
-                                        let c = self.cats.color(cat, dark);
-                                        ui.painter().rect_filled(
-                                            swatch,
-                                            2.0,
-                                            if dimmed { c.gamma_multiply(0.3) } else { c },
-                                        );
-                                    }
-                                    ui.add(egui::Label::new(text(row.label.clone())).sense(sense))
-                                })
-                                .inner;
-                            hit |= ui
-                                .with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.add(
-                                            egui::Label::new(text(human_size(row.size)))
-                                                .sense(sense),
-                                        )
-                                    },
-                                )
-                                .inner;
-                            hit |= ui
-                                .with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.add(
-                                            egui::Label::new(text(format_count(row.files)))
-                                                .sense(sense),
-                                        )
-                                    },
-                                )
-                                .inner;
-                            ui.end_row();
-                            if let Some(ext) = &row.ext {
-                                let hit = hit
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .on_hover_text(tr(if picked {
-                                        "CAT_CLICK_AGAIN"
-                                    } else {
-                                        "CAT_CLICK"
-                                    }));
-                                if hit.clicked() {
-                                    clicked = Some(ext.clone());
-                                }
-                            }
+        let ext_sort = &mut self.ext_sort;
+        TableBuilder::new(ui)
+            .id_salt("ext_table")
+            .striped(true)
+            .sense(egui::Sense::click())
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .min_scrolled_height(0.0)
+            .max_scroll_height(height.max(40.0))
+            .animate_scrolling(false)
+            .auto_shrink([false, true])
+            .column(Column::remainder().at_least(60.0))
+            .column(Column::auto().at_least(50.0))
+            .column(Column::auto().at_least(36.0))
+            .header(row_h, |mut header| {
+                header.col(|ui| {
+                    sortable_header(ui, &tr("COL_EXTENSION"), SortColumn::Name, ext_sort);
+                });
+                header.col(|ui| {
+                    sortable_header(ui, &tr("COL_SIZE"), SortColumn::Size, ext_sort);
+                });
+                header.col(|ui| {
+                    sortable_header(ui, &tr("COL_FILES"), SortColumn::Files, ext_sort);
+                });
+            })
+            .body(|body| {
+                body.rows(row_h, rows.len(), |mut table_row| {
+                    let row = &rows[table_row.index()];
+                    let pick = Pick::Extension(row.ext.clone());
+                    let picked = self.pick.as_ref() == Some(&pick);
+                    let dimmed = !picked
+                        && self.pick.as_ref().is_some_and(|p| match p {
+                            Pick::Category(c) => row.cat != *c,
+                            Pick::Extension(_) => true,
+                        });
+                    table_row.set_selected(picked);
+                    let color = |ui: &egui::Ui| {
+                        if picked {
+                            ui.visuals().selection.stroke.color
+                        } else if dimmed {
+                            ui.visuals().weak_text_color()
+                        } else {
+                            ui.visuals().text_color()
                         }
+                    };
+                    table_row.col(|ui| {
+                        // A swatch in the extension's category color.
+                        let (swatch, _) =
+                            ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                        let c = self.cats.color(row.cat, dark);
+                        ui.painter().rect_filled(
+                            swatch,
+                            2.0,
+                            if dimmed { c.gamma_multiply(0.3) } else { c },
+                        );
+                        let c = color(ui);
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&row.label).color(c))
+                                .selectable(false)
+                                .truncate(),
+                        );
                     });
+                    table_row.col(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let c = color(ui);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(human_size(row.size)).color(c),
+                                )
+                                .selectable(false),
+                            );
+                        });
+                    });
+                    table_row.col(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let c = color(ui);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(format_count(row.files)).color(c),
+                                )
+                                .selectable(false),
+                            );
+                        });
+                    });
+                    let hit = table_row
+                        .response()
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(tr(if picked {
+                            "CAT_CLICK_AGAIN"
+                        } else {
+                            "CAT_CLICK"
+                        }));
+                    if hit.clicked() {
+                        clicked = Some(row.ext.clone());
+                    }
+                });
             });
         if let Some(ext) = clicked {
             let pick = Pick::Extension(ext);
@@ -1943,12 +1927,12 @@ impl DiskScanApp {
 
 /// One row of the extensions table.
 struct ExtRow {
-    /// The extension (an `ext_key`); None for the summed-up rare ones.
-    ext: Option<String>,
+    /// The extension, as an `ext_key` ("" for files without one).
+    ext: String,
     label: String,
     size: u64,
     files: u64,
-    cat: Option<Category>,
+    cat: Category,
 }
 
 #[cfg(test)]
@@ -2040,8 +2024,7 @@ mod category_bar_tests {
     }
 
     /// The extensions table lists every extension (also while something is
-    /// picked), folds rare ones past 40 into one row, and sorts by its
-    /// headers.
+    /// picked), sorts by its headers, and keeps "(no extension)" last.
     #[test]
     fn extension_rows_follow_category_and_sort() {
         let mut app = DiskScanApp::default();
@@ -2081,18 +2064,27 @@ mod category_bar_tests {
             column: SortColumn::Size,
             ascending: false,
         };
-        let many: Vec<(String, u64, u64)> = (0..45)
+        // Every extension is listed (no limit), and "(no extension)" stays
+        // last whatever the order.
+        let mut many: Vec<(String, u64, u64)> = (0..45)
             .map(|i| (format!("e{i}"), 100 - i as u64, 1))
             .collect();
+        many.push((String::new(), 1000, 1));
         app.cat_breakdown = vec![CategoryRow {
             cat: app.cats.other(),
             size: 0,
-            files: 45,
+            files: 46,
             exts: many,
         }];
-        let rows = app.extension_rows();
-        assert_eq!(rows.len(), 41);
-        assert!(rows.iter().any(|r| r.ext.is_none() && r.files == 5));
+        for ascending in [false, true] {
+            app.ext_sort = SortState {
+                column: SortColumn::Size,
+                ascending,
+            };
+            let rows = app.extension_rows();
+            assert_eq!(rows.len(), 46);
+            assert!(rows.last().unwrap().ext.is_empty());
+        }
     }
 
     /// The Extensions panel draws, and the choice is saved with the table's

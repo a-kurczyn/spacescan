@@ -255,7 +255,6 @@ HELP_HELP=Questo aiuto
 SUMMARY_CATEGORIES=Categorie
 SUMMARY_EXTENSIONS=Estensioni
 COL_EXTENSION=Estensione
-EXT_OTHER_COUNT=(%s altre estensioni)
 CAT_VIDEO=Video
 CAT_AUDIO=Audio
 CAT_IMAGES=Immagini

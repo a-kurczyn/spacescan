@@ -271,7 +271,6 @@ HELP_HELP=This help
 SUMMARY_CATEGORIES=Categories
 SUMMARY_EXTENSIONS=Extensions
 COL_EXTENSION=Extension
-EXT_OTHER_COUNT=(%s other extensions)
 # Category names: the tokens used as "name" in categories.json.
 CAT_VIDEO=Video
 CAT_AUDIO=Audio
