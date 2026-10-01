@@ -77,7 +77,7 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-55 | S3 | A user language file that is a FIFO or a link to /dev/zero hangs startup / eats memory (13 GB in 2 s) | OPEN | | |
 | SM-56 | S4 | Action buttons (Rescan, Empty trash, Choose folder) are announced as toggle buttons | OPEN | | |
 | SM-57 | S4 | Extensions table: "(no extension)" is cut to "(no extens…" at the default panel width | OPEN | | |
-| SM-58 | S4 | Extensions table rows can't be picked with a screen reader (exposed as plain text) | OPEN | | |
+| SM-58 | S4 | Extensions table rows can't be picked with a screen reader (exposed as plain text) | WONTFIX (agreed) | | **User decision (relayed by the coder, 2026-09-30): not doing this.** |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
