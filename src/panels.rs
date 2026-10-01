@@ -1344,11 +1344,6 @@ impl DiskScanApp {
             // Room for leader lines to slope gently to labels that moved.
             let label_x = rect.left() + bar_w + 34.0;
             let name_w = (rect.right() - label_x - 4.0).max(0.0);
-            // Each of the first nine labels starts with its key (1–9).
-            let key_w = painter
-                .layout_no_wrap("9 ".into(), font.clone(), Color32::WHITE)
-                .size()
-                .x;
             for (i, row) in rows.iter().enumerate() {
                 let (y0, y1) = spans[i];
                 let seg = egui::Rect::from_min_max(
@@ -1432,16 +1427,8 @@ impl DiskScanApp {
                     painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
                     painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
                 }
+                // Key 1–9 for the first nine (in the spoken name, not drawn).
                 let key = (i < 9).then(|| (i + 1).to_string());
-                if let Some(key) = key.as_ref().filter(|_| labelled[i]) {
-                    painter.text(
-                        Pos2::new(label_x, label_y[i] + 2.0),
-                        egui::Align2::LEFT_TOP,
-                        key,
-                        font.clone(),
-                        ui.visuals().weak_text_color(),
-                    );
-                }
                 if labelled[i] {
                     // A long name ends in "…"; the tooltip has it in full.
                     let mut job = egui::text::LayoutJob::simple_singleline(
@@ -1449,9 +1436,9 @@ impl DiskScanApp {
                         font.clone(),
                         ink,
                     );
-                    job.wrap = egui::text::TextWrapping::truncate_at_width(name_w - key_w);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
                     painter.galley(
-                        Pos2::new(label_x + key_w, label_y[i] + 2.0),
+                        Pos2::new(label_x, label_y[i] + 2.0),
                         painter.layout_job(job),
                         ink,
                     );
@@ -1476,7 +1463,7 @@ impl DiskScanApp {
                 });
                 if labelled[i] && two_lines {
                     painter.text(
-                        Pos2::new(label_x + key_w, label_y[i] + 2.0 + line_h),
+                        Pos2::new(label_x, label_y[i] + 2.0 + line_h),
                         egui::Align2::LEFT_TOP,
                         format!("{pct:.1}% · {}", human_size(row.size)),
                         font.clone(),
