@@ -191,6 +191,15 @@ struct DiskScanApp {
     /// Extension totals of the files found so far in the running scan, so
     /// the category bar grows live like the table.
     live_exts: ExtTotals,
+    /// Each finished folder's own files in the running scan, by path, and
+    /// the slice looks of the live chart built from them (refreshed when
+    /// `live_looks_gen` falls behind `partial_gen`).
+    live_files: HashMap<PathBuf, DirectFiles>,
+    live_looks: Looks,
+    live_looks_gen: u64,
+    live_looks_at: Instant,
+    /// How long the last live looks rebuild took.
+    live_looks_took: std::time::Duration,
     /// The category or extension picked in the left panel (None = all
     /// files). Applied on top of `filter`.
     pick: Option<Pick>,
@@ -350,6 +359,11 @@ impl Default for DiskScanApp {
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::new(),
+            live_files: HashMap::new(),
+            live_looks: Looks::empty(),
+            live_looks_gen: 0,
+            live_looks_at: Instant::now(),
+            live_looks_took: std::time::Duration::ZERO,
             cat_base: None,
             cat_breakdown: Vec::new(),
             cat_breakdown_for: None,
@@ -433,6 +447,8 @@ impl DiskScanApp {
         self.live_gen += 1;
         self.live_view = empty_node();
         self.live_exts.clear();
+        self.live_files.clear();
+        self.live_looks = Looks::empty();
         self.cat_breakdown.clear();
         self.cat_breakdown_for = None;
         self.status = tr("STATUS_SCANNING");
@@ -645,6 +661,8 @@ impl DiskScanApp {
     /// returns the memory.
     fn scan_ended(&mut self) {
         self.partial_root = empty_node();
+        self.live_files = HashMap::new();
+        self.live_looks = Looks::empty();
         after_tree_dropped();
     }
 
@@ -838,7 +856,7 @@ impl DiskScanApp {
                         ctime,
                         uid,
                         gid,
-                        exts,
+                        files,
                     }) => {
                         graft_slice(
                             &mut self.partial_root,
@@ -851,9 +869,10 @@ impl DiskScanApp {
                             uid,
                             gid,
                         );
-                        for (ext, size, files) in exts {
-                            add_ext(&mut self.live_exts, ext, size, files);
+                        for (ext, size, count) in &files.exts {
+                            add_ext(&mut self.live_exts, ext.clone(), *size, *count);
                         }
+                        self.live_files.insert(path, files);
                         self.partial_gen += 1;
                     }
                     Ok(ScanMsg::Done(node, secs)) => {

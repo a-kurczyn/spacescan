@@ -694,17 +694,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         .fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
-    let mut exts: Vec<(String, u64, u64)> = Vec::new();
-    for c in children.iter().filter(|c| !c.is_dir) {
-        let key = ext_key(&c.name);
-        match exts.iter_mut().find(|e| e.0 == key) {
-            Some(e) => {
-                e.1 = e.1.saturating_add(c.size);
-                e.2 += c.file_count.max(1);
-            }
-            None => exts.push((key, c.size, c.file_count.max(1))),
-        }
-    }
+    let files = DirectFiles::of_children(&children);
     let _ = progress.send(ScanMsg::SliceDone {
         path: path.to_path_buf(),
         size,
@@ -714,7 +704,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         ctime: self_ctime,
         uid: self_uid,
         gid: self_gid,
-        exts,
+        files,
     });
 
     Node {
@@ -746,9 +736,8 @@ pub(crate) enum ScanMsg {
         ctime: i64,
         uid: u32,
         gid: u32,
-        /// (extension, size, file count) of the files directly in it, for
-        /// the category bar's live totals (see `ext_key`).
-        exts: Vec<(String, u64, u64)>,
+        /// Its own files, for the live category bar and slice colors.
+        files: DirectFiles,
     },
     Done(Node, f64),
     Error(String),
@@ -1165,9 +1154,9 @@ mod live_category_tests {
         drop(tx);
         let mut live = ExtTotals::new();
         for msg in rx {
-            if let ScanMsg::SliceDone { exts, .. } = msg {
-                for (ext, size, files) in exts {
-                    add_ext(&mut live, ext, size, files);
+            if let ScanMsg::SliceDone { files, .. } = msg {
+                for (ext, size, count) in files.exts {
+                    add_ext(&mut live, ext, size, count);
                 }
             }
         }
