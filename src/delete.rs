@@ -4,7 +4,6 @@
 //! the trash ask for confirmation first; moving to the trash doesn't.
 
 use super::*;
-use std::os::unix::fs::MetadataExt;
 use std::sync::mpsc::channel;
 
 // Mount safety: deleting or trashing must never reach into another mounted
@@ -12,42 +11,14 @@ use std::sync::mpsc::channel;
 // is or contains a mount point is refused, and the recursive delete also
 // stops at any folder on another device.
 
-/// Mount points at or below `path`, from /proc/self/mountinfo.
+/// Mount points at or below `path`.
 fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
-    let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else {
-        return Vec::new();
-    };
-    let mut mounts: Vec<PathBuf> = info
-        .lines()
-        .filter_map(|line| line.split(' ').nth(4))
-        .map(|field| PathBuf::from(unescape_mountinfo(field)))
+    let mut mounts: Vec<PathBuf> = mount_points()
+        .into_iter()
         .filter(|m| m.starts_with(path))
         .collect();
-    // Stacked mounts (e.g. autofs under a network share) repeat a path.
     mounts.sort();
-    mounts.dedup();
     mounts
-}
-
-/// mountinfo writes space, tab, newline and backslash as octal escapes
-/// (`\040` for a space).
-fn unescape_mountinfo(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'\\'
-            && i + 3 < b.len()
-            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
-        {
-            out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
-            i += 4;
-        } else {
-            out.push(b[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Err (for the Issues log) if deleting or trashing `path` would touch a
@@ -104,14 +75,15 @@ fn trash_reason(e: &trash::Error) -> String {
     }
 }
 
-/// Like `remove_dir_all`, but stops with an error at a folder on another
-/// filesystem, and works in trees deeper than the path length limit.
-fn remove_dir_one_fs(dir: &Path, dev: u64) -> std::io::Result<()> {
-    remove_dir_in(dir, &None, dev)
+/// Like `remove_dir_all`, but stops with an error at a folder where another
+/// filesystem is mounted (one of `mounts`), and works in trees deeper than
+/// the path length limit. btrfs subvolumes inside are removed like folders.
+fn remove_dir_one_fs(dir: &Path, mounts: &HashSet<PathBuf>) -> std::io::Result<()> {
+    remove_dir_in(dir, &None, mounts)
 }
 
 /// `dir`'s parent folder is open as `parent` when the path is long.
-fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()> {
+fn remove_dir_in(dir: &Path, parent: &DirHandle, mounts: &HashSet<PathBuf>) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     let open_at = openable(dir, parent);
     // Keep this folder open while its entries' paths may be too long to
@@ -131,13 +103,13 @@ fn remove_dir_in(dir: &Path, parent: &DirHandle, dev: u64) -> std::io::Result<()
         // Not following symlinks: a link is removed, never its target.
         let m = entry.metadata()?;
         if m.is_dir() {
-            if m.dev() != dev {
+            if mounts.contains(&child) {
                 return Err(std::io::Error::other(trf(
                     "ERR_OTHER_FS_INSIDE",
                     &[&show_path(&child)],
                 )));
             }
-            deep(|| remove_dir_in(&child, &handle, dev))?;
+            deep(|| remove_dir_in(&child, &handle, mounts))?;
         } else {
             std::fs::remove_file(openable(&child, &handle))?;
         }
@@ -534,7 +506,7 @@ impl DiskScanApp {
             }
             let result = if permanent {
                 match std::fs::symlink_metadata(&p) {
-                    Ok(m) if m.is_dir() => remove_dir_one_fs(&p, m.dev()),
+                    Ok(m) if m.is_dir() => remove_dir_one_fs(&p, &mount_points()),
                     _ => std::fs::remove_file(&p),
                 }
                 .map_err(|e| e.to_string())
@@ -640,7 +612,6 @@ mod tests {
 
     #[test]
     fn deletes_trees_deeper_than_path_max() {
-        use std::os::unix::fs::MetadataExt;
         let base =
             std::env::temp_dir().join(format!("spacemap-deep-delete-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -669,8 +640,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, openable(&dir.join("link"), &handle)).unwrap();
         drop(handle);
         assert!(dir.as_os_str().len() > 7000);
-        let dev = std::fs::metadata(&top).unwrap().dev();
-        remove_dir_one_fs(&top, dev).unwrap();
+        remove_dir_one_fs(&top, &HashSet::new()).unwrap();
         assert!(!top.exists());
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep me");
         std::fs::remove_dir_all(&base).unwrap();
@@ -764,7 +734,6 @@ mod tests {
     /// it: scan, live-preview graft, category breakdown, filter, clone,
     /// find, replace, remove, drop, and the delete from disk.
     fn deep_chain(levels: usize) {
-        use std::os::unix::fs::MetadataExt;
         let base =
             std::env::temp_dir().join(format!("spacemap-deep-{levels}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -795,7 +764,7 @@ mod tests {
         let (tx, rx) = channel();
         std::thread::spawn(move || for _ in rx {});
         let ctx = ScanCtx {
-            root_dev: std::fs::metadata(&top).unwrap().dev(),
+            mounts: &HashSet::new(),
             progress: &tx,
             counter: &Default::default(),
             cancel: &Default::default(),
@@ -851,7 +820,7 @@ mod tests {
         drop(tree);
 
         // Delete from disk.
-        remove_dir_one_fs(&top, std::fs::metadata(&top).unwrap().dev()).unwrap();
+        remove_dir_one_fs(&top, &HashSet::new()).unwrap();
         assert!(!top.exists());
         std::fs::remove_dir_all(&base).unwrap();
     }

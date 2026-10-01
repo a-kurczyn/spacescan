@@ -509,35 +509,34 @@ impl DiskScanApp {
                 )));
                 return;
             }
-            let root_dev = match std::fs::metadata(&path) {
-                Ok(m) => {
-                    use std::os::unix::fs::MetadataExt;
-                    m.dev()
-                }
-                Err(e) => {
-                    let _ = tx.send(ScanMsg::Error(trf(
-                        "ERR_CANNOT_STAT",
-                        &[&show_path(&path), &e.to_string()],
-                    )));
-                    return;
-                }
-            };
+            if let Err(e) = std::fs::metadata(&path) {
+                let _ = tx.send(ScanMsg::Error(trf(
+                    "ERR_CANNOT_STAT",
+                    &[&show_path(&path), &e.to_string()],
+                )));
+                return;
+            }
+            let mounts = Arc::new(mount_points());
             let scan_finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
             if let Some(count) = entry_count {
-                let (path, cancel, scan_finished) =
-                    (path.clone(), cancel.clone(), scan_finished.clone());
+                let (path, cancel, scan_finished, mounts) = (
+                    path.clone(),
+                    cancel.clone(),
+                    scan_finished.clone(),
+                    mounts.clone(),
+                );
                 std::thread::spawn(move || {
                     use std::sync::atomic::Ordering;
                     let stop =
                         || cancel.load(Ordering::Relaxed) || scan_finished.load(Ordering::Relaxed);
-                    count_entries(&path, root_dev, &count.found, &stop);
+                    count_entries(&path, &mounts, &count.found, &stop);
                     if !stop() {
                         count.done.store(true, Ordering::Relaxed);
                     }
                 });
             }
             let ctx = ScanCtx {
-                root_dev,
+                mounts: &mounts,
                 progress: &tx,
                 counter: &counter,
                 cancel: &cancel,

@@ -433,10 +433,44 @@ pub(crate) fn birth_secs(m: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
+/// Every mount point, from /proc/self/mountinfo. A folder in this set has
+/// another filesystem mounted on it; scans and deletes stop there.
+pub(crate) fn mount_points() -> HashSet<PathBuf> {
+    let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return HashSet::new();
+    };
+    info.lines()
+        .filter_map(|line| line.split(' ').nth(4))
+        .map(|field| PathBuf::from(unescape_mountinfo(field)))
+        .collect()
+}
+
+/// mountinfo writes space, tab, newline and backslash as octal escapes
+/// (`\040` for a space).
+pub(crate) fn unescape_mountinfo(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\'
+            && i + 3 < b.len()
+            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+        {
+            out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
+            i += 4;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Everything a scan's worker threads share.
 pub(crate) struct ScanCtx<'a> {
-    /// Device of the scanned folder: other filesystems aren't entered.
-    pub(crate) root_dev: u64,
+    /// Folders where another filesystem is mounted (from `mount_points`):
+    /// not entered. Anything else is scanned, btrfs subvolumes included.
+    pub(crate) mounts: &'a HashSet<PathBuf>,
     pub(crate) progress: &'a Sender<ScanMsg>,
     pub(crate) counter: &'a std::sync::atomic::AtomicU64,
     pub(crate) cancel: &'a Arc<std::sync::atomic::AtomicBool>,
@@ -507,7 +541,7 @@ pub(crate) fn scan_entry(
     ctx: &ScanCtx,
 ) -> Node {
     let ScanCtx {
-        root_dev,
+        mounts,
         progress,
         counter,
         progress_interval,
@@ -527,8 +561,7 @@ pub(crate) fn scan_entry(
         Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
             // Other filesystems mounted inside aren't entered (like `du -x`).
             let meta = entry.metadata().ok();
-            let dev = meta.as_ref().map(|m| m.dev()).unwrap_or(root_dev);
-            if dev != root_dev {
+            if mounts.contains(&p) {
                 Node {
                     name: trf("SEG_OTHER_FS", &[&file_name_of(&p)]),
                     path: p,
@@ -738,11 +771,10 @@ pub(crate) struct EntryCount {
 /// and gives the progress bar its total.
 pub(crate) fn count_entries(
     path: &Path,
-    root_dev: u64,
+    mounts: &HashSet<PathBuf>,
     found: &std::sync::atomic::AtomicU64,
     stop: &(dyn Fn() -> bool + Sync),
 ) {
-    use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
     if stop() {
         return;
@@ -756,9 +788,11 @@ pub(crate) fn count_entries(
         let is_dir = e
             .file_type()
             .is_ok_and(|ft| ft.is_dir() && !ft.is_symlink());
-        // Only directories need a stat, to stay on the same filesystem.
-        if is_dir && e.metadata().is_ok_and(|m| m.dev() == root_dev) {
-            deep(|| count_entries(&e.path(), root_dev, found, stop));
+        if is_dir {
+            let child = e.path();
+            if !mounts.contains(&child) {
+                deep(|| count_entries(&child, mounts, found, stop));
+            }
         }
     });
 }
@@ -991,11 +1025,9 @@ mod memory {
         std::thread::spawn(move || for _ in rx {});
         let counter = std::sync::atomic::AtomicU64::new(0);
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        use std::os::unix::fs::MetadataExt;
-        let dev = std::fs::metadata(&root).unwrap().dev();
         let scan = || {
             let ctx = ScanCtx {
-                root_dev: dev,
+                mounts: &HashSet::new(),
                 progress: &tx,
                 counter: &counter,
                 cancel: &cancel,
@@ -1060,7 +1092,6 @@ mod hangul_tests {
     use super::*;
     #[test]
     fn scan_notices_korean_names() {
-        use std::os::unix::fs::MetadataExt;
         let dir = std::env::temp_dir().join(format!("spacemap-hangul-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -1069,7 +1100,7 @@ mod hangul_tests {
         std::thread::spawn(move || for _ in rx {});
         let seen = std::sync::atomic::AtomicBool::new(false);
         let ctx = ScanCtx {
-            root_dev: std::fs::metadata(&dir).unwrap().dev(),
+            mounts: &HashSet::new(),
             progress: &tx,
             counter: &Default::default(),
             cancel: &Default::default(),
@@ -1111,7 +1142,6 @@ mod live_category_tests {
     /// exactly what the finished tree's category bar shows.
     #[test]
     fn streamed_extension_totals_match_the_finished_tree() {
-        use std::os::unix::fs::MetadataExt;
         let dir = std::env::temp_dir().join(format!("spacemap-livecat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("a/b")).unwrap();
@@ -1122,7 +1152,7 @@ mod live_category_tests {
         std::fs::hard_link(dir.join("a/b/clip.mp4"), dir.join("a/clip-link.mp4")).unwrap();
         let (tx, rx) = channel();
         let ctx = ScanCtx {
-            root_dev: std::fs::metadata(&dir).unwrap().dev(),
+            mounts: &HashSet::new(),
             progress: &tx,
             counter: &Default::default(),
             cancel: &Default::default(),
@@ -1161,13 +1191,12 @@ mod scan_perf {
     #[test]
     #[ignore]
     fn scan_bench() {
-        use std::os::unix::fs::MetadataExt;
         let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").expect("set SPACEMAP_BENCH"));
         for run in 0..5 {
             let (tx, rx) = channel();
             let drain = std::thread::spawn(move || rx.into_iter().count());
             let ctx = ScanCtx {
-                root_dev: std::fs::metadata(&dir).unwrap().dev(),
+                mounts: &HashSet::new(),
                 progress: &tx,
                 counter: &Default::default(),
                 cancel: &Default::default(),
@@ -1186,5 +1215,46 @@ mod scan_perf {
                 tree.file_count
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod mount_tests {
+    use super::*;
+
+    /// Only folders in the mount table are left out of a scan (shown as
+    /// "[other filesystem]"); every other folder is scanned and counted,
+    /// whatever device it reports (btrfs subvolumes report their own).
+    #[test]
+    fn scans_stop_only_at_mount_points() {
+        let dir = std::env::temp_dir().join(format!("spacemap-mounts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("mounted")).unwrap();
+        std::fs::create_dir_all(dir.join("plain")).unwrap();
+        std::fs::write(dir.join("mounted/f"), vec![0u8; 5000]).unwrap();
+        std::fs::write(dir.join("plain/f"), vec![0u8; 5000]).unwrap();
+        let mounts: HashSet<PathBuf> = [dir.join("mounted")].into();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let ctx = ScanCtx {
+            mounts: &mounts,
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &Default::default(),
+            progress_interval: 512,
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+        };
+        let tree = scan_dir(&dir, &ctx);
+        let child = |name: &str| {
+            tree.children
+                .iter()
+                .find(|c| c.path == dir.join(name))
+                .unwrap()
+        };
+        assert_eq!((child("mounted").file_count, child("mounted").size), (0, 0));
+        assert_eq!(child("plain").file_count, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
