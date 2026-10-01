@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=%s에 이름이 없습니다
 ERR_CATEGORIES_ENTRY=%s: "%s"에 잘못된 항목: %s
 ERR_CATEGORIES_TWICE=%s은(는) 이미 "%s"에 있습니다
 ERR_CATEGORIES_OTHER=%s: "기타"는 내장 분류입니다
-ERR_CATEGORIES_MANY=분류 %s개: %s개를 넘으면 색을 구분하기 어렵습니다

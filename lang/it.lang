@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=%s non ha un nome
 ERR_CATEGORIES_ENTRY=%s: voce non valida in "%s": %s
 ERR_CATEGORIES_TWICE=%s è già in "%s"
 ERR_CATEGORIES_OTHER=%s: "Altri" è già integrato
-ERR_CATEGORIES_MANY=%s categorie: oltre %s i loro colori sono difficili da distinguere

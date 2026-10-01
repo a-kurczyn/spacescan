@@ -300,4 +300,3 @@ ERR_CATEGORIES_NO_NAME=%s has no name
 ERR_CATEGORIES_ENTRY=%s: not a valid entry in "%s": %s
 ERR_CATEGORIES_TWICE=%s is already in "%s"
 ERR_CATEGORIES_OTHER=%s: "Other" is built in
-ERR_CATEGORIES_MANY=%s categories: past %s, their colors are hard to tell apart

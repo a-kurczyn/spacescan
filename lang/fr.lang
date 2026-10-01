@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=%s n'a pas de nom
 ERR_CATEGORIES_ENTRY=%s : entrée non valide dans "%s" : %s
 ERR_CATEGORIES_TWICE=%s est déjà dans « %s »
 ERR_CATEGORIES_OTHER=%s : « Autres » est intégré
-ERR_CATEGORIES_MANY=%s catégories : au-delà de %s, leurs couleurs sont difficiles à distinguer

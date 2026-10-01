@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=%s に名前がありません
 ERR_CATEGORIES_ENTRY=%s: "%s" の無効な項目: %s
 ERR_CATEGORIES_TWICE=%s はすでに「%s」にあります
 ERR_CATEGORIES_OTHER=%s: 「その他」は組み込みです
-ERR_CATEGORIES_MANY=%s カテゴリー: %s を超えると色の区別が難しくなります

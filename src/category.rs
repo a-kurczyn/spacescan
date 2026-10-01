@@ -157,12 +157,6 @@ impl CategoryModel {
                 }
             }
         }
-        if model.names.len() > PALETTE.len() {
-            problems.push(trf(
-                "ERR_CATEGORIES_MANY",
-                &[&model.names.len().to_string(), &PALETTE.len().to_string()],
-            ));
-        }
         Ok((model, problems))
     }
 

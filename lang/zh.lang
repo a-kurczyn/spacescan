@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=%s 没有名称
 ERR_CATEGORIES_ENTRY=%s："%s" 中的条目无效：%s
 ERR_CATEGORIES_TWICE=%s 已在“%s”中
 ERR_CATEGORIES_OTHER=%s：“其他”为内置分类
-ERR_CATEGORIES_MANY=%s 个分类：超过 %s 个后颜色难以区分

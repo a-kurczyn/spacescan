@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=%s hat keinen Namen
 ERR_CATEGORIES_ENTRY=%s: ungültiger Eintrag in "%s": %s
 ERR_CATEGORIES_TWICE=%s ist bereits in „%s“
 ERR_CATEGORIES_OTHER=%s: „Sonstige“ ist eingebaut
-ERR_CATEGORIES_MANY=%s Kategorien: über %s hinaus sind ihre Farben schwer zu unterscheiden

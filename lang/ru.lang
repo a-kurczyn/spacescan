@@ -283,4 +283,3 @@ ERR_CATEGORIES_NO_NAME=у %s нет имени
 ERR_CATEGORIES_ENTRY=%s: недопустимая запись в "%s": %s
 ERR_CATEGORIES_TWICE=%s уже есть в «%s»
 ERR_CATEGORIES_OTHER=%s: «Прочее» встроено
-ERR_CATEGORIES_MANY=категорий: %s; больше %s — цвета трудно различить
