@@ -376,8 +376,10 @@ mod tests {
             std::fs::write(&real, "{}").unwrap();
             std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
             std::os::unix::fs::symlink(&real, settings_file()).unwrap();
-            let mut cfg = Config::default();
-            cfg.language = "es".into();
+            let cfg = Config {
+                language: "es".into(),
+                ..Config::default()
+            };
             cfg.save().unwrap();
             assert!(
                 std::fs::symlink_metadata(settings_file())

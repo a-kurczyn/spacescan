@@ -519,9 +519,11 @@ mod tests {
             .collect();
         kids.extend((0..1195).map(|i| test_node(&format!("/m/{i}"), 30, false, vec![])));
         let root = test_node("/m", kids.iter().map(|k| k.size).sum(), true, kids);
-        let mut settings = Settings::default();
-        settings.min_segment_angle_deg = 1.0;
-        settings.max_children_shown = 360;
+        let settings = Settings {
+            min_segment_angle_deg: 1.0,
+            max_children_shown: 360,
+            ..Settings::default()
+        };
         let span = 160f32.to_radians();
         let segs = layout_with(&root, span, &settings);
         let shown: Vec<&Segment> = segs.iter().filter(|s| !s.is_other).collect();
@@ -602,9 +604,11 @@ mod tests {
     /// Never more than 360 slices around a full ring, even at a tiny min angle.
     #[test]
     fn at_most_360_slices_per_ring() {
-        let mut settings = Settings::default();
-        settings.min_segment_angle_deg = 0.1;
-        settings.max_children_shown = usize::MAX;
+        let settings = Settings {
+            min_segment_angle_deg: 0.1,
+            max_children_shown: usize::MAX,
+            ..Settings::default()
+        };
         let n = 5000;
         let root = test_node(
             "/m",
