@@ -726,7 +726,6 @@ impl DiskScanApp {
             if self.scanning {
                 ui.weak(format!("· {}", tr("TABLE_TAG_SCANNING")));
             }
-            ui.weak(format!("· {}", tr("TABLE_HELP_HINT")));
         });
         if let Some(query) = &mut self.table.jump {
             let mut close = false;

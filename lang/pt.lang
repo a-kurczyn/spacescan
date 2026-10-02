@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=Excluir
 ERR_DELETE_FAILED=Não foi possível excluir %s: %s
 ERR_DELETE_PARTIAL=%s pode ter sido excluído em parte; analise de novo (r) para ver o que restou.
 ERR_OPEN_FAILED=Não foi possível abrir %s: %s
-TABLE_HELP_HINT=pressione ? para os atalhos de teclado
 TABLE_TAG_DIRS_FIRST=pastas primeiro
 TABLE_VIEW_TREE=Conteúdo da pasta
 TABLE_VIEW_FLAT=Lista plana: arquivos de todas as subpastas (l)

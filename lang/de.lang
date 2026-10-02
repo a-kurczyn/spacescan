@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=Löschen
 ERR_DELETE_FAILED=%s konnte nicht gelöscht werden: %s
 ERR_DELETE_PARTIAL=%s wurde eventuell teilweise gelöscht; neu durchsuchen (r), um zu sehen, was übrig ist.
 ERR_OPEN_FAILED=%s konnte nicht geöffnet werden: %s
-TABLE_HELP_HINT=? drücken für Tastenkürzel
 TABLE_TAG_DIRS_FIRST=Ordner zuerst
 TABLE_VIEW_TREE=Ordnerinhalt
 TABLE_VIEW_FLAT=Flache Liste: Dateien aus allen Unterordnern (l)

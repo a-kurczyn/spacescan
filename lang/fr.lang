@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=Supprimer
 ERR_DELETE_FAILED=Impossible de supprimer %s : %s
 ERR_DELETE_PARTIAL=%s a peut-être été supprimé en partie ; réanalysez-le (r) pour voir ce qui reste.
 ERR_OPEN_FAILED=Impossible d'ouvrir %s : %s
-TABLE_HELP_HINT=appuyez sur ? pour les raccourcis clavier
 TABLE_TAG_DIRS_FIRST=dossiers d'abord
 TABLE_VIEW_TREE=Contenu du dossier
 TABLE_VIEW_FLAT=Liste à plat : fichiers de tous les sous-dossiers (l)

@@ -177,7 +177,6 @@ ERR_DELETE_FAILED=No se pudo borrar %s: %s
 ERR_DELETE_PARTIAL=%s puede haberse borrado en parte; vuelve a escanearlo (r) para ver lo que queda.
 ERR_OPEN_FAILED=No se pudo abrir %s: %s
 
-TABLE_HELP_HINT=pulsa ? para ver los atajos de teclado
 TABLE_TAG_DIRS_FIRST=carpetas primero
 TABLE_VIEW_TREE=Contenido de la carpeta
 TABLE_VIEW_FLAT=Lista plana: archivos de todas las subcarpetas (l)

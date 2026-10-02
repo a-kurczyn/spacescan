@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=Elimina
 ERR_DELETE_FAILED=Impossibile eliminare %s: %s
 ERR_DELETE_PARTIAL=%s potrebbe essere stato eliminato in parte; rianalizzalo (r) per vedere cosa resta.
 ERR_OPEN_FAILED=Impossibile aprire %s: %s
-TABLE_HELP_HINT=premi ? per le scorciatoie da tastiera
 TABLE_TAG_DIRS_FIRST=prima le cartelle
 TABLE_VIEW_TREE=Contenuto della cartella
 TABLE_VIEW_FLAT=Elenco piatto: file di tutte le sottocartelle (l)

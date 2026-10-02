@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=削除
 ERR_DELETE_FAILED=%s を削除できませんでした: %s
 ERR_DELETE_PARTIAL=%s は一部だけ削除された可能性があります。再スキャン (r) して残りを確認してください。
 ERR_OPEN_FAILED=%s を開けませんでした: %s
-TABLE_HELP_HINT=? でキーボードショートカット
 TABLE_TAG_DIRS_FIRST=フォルダーを先に
 TABLE_VIEW_TREE=フォルダーの内容
 TABLE_VIEW_FLAT=フラット表示: すべてのサブフォルダーのファイル (l)

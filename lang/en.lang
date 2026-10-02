@@ -189,7 +189,6 @@ ERR_DELETE_FAILED=Couldn't delete %s: %s
 ERR_DELETE_PARTIAL=%s may have been partly deleted; rescan it (r) to see what's left.
 ERR_OPEN_FAILED=Couldn't open %s: %s
 
-TABLE_HELP_HINT=press ? for keyboard shortcuts
 TABLE_TAG_DIRS_FIRST=folders first
 TABLE_VIEW_TREE=Folder contents
 TABLE_VIEW_FLAT=Flat list: files from all subfolders (l)

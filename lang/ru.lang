@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=Удалить
 ERR_DELETE_FAILED=Не удалось удалить %s: %s
 ERR_DELETE_PARTIAL=%s, возможно, удалён частично; проанализируйте заново (r), чтобы увидеть, что осталось.
 ERR_OPEN_FAILED=Не удалось открыть %s: %s
-TABLE_HELP_HINT=нажмите ? для списка клавиш
 TABLE_TAG_DIRS_FIRST=папки сначала
 TABLE_VIEW_TREE=Содержимое папки
 TABLE_VIEW_FLAT=Плоский список: файлы из всех подпапок (l)

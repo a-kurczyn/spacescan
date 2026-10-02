@@ -173,7 +173,6 @@ DELETE_CONFIRM_YES=删除
 ERR_DELETE_FAILED=无法删除 %s：%s
 ERR_DELETE_PARTIAL=%s 可能只被删除了一部分；请重新扫描 (r) 查看剩余内容。
 ERR_OPEN_FAILED=无法打开 %s：%s
-TABLE_HELP_HINT=按 ? 查看键盘快捷键
 TABLE_TAG_DIRS_FIRST=文件夹优先
 TABLE_VIEW_TREE=文件夹内容
 TABLE_VIEW_FLAT=平铺列表：所有子文件夹中的文件 (l)
