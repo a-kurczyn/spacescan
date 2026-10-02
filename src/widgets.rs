@@ -555,6 +555,32 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
     cut(lo)
 }
 
+/// `text` shortened in the middle (see `shorten_middle`) just enough to fit
+/// in `width` points in `font`; as is if it fits.
+pub(crate) fn fit_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
+    let fits = |t: &str| {
+        ui.painter()
+            .layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+            <= width
+    };
+    if fits(text) {
+        return text.to_string();
+    }
+    // The longest cut that fits, by binary search on its length.
+    let (mut lo, mut hi) = (1, text.chars().count());
+    while lo + 1 < hi {
+        let mid = (lo + hi) / 2;
+        if fits(&shorten_middle(text, mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    shorten_middle(text, lo)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,5 +630,27 @@ mod tests {
         };
         assert!(node("Chart view").toggled().is_some());
         assert!(node("Rescan").toggled().is_none());
+    }
+
+    #[test]
+    fn long_paths_are_cut_in_the_middle_to_fit() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let path = "/run/media/user/disk/some/very/long/folder/name/film.mkv";
+            let width = |t: &str| {
+                ui.painter()
+                    .layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE)
+                    .size()
+                    .x
+            };
+            assert_eq!(fit_middle(ui, path, &font, 10_000.0), path);
+            let half = width(path) / 2.0;
+            let cut = fit_middle(ui, path, &font, half);
+            assert!(cut.contains('…') && cut.ends_with("film.mkv") && width(&cut) <= half);
+            // One more character wouldn't fit.
+            let longer = shorten_middle(path, cut.chars().count() + 1);
+            assert!(width(&longer) > half);
+        });
     }
 }

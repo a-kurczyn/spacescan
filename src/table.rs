@@ -829,9 +829,17 @@ impl DiskScanApp {
                                 );
                             }
                             Cell::Name => {
-                                // The flat list shows each file's full path.
+                                // The flat list shows each file's full path, shortened
+                                // in the middle when the column is too narrow.
                                 let mut text = if flat {
-                                    egui::RichText::new(show_path(&c.path))
+                                    let font = egui::TextStyle::Body.resolve(ui.style());
+                                    let width = ui.available_width();
+                                    egui::RichText::new(fit_middle(
+                                        ui,
+                                        &show_path(&c.path),
+                                        &font,
+                                        width,
+                                    ))
                                 } else {
                                     egui::RichText::new(&c.name)
                                 };
