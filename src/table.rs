@@ -139,6 +139,44 @@ struct RowOrder {
     dotfile_size: u64,
     /// The flat list: how many files it has, shown or past the limit.
     flat_files: u64,
+    /// Width of the longest name or path in the rows, once measured.
+    name_width: Option<f32>,
+}
+
+/// The Name column's text for `node`: its name, or in the flat list its
+/// full path.
+fn row_text(node: &Node, flat: bool) -> std::borrow::Cow<'_, str> {
+    if flat {
+        show_path(&node.path).into()
+    } else {
+        node.name.as_str().into()
+    }
+}
+
+/// Width of the longest name in `rows`. Only the names with the most characters are measured, so huge folders
+/// stay fast.
+fn widest_name(ui: &egui::Ui, rows: &Rows, view: &Node, flat: bool) -> f32 {
+    const MEASURED: usize = 64;
+    let mut by_len: Vec<(usize, usize)> = (0..rows.len())
+        .map(|i| (row_text(rows.node(view, i), flat).chars().count(), i))
+        .collect();
+    if by_len.len() > MEASURED {
+        by_len.select_nth_unstable_by(MEASURED, |a, b| b.cmp(a));
+        by_len.truncate(MEASURED);
+    }
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let color = ui.visuals().text_color();
+    by_len
+        .iter()
+        .map(|&(_, i)| {
+            let text = row_text(rows.node(view, i), flat).into_owned();
+            ui.painter()
+                .layout_no_wrap(text, font.clone(), color)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max)
+        + ui.spacing().item_spacing.x
 }
 
 /// Where `cursor` is in `rows`. `pos` is the last answer, checked first,
@@ -494,6 +532,10 @@ impl DiskScanApp {
             Some(o) if o.key == key => o,
             _ => self.row_order(view_node, key),
         };
+        let mut order = order;
+        let name_width = *order.name_width.get_or_insert_with(|| {
+            widest_name(ui, &order.rows, view_node, order.key.flat.is_some())
+        });
         let row = |i: usize| order.rows.node(view_node, i);
         let n_rows = order.rows.len();
         let flat = order.key.flat.is_some();
@@ -707,9 +749,12 @@ impl DiskScanApp {
                             Cell::Mark => Column::exact(12.0),
                             Cell::Opt(TableCol::Bar) => Column::exact(92.0),
                             Cell::Opt(_) => Column::auto().at_least(40.0),
-                            // Clipped, so it can narrow again after showing a long
-                            // name in full (names cut themselves short with "…").
-                            Cell::Name => Column::remainder().at_least(120.0).clip(true),
+                            // Wide enough for the longest name in full; the table
+                            // scrolls sideways when that's wider than the window.
+                            // Clipped, so it narrows again to that width.
+                            Cell::Name => Column::remainder()
+                                .at_least(name_width.max(120.0))
+                                .clip(true),
                         };
                         tb = tb.column(column.auto_size_this_frame(fit[i]));
                     }
@@ -886,20 +931,8 @@ impl DiskScanApp {
                                     Cell::Name => {
                                         #[cfg(test)]
                                         tests_probe::NAME_WIDTH.set(ui.available_width());
-                                        // The flat list shows each file's full path, shortened
-                                        // in the middle when the column is too narrow.
-                                        let mut text = if flat {
-                                            let font = egui::TextStyle::Body.resolve(ui.style());
-                                            let width = ui.available_width();
-                                            egui::RichText::new(fit_middle(
-                                                ui,
-                                                &show_path(&c.path),
-                                                &font,
-                                                width,
-                                            ))
-                                        } else {
-                                            egui::RichText::new(&c.name)
-                                        };
+                                        // The flat list shows each file's full path.
+                                        let mut text = egui::RichText::new(row_text(c, flat));
                                         // Folders stand out by color alone.
                                         if c.is_dir || selected {
                                             text = text.color(pick(dir_color));
@@ -907,7 +940,7 @@ impl DiskScanApp {
                                         if is_marked {
                                             text = text.strong();
                                         }
-                                        ui.add(egui::Label::new(text).truncate());
+                                        ui.add(egui::Label::new(text).extend());
                                     }
                                 });
                             }
@@ -982,6 +1015,7 @@ impl DiskScanApp {
                 shown_size: size,
                 dotfile_size: dot_size,
                 flat_files: count,
+                name_width: None,
                 key,
             };
         }
@@ -1066,6 +1100,7 @@ impl DiskScanApp {
                 .fold(0u64, u64::saturating_add),
             rows: Rows::Children(idx),
             flat_files: 0,
+            name_width: None,
             key,
         }
     }
@@ -1797,10 +1832,10 @@ mod flat_tests {
         assert_eq!(draw(&mut app), ["d"]);
     }
 
-    /// After showing a long name in full in a wide window, the Name column
-    /// narrows again with the window.
+    /// The Name column is wide enough for the longest name, past the
+    /// window if need be, fills a wider window, and narrows back with it.
     #[test]
-    fn the_name_column_narrows_with_the_window() {
+    fn the_name_column_fits_the_longest_name() {
         let mut app = DiskScanApp {
             summary_view: true,
             ..DiskScanApp::default()
@@ -1825,9 +1860,23 @@ mod flat_tests {
             }
             tests_probe::NAME_WIDTH.get()
         };
+        let full = {
+            let ctx = egui::Context::default();
+            let mut w = 0.0;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                w = ui
+                    .painter()
+                    .layout_no_wrap(file_name_of(Path::new(&long)), font, Color32::WHITE)
+                    .size()
+                    .x;
+            });
+            w
+        };
         let narrow = name_width(700.0);
-        let wide = name_width(3000.0);
-        assert!(wide > narrow + 1000.0, "{narrow} {wide}");
+        assert!(narrow >= full && narrow > 700.0, "{narrow} {full}");
+        let wide = name_width(4000.0);
+        assert!(wide > full + 1000.0, "{wide} {full}");
         assert!((name_width(700.0) - narrow).abs() < 1.0);
     }
 
