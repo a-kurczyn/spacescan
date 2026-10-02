@@ -667,10 +667,11 @@ impl DiskScanApp {
                         ui.separator();
                         ui.label(tr("SETTINGS_COLORS"));
                         ui.add(
-                            egui::Slider::new(&mut s.age_weeks, Settings::AGE_WEEKS)
-                                .text(tr("SETTINGS_AGE_WEEKS")),
+                            egui::Slider::new(&mut s.age_days, Settings::AGE_DAYS)
+                                .logarithmic(true)
+                                .text(tr("SETTINGS_AGE_DAYS")),
                         )
-                        .on_hover_text(tr("SETTINGS_AGE_WEEKS_HOVER"));
+                        .on_hover_text(tr("SETTINGS_AGE_DAYS_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
                                 .text(tr("SETTINGS_FREE_GAMMA")),
@@ -870,7 +871,7 @@ impl DiskScanApp {
             };
             ui.scope(|ui| {
                 ui.set_opacity(fade);
-                age_legend_ui(ui, self.settings.age_weeks);
+                age_legend_ui(ui, self.settings.age_days);
             });
         });
         central.response.rect
@@ -1580,7 +1581,7 @@ impl DiskScanApp {
                     } else {
                         looks.of(get_node(view, &seg.idx_path), &self.cats)
                     };
-                    let color = look_color(&look, now, self.settings.age_weeks, &self.cats, dark);
+                    let color = look_color(&look, now, self.settings.age_days, &self.cats, dark);
                     // "Other" is paler, to read as a group.
                     let color = if seg.is_other {
                         color.lerp_to_gamma(free_color, 0.35)
@@ -2019,13 +2020,13 @@ struct SliceColoring<'a> {
     now: i64,
 }
 
-/// The legend for slice brightness: five swatches from this week (bright)
-/// to `age_weeks` or older (dark), centered under the chart.
-fn age_legend_ui(ui: &mut egui::Ui, age_weeks: u32) {
+/// The legend for slice brightness: one swatch per step, from new (bright)
+/// to `age_days` or older (dark), centered under the chart.
+fn age_legend_ui(ui: &mut egui::Ui, age_days: u32) {
     let base = ui.visuals().strong_text_color();
     let swatch = Vec2::new(14.0, 10.0);
     let new_text = tr("AGE_LEGEND_NEW");
-    let old_text = trf("AGE_LEGEND_OLD", &[&age_weeks.to_string()]);
+    let old_text = trf("AGE_LEGEND_OLD", &[&age_days.to_string()]);
     let font = egui::TextStyle::Small.resolve(ui.style());
     let text_w = |t: &str| {
         ui.painter()

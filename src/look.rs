@@ -1,8 +1,8 @@
 //! Slice colors in the finished chart. The category taking the most space
 //! in a slice sets its hue (the category bar's colors); the size-weighted
 //! average age of its contents, by Changed time (when the data arrived on
-//! this disk), sets its brightness in five steps: this week is brightest,
-//! `age_weeks` and older is darkest.
+//! this disk), sets its brightness in three steps: new is brightest,
+//! `age_days` and older is darkest.
 
 use super::*;
 
@@ -138,26 +138,20 @@ impl Looks {
 }
 
 /// Number of brightness steps.
-pub(crate) const AGE_STEPS: u8 = 5;
+pub(crate) const AGE_STEPS: u8 = 3;
 
-/// Brightness step of an average Changed time: 0 for this week, the last
-/// step for `age_weeks` or older (or unknown), evenly spread in between.
-pub(crate) fn age_step(avg_ctime: i64, now: i64, age_weeks: u32) -> u8 {
-    const WEEK: f64 = 7.0 * 24.0 * 3600.0;
+/// Brightness step of an average Changed time: the time from now back to
+/// `age_days` is split evenly between the steps, and `age_days` or older
+/// (or unknown) is the last.
+pub(crate) fn age_step(avg_ctime: i64, now: i64, age_days: u32) -> u8 {
+    const DAY: f64 = 24.0 * 3600.0;
     const LAST: u8 = AGE_STEPS - 1;
     if avg_ctime == NO_TIME {
         return LAST;
     }
-    let weeks = (now - avg_ctime).max(0) as f64 / WEEK;
-    if weeks < 1.0 {
-        return 0;
-    }
-    let oldest = age_weeks.max(2) as f64;
-    if weeks >= oldest {
-        return LAST;
-    }
-    // The middle steps share the time between one week and `age_weeks`.
-    1 + ((weeks - 1.0) / (oldest - 1.0) * (LAST - 1) as f64) as u8
+    let days = (now - avg_ctime).max(0) as f64 / DAY;
+    let share = days / age_days.max(1) as f64;
+    ((share * LAST as f64) as u8).min(LAST)
 }
 
 /// `color` at brightness step `step`: 0 is the color as is, each step
@@ -173,13 +167,13 @@ pub(crate) fn shade(color: Color32, step: u8) -> Color32 {
 pub(crate) fn look_color(
     look: &Look,
     now: i64,
-    age_weeks: u32,
+    age_days: u32,
     cats: &CategoryModel,
     dark: bool,
 ) -> Color32 {
     shade(
         cats.color(look.cat, dark),
-        age_step(look.avg_ctime, now, age_weeks),
+        age_step(look.avg_ctime, now, age_days),
     )
 }
 
@@ -197,18 +191,18 @@ mod tests {
     const DAY: i64 = 24 * 3600;
 
     #[test]
-    fn age_steps_span_this_week_to_the_baseline() {
+    fn age_steps_split_the_days_evenly() {
         let now = 1_000_000_000;
-        assert_eq!(age_step(now - DAY, now, 52), 0);
-        assert_eq!(age_step(now - 8 * DAY, now, 52), 1);
-        assert_eq!(age_step(now - 26 * 7 * DAY, now, 52), 2);
-        assert_eq!(age_step(now - 51 * 7 * DAY, now, 52), 3);
-        assert_eq!(age_step(now - 52 * 7 * DAY, now, 52), 4);
-        assert_eq!(age_step(now - 500 * 7 * DAY, now, 52), 4);
-        assert_eq!(age_step(NO_TIME, now, 52), 4);
+        assert_eq!(age_step(now - DAY, now, 365), 0);
+        assert_eq!(age_step(now - 182 * DAY, now, 365), 0);
+        assert_eq!(age_step(now - 183 * DAY, now, 365), 1);
+        assert_eq!(age_step(now - 364 * DAY, now, 365), 1);
+        assert_eq!(age_step(now - 365 * DAY, now, 365), 2);
+        assert_eq!(age_step(now - 5000 * DAY, now, 365), 2);
+        assert_eq!(age_step(NO_TIME, now, 365), 2);
         // Steps never go down as files get older.
-        let steps: Vec<u8> = (0..60)
-            .map(|w| age_step(now - w * 7 * DAY, now, 52))
+        let steps: Vec<u8> = (0..400)
+            .map(|d| age_step(now - d * DAY, now, 365))
             .collect();
         assert!(steps.windows(2).all(|p| p[0] <= p[1]));
     }
@@ -242,8 +236,8 @@ mod tests {
     fn shades_get_darker_with_age() {
         let c = Color32::from_rgb(200, 100, 50);
         assert_eq!(shade(c, 0), c);
-        assert!(shade(c, 4).r() < shade(c, 2).r() && shade(c, 2).r() < c.r());
-        assert_eq!(shade(c, 4), Color32::from_rgb(50, 25, 13));
+        assert!(shade(c, 2).r() < shade(c, 1).r() && shade(c, 1).r() < c.r());
+        assert_eq!(shade(c, 2), Color32::from_rgb(50, 25, 13));
     }
 }
 

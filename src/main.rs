@@ -89,8 +89,8 @@ struct Settings {
     /// Every child gets its own slice (no "other"), however thin.
     unlimited_slices: bool,
     hub_radius_frac: f32,
-    /// Weeks of age at which slices reach their darkest shade.
-    age_weeks: u32,
+    /// Days of age at which slices reach their darkest shade.
+    age_days: u32,
     free_space_gamma: f32,
     stroke_width: f32,
     stroke_alpha: u8,
@@ -109,7 +109,7 @@ impl Settings {
     const MIN_ANGLE: RangeInclusive<f32> = 0.1..=5.0;
     const MAX_CHILDREN: RangeInclusive<usize> = 4..=360;
     const HUB: RangeInclusive<f32> = 0.05..=0.5;
-    const AGE_WEEKS: RangeInclusive<u32> = 2..=520;
+    const AGE_DAYS: RangeInclusive<u32> = 7..=3650;
     const FREE_GAMMA: RangeInclusive<f32> = 0.2..=1.5;
     const STROKE_WIDTH: RangeInclusive<f32> = 0.0..=3.0;
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
@@ -129,9 +129,9 @@ impl Settings {
         self.hub_radius_frac = self
             .hub_radius_frac
             .clamp(*Self::HUB.start(), *Self::HUB.end());
-        self.age_weeks = self
-            .age_weeks
-            .clamp(*Self::AGE_WEEKS.start(), *Self::AGE_WEEKS.end());
+        self.age_days = self
+            .age_days
+            .clamp(*Self::AGE_DAYS.start(), *Self::AGE_DAYS.end());
         self.free_space_gamma = self
             .free_space_gamma
             .clamp(*Self::FREE_GAMMA.start(), *Self::FREE_GAMMA.end());
@@ -159,7 +159,7 @@ impl Default for Settings {
             max_children_shown: 120,
             unlimited_slices: false,
             hub_radius_frac: 0.22,
-            age_weeks: 52,
+            age_days: 365,
             free_space_gamma: 0.7,
             stroke_width: 1.0,
             stroke_alpha: 90,
