@@ -1080,6 +1080,25 @@ impl DiskScanApp {
         let mut clicked: Option<(String, bool)> = None;
         // A steady scroll bar, beside the rows rather than over them.
         ui.spacing_mut().scroll = steady_scroll_style();
+        // The number columns are exactly as wide as their widest value or
+        // header, so they never take width from the extension names.
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let text_w = |t: &str| {
+            ui.painter()
+                .layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE)
+                .size()
+                .x
+        };
+        // A header button holds its title, the sort arrow and padding.
+        let header_w = |t: &str| text_w(t) + 2.0 * ui.spacing().button_padding.x + 16.0;
+        let size_w = rows
+            .iter()
+            .map(|r| text_w(&human_size(r.size)))
+            .fold(header_w(&tr("COL_SIZE")), f32::max);
+        let files_w = rows
+            .iter()
+            .map(|r| text_w(&format_count(r.files)))
+            .fold(header_w(&tr("COL_FILES")), f32::max);
         let ext_sort = &mut self.ext_sort;
         TableBuilder::new(ui)
             .id_salt("ext_table")
@@ -1091,8 +1110,8 @@ impl DiskScanApp {
             .animate_scrolling(false)
             .auto_shrink([false, true])
             .column(Column::remainder().at_least(60.0))
-            .column(Column::auto().at_least(50.0))
-            .column(Column::auto().at_least(36.0))
+            .column(Column::exact(size_w))
+            .column(Column::exact(files_w))
             .header(row_h, |mut header| {
                 header.col(|ui| {
                     sortable_header(ui, &tr("COL_EXTENSION"), SortColumn::Name, ext_sort);
@@ -1214,7 +1233,6 @@ impl DiskScanApp {
         } else {
             (full_w * 0.3).clamp(150.0, 260.0)
         };
-        let table_w = (full_w - cat_w - 16.0).max(200.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
                 Vec2::new(cat_w, avail),
@@ -1225,6 +1243,8 @@ impl DiskScanApp {
                 },
             );
             ui.separator();
+            // Whatever width is left, so the table never reaches past the window.
+            let table_w = ui.available_width().max(200.0);
             ui.allocate_ui_with_layout(
                 Vec2::new(table_w, avail),
                 egui::Layout::top_down(egui::Align::Min),
