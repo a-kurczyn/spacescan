@@ -19,7 +19,6 @@ DIALOG_PICK_FOLDER_TITLE=Laufwerk oder Ordner zum Durchsuchen wählen
 
 # ---- Filter panel ----
 FILTER_TITLE=Filter
-FILTER_CLOSE=Filter schließen
 FILTER_NAME_LABEL=Name
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
 FILTER_NAME_HOVER=Muster, getrennt durch Leerzeichen oder Kommas; eine Datei passt, wenn eines davon passt. Setzen Sie ein Muster in "Anführungszeichen" (oder schreiben Sie \\ vor ein Zeichen), um Leerzeichen oder Kommas einzuschließen.\n* = beliebige Zeichen, ? = ein Zeichen, [a,b,c] oder {a,b,c} = Alternativen.\nOhne * oder ? passt es an beliebiger Stelle im Namen. Groß-/Kleinschreibung wird ignoriert, außer der Aa-Schalter ist an.
@@ -57,7 +56,6 @@ ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=Diagrammeinstellungen
-SETTINGS_CLOSE=Einstellungen schließen
 SETTINGS_DEPTH_GROUPING=Tiefe und Gruppierung
 SETTINGS_DEPTH_LEVELS=Angezeigte Ebenen
 SETTINGS_MIN_SLICE_ANGLE=Mindestwinkel eines Segments (°)

@@ -19,7 +19,6 @@ DIALOG_PICK_FOLDER_TITLE=Выберите диск или папку для ан
 
 # ---- Filter panel ----
 FILTER_TITLE=Фильтры
-FILTER_CLOSE=Закрыть фильтры
 FILTER_NAME_LABEL=Имя
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
 FILTER_NAME_HOVER=Шаблоны через пробел или запятую; файл подходит, если подходит любой из них. Заключите шаблон в "кавычки" (или поставьте \\ перед символом), чтобы включить пробелы или запятые.\n* = любые символы, ? = один символ, [a,b,c] или {a,b,c} = варианты.\nБез * и ? совпадение ищется в любом месте имени. Регистр не учитывается, если не включена кнопка Aa.
@@ -57,7 +56,6 @@ ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=Настройки диаграммы
-SETTINGS_CLOSE=Закрыть настройки
 SETTINGS_DEPTH_GROUPING=Глубина и группировка
 SETTINGS_DEPTH_LEVELS=Показываемые уровни
 SETTINGS_MIN_SLICE_ANGLE=Мин. угол сектора (°)

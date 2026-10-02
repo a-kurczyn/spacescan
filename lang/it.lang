@@ -19,7 +19,6 @@ DIALOG_PICK_FOLDER_TITLE=Scegli un disco o una cartella da analizzare
 
 # ---- Filter panel ----
 FILTER_TITLE=Filtri
-FILTER_CLOSE=Chiudi i filtri
 FILTER_NAME_LABEL=Nome
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
 FILTER_NAME_HOVER=Modelli separati da spazi o virgole; un file corrisponde se ne corrisponde almeno uno. Metti un modello tra "virgolette" (o scrivi \\ prima di un carattere) per includere spazi o virgole.\n* = qualsiasi carattere, ? = un carattere, [a,b,c] o {a,b,c} = alternative.\nSenza * o ? corrisponde in qualsiasi punto del nome. Non distingue maiuscole e minuscole, a meno che il pulsante Aa sia attivo.
@@ -57,7 +56,6 @@ ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=Impostazioni del grafico
-SETTINGS_CLOSE=Chiudi le impostazioni
 SETTINGS_DEPTH_GROUPING=Profondità e raggruppamento
 SETTINGS_DEPTH_LEVELS=Livelli di profondità mostrati
 SETTINGS_MIN_SLICE_ANGLE=Angolo minimo di uno spicchio (°)

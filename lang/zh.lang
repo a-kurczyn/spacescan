@@ -19,7 +19,6 @@ DIALOG_PICK_FOLDER_TITLE=选择要扫描的驱动器或文件夹
 
 # ---- Filter panel ----
 FILTER_TITLE=筛选
-FILTER_CLOSE=关闭筛选
 FILTER_NAME_LABEL=名称
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
 FILTER_NAME_HOVER=用空格或逗号分隔的模式；文件只要匹配其中任意一个即可。要包含空格或逗号，请把模式放在 "双引号" 中（或在字符前写 \\）。\n* = 任意字符，? = 单个字符，[a,b,c] 或 {a,b,c} = 任选其一。\n没有 * 或 ? 时，名称中任意位置包含即匹配。除非打开 Aa 按钮，否则不区分大小写。
@@ -57,7 +56,6 @@ ERR_FIELD_PREFIX=%s：%s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=图表设置
-SETTINGS_CLOSE=关闭设置
 SETTINGS_DEPTH_GROUPING=深度与分组
 SETTINGS_DEPTH_LEVELS=显示的层级数
 SETTINGS_MIN_SLICE_ANGLE=扇区最小角度 (°)

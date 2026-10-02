@@ -19,7 +19,6 @@ DIALOG_PICK_FOLDER_TITLE=Choisir un disque ou un dossier à analyser
 
 # ---- Filter panel ----
 FILTER_TITLE=Filtres
-FILTER_CLOSE=Fermer les filtres
 FILTER_NAME_LABEL=Nom
 FILTER_NAME_HINT=*.iso, *.[mkv,mp4,avi]
 FILTER_NAME_HOVER=Motifs séparés par des espaces ou des virgules ; un fichier correspond si l'un d'eux correspond. Mettez un motif entre "guillemets" (ou écrivez \\ devant un caractère) pour inclure des espaces ou des virgules.\n* = n'importe quels caractères, ? = un caractère, [a,b,c] ou {a,b,c} = alternatives.\nSans * ni ?, il correspond n'importe où dans le nom. Insensible à la casse sauf si le bouton Aa est activé.
@@ -57,7 +56,6 @@ ERR_FIELD_PREFIX=%s : %s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=Paramètres du graphique
-SETTINGS_CLOSE=Fermer les paramètres
 SETTINGS_DEPTH_GROUPING=Profondeur et regroupement
 SETTINGS_DEPTH_LEVELS=Niveaux de profondeur affichés
 SETTINGS_MIN_SLICE_ANGLE=Angle minimal d'une part (°)
