@@ -193,6 +193,7 @@ TABLE_TAG_DIRS_FIRST=folders first
 TABLE_VIEW_TREE=Folder contents
 TABLE_VIEW_FLAT=Flat list: files from all subfolders (l)
 TABLE_TAG_FLAT=%s files from all subfolders
+TABLE_TAG_FOLDER_COUNTS=%s folders, %s files
 TABLE_TAG_FLAT_SOME=first %s of %s files from all subfolders
 TABLE_TAG_FLAT_ON_FINISH=flat list when the scan finishes
 TABLE_TAG_SCANNING=sizes so far · opening folders, delete and trash wait for the scan to finish

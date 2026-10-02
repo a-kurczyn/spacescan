@@ -177,6 +177,7 @@ TABLE_TAG_DIRS_FIRST=dossiers d'abord
 TABLE_VIEW_TREE=Contenu du dossier
 TABLE_VIEW_FLAT=Liste à plat : fichiers de tous les sous-dossiers (l)
 TABLE_TAG_FLAT=%s fichiers de tous les sous-dossiers
+TABLE_TAG_FOLDER_COUNTS=%s dossiers, %s fichiers
 TABLE_TAG_FLAT_SOME=%s premiers sur %s fichiers de tous les sous-dossiers
 TABLE_TAG_FLAT_ON_FINISH=liste à plat à la fin de l'analyse
 TABLE_TAG_SCANNING=tailles provisoires · ouvrir des dossiers, supprimer et mettre à la corbeille attendent la fin de l'analyse

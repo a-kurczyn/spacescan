@@ -177,6 +177,7 @@ TABLE_TAG_DIRS_FIRST=폴더 먼저
 TABLE_VIEW_TREE=폴더 내용
 TABLE_VIEW_FLAT=평면 목록: 모든 하위 폴더의 파일 (l)
 TABLE_TAG_FLAT=모든 하위 폴더의 파일 %s개
+TABLE_TAG_FOLDER_COUNTS=폴더 %s개, 파일 %s개
 TABLE_TAG_FLAT_SOME=처음 %s개 (모든 하위 폴더의 파일 총 %s개 중)
 TABLE_TAG_FLAT_ON_FINISH=검사가 끝나면 평면 목록
 TABLE_TAG_SCANNING=현재까지의 크기 · 폴더 열기, 삭제, 휴지통은 검사가 끝난 뒤

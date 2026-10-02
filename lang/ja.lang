@@ -177,6 +177,7 @@ TABLE_TAG_DIRS_FIRST=フォルダーを先に
 TABLE_VIEW_TREE=フォルダーの内容
 TABLE_VIEW_FLAT=フラット表示: すべてのサブフォルダーのファイル (l)
 TABLE_TAG_FLAT=すべてのサブフォルダーのファイル %s 件
+TABLE_TAG_FOLDER_COUNTS=フォルダー %s 個、ファイル %s 個
 TABLE_TAG_FLAT_SOME=先頭 %s 件 (すべてのサブフォルダーのファイル全 %s 件中)
 TABLE_TAG_FLAT_ON_FINISH=スキャン完了後にフラット表示
 TABLE_TAG_SCANNING=途中のサイズ · フォルダーを開く、削除、ゴミ箱はスキャン完了後

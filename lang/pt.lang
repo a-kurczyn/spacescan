@@ -177,6 +177,7 @@ TABLE_TAG_DIRS_FIRST=pastas primeiro
 TABLE_VIEW_TREE=Conteúdo da pasta
 TABLE_VIEW_FLAT=Lista plana: arquivos de todas as subpastas (l)
 TABLE_TAG_FLAT=%s arquivos de todas as subpastas
+TABLE_TAG_FOLDER_COUNTS=%s pastas, %s arquivos
 TABLE_TAG_FLAT_SOME=primeiros %s de %s arquivos de todas as subpastas
 TABLE_TAG_FLAT_ON_FINISH=lista plana ao terminar a análise
 TABLE_TAG_SCANNING=tamanhos parciais · abrir pastas, excluir e mover para a lixeira aguardam o fim da análise

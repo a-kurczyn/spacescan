@@ -180,6 +180,8 @@ struct RowOrder {
     dotfile_size: u64,
     /// The flat list: how many files it has, shown or past the limit.
     flat_files: u64,
+    /// The folder's own contents: how many of the listed rows are folders.
+    folders: u64,
     /// Width of the longest name or path in the rows, once measured.
     name_width: Option<f32>,
 }
@@ -671,8 +673,19 @@ impl DiskScanApp {
                     trf("TABLE_TAG_FLAT", &[&shown])
                 };
                 ui.label(format!("· {tag}"));
-            } else if self.table.flat {
-                ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
+            } else {
+                // The folder's own contents, as listed.
+                let files = (n_rows as u64).saturating_sub(order.folders);
+                ui.label(format!(
+                    "· {}",
+                    trf(
+                        "TABLE_TAG_FOLDER_COUNTS",
+                        &[&format_count(order.folders), &format_count(files)]
+                    )
+                ));
+                if self.table.flat {
+                    ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
+                }
             }
             // During a scan the pick waits for the end, and says so.
             if let Some(pick) = &self.pick {
@@ -1138,6 +1151,7 @@ impl DiskScanApp {
                 shown_size: size,
                 dotfile_size: dot_size,
                 flat_files: count,
+                folders: 0,
                 name_width: None,
                 key,
             };
@@ -1221,6 +1235,7 @@ impl DiskScanApp {
                 .filter(|c| c.name.starts_with('.'))
                 .map(|c| c.size)
                 .fold(0u64, u64::saturating_add),
+            folders: idx.iter().filter(|&&i| children[i].is_dir).count() as u64,
             rows: Rows::Children(idx),
             flat_files: 0,
             name_width: None,
@@ -1973,6 +1988,8 @@ mod flat_tests {
         )));
         app.rebuild_view_tree();
         assert_eq!(draw(&mut app), ["d", "c.txt"]);
+        let order = app.table.order.as_ref().unwrap();
+        assert_eq!((order.folders, order.rows.len()), (1, 2), "1 folder, 1 file");
         app.table.flat = true;
         assert_eq!(draw(&mut app), ["a.eml", "b.mkv", "c.txt"]);
         app.pick = Some(Pick::extension("eml"));

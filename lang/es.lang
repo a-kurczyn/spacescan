@@ -181,6 +181,7 @@ TABLE_TAG_DIRS_FIRST=carpetas primero
 TABLE_VIEW_TREE=Contenido de la carpeta
 TABLE_VIEW_FLAT=Lista plana: archivos de todas las subcarpetas (l)
 TABLE_TAG_FLAT=%s archivos de todas las subcarpetas
+TABLE_TAG_FOLDER_COUNTS=%s carpetas, %s archivos
 TABLE_TAG_FLAT_SOME=primeros %s de %s archivos de todas las subcarpetas
 TABLE_TAG_FLAT_ON_FINISH=lista plana al terminar el escaneo
 TABLE_TAG_SCANNING=tamaños hasta ahora · abrir carpetas, borrar y la papelera esperan a que termine el escaneo

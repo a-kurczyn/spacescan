@@ -177,6 +177,7 @@ TABLE_TAG_DIRS_FIRST=prima le cartelle
 TABLE_VIEW_TREE=Contenuto della cartella
 TABLE_VIEW_FLAT=Elenco piatto: file di tutte le sottocartelle (l)
 TABLE_TAG_FLAT=%s file di tutte le sottocartelle
+TABLE_TAG_FOLDER_COUNTS=%s cartelle, %s file
 TABLE_TAG_FLAT_SOME=primi %s di %s file di tutte le sottocartelle
 TABLE_TAG_FLAT_ON_FINISH=elenco piatto al termine dell'analisi
 TABLE_TAG_SCANNING=dimensioni parziali · aprire cartelle, eliminare e cestinare attendono la fine dell'analisi

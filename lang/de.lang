@@ -177,6 +177,7 @@ TABLE_TAG_DIRS_FIRST=Ordner zuerst
 TABLE_VIEW_TREE=Ordnerinhalt
 TABLE_VIEW_FLAT=Flache Liste: Dateien aus allen Unterordnern (l)
 TABLE_TAG_FLAT=%s Dateien aus allen Unterordnern
+TABLE_TAG_FOLDER_COUNTS=%s Ordner, %s Dateien
 TABLE_TAG_FLAT_SOME=erste %s von %s Dateien aus allen Unterordnern
 TABLE_TAG_FLAT_ON_FINISH=flache Liste nach dem Durchsuchen
 TABLE_TAG_SCANNING=vorläufige Größen · Ordner öffnen, Löschen und Papierkorb warten auf das Ende des Durchsuchens
