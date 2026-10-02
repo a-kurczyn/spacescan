@@ -244,8 +244,6 @@ struct DiskScanApp {
     /// Counts changes to the displayed tree, so views derived from it know to
     /// recompute.
     tree_gen: u64,
-    /// Window width added for open side panels (see panels.rs).
-    window_grown: panels::WindowGrown,
     /// Folders the last scan couldn't list (size unknown), for the delete
     /// dialog's warning.
     unreadable: Vec<PathBuf>,
@@ -339,7 +337,6 @@ impl Default for DiskScanApp {
             saw_hangul: Default::default(),
             korean_font: false,
             unreadable: Vec::new(),
-            window_grown: Default::default(),
             tree_gen: 0,
             partial_gen: 0,
             live_gen: 0,
