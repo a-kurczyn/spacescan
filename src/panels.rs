@@ -1344,12 +1344,14 @@ impl DiskScanApp {
             // rest keep their tooltips and keys).
             let font = egui::FontId::default();
             let line_h = ui.text_style_height(&egui::TextStyle::Body);
+            // Half a line of space above and below each label.
+            let pad = line_h * 0.5;
             let n = rows.len();
-            let two_lines = (line_h * 2.0 + 4.0) * n as f32 <= rect.height();
+            let two_lines = (line_h * 2.0 + 2.0 * pad) * n as f32 <= rect.height();
             let label_h = if two_lines {
-                line_h * 2.0 + 4.0
+                line_h * 2.0 + 2.0 * pad
             } else {
-                line_h + 4.0
+                line_h + 2.0 * pad
             };
             let room = (rect.height() / label_h).floor() as usize;
             let mut by_size: Vec<usize> = (0..n).collect();
@@ -1468,7 +1470,7 @@ impl DiskScanApp {
                 } else {
                     ui.visuals().strong_text_color()
                 };
-                let name_mid = label_y[i] + 2.0 + line_h / 2.0;
+                let name_mid = label_y[i] + pad + line_h / 2.0;
                 if labelled[i] && (mid - name_mid).abs() > 2.0 {
                     let stroke =
                         egui::Stroke::new(1.0, ui.visuals().weak_text_color().gamma_multiply(0.6));
@@ -1487,7 +1489,7 @@ impl DiskScanApp {
                     );
                     job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
                     painter.galley(
-                        Pos2::new(label_x, label_y[i] + 2.0),
+                        Pos2::new(label_x, label_y[i] + pad),
                         painter.layout_job(job),
                         ink,
                     );
@@ -1512,7 +1514,7 @@ impl DiskScanApp {
                 });
                 if labelled[i] && two_lines {
                     painter.text(
-                        Pos2::new(label_x, label_y[i] + 2.0 + line_h),
+                        Pos2::new(label_x, label_y[i] + pad + line_h),
                         egui::Align2::LEFT_TOP,
                         format!("{pct:.1}% · {}", human_size(row.size)),
                         font.clone(),
