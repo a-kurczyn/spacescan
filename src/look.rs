@@ -1,8 +1,9 @@
 //! Slice colors in the finished chart. The category taking the most space
-//! in a slice sets its hue (the category bar's colors); the size-weighted
-//! average age of its contents, by Changed time (when the data arrived on
-//! this disk), sets its brightness in three steps: new is brightest,
-//! `age_days` and older is darkest.
+//! in a slice sets its hue (the category bar's colors). Age, by Changed
+//! time (when the data arrived on this disk), sets brightness in three
+//! steps: new is brightest, `age_days` and older is darkest. Each slice
+//! blends along its arc from the shade of its newest file to the shade of
+//! its oldest.
 
 use super::*;
 
@@ -10,8 +11,10 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Look {
     pub(crate) cat: Category,
-    /// Size-weighted average Changed time; NO_TIME if none is known.
-    pub(crate) avg_ctime: i64,
+    /// Changed times of the newest and oldest file; NO_TIME if none is
+    /// known.
+    pub(crate) newest: i64,
+    pub(crate) oldest: i64,
     pub(crate) size: u64,
 }
 
@@ -22,12 +25,12 @@ pub(crate) struct Looks {
 }
 
 /// Running totals for one folder: bytes and files per category, and the
-/// weighted sum of Changed times.
+/// newest and oldest Changed times.
 struct Totals {
     bytes: Vec<u64>,
     files: Vec<u64>,
-    ctime_sum: f64,
-    ctime_weight: f64,
+    newest: Option<i64>,
+    oldest: Option<i64>,
 }
 
 impl Totals {
@@ -35,8 +38,18 @@ impl Totals {
         Totals {
             bytes: vec![0; categories],
             files: vec![0; categories],
-            ctime_sum: 0.0,
-            ctime_weight: 0.0,
+            newest: None,
+            oldest: None,
+        }
+    }
+
+    /// Takes the Changed times `newest` and `oldest` into account.
+    fn add_times(&mut self, newest: i64, oldest: i64) {
+        if newest != NO_TIME {
+            self.newest = Some(self.newest.map_or(newest, |t| t.max(newest)));
+        }
+        if oldest != NO_TIME {
+            self.oldest = Some(self.oldest.map_or(oldest, |t| t.min(oldest)));
         }
     }
 
@@ -47,19 +60,18 @@ impl Totals {
         for (a, b) in self.files.iter_mut().zip(&other.files) {
             *a += b;
         }
-        self.ctime_sum += other.ctime_sum;
-        self.ctime_weight += other.ctime_weight;
+        if let Some(t) = other.newest {
+            self.add_times(t, NO_TIME);
+        }
+        if let Some(t) = other.oldest {
+            self.add_times(NO_TIME, t);
+        }
     }
 
     fn add_file(&mut self, cat: Category, size: u64, ctime: i64) {
         self.bytes[cat.0] = self.bytes[cat.0].saturating_add(size);
         self.files[cat.0] += 1;
-        if ctime != NO_TIME {
-            // Weighted by size; empty files still count a little.
-            let weight = size.max(1) as f64;
-            self.ctime_sum += ctime as f64 * weight;
-            self.ctime_weight += weight;
-        }
+        self.add_times(ctime, ctime);
     }
 
     /// The category with the most bytes (most files if all are empty).
@@ -67,14 +79,10 @@ impl Totals {
         let most = |v: &[u64]| (0..v.len()).max_by_key(|&i| (v[i], std::cmp::Reverse(i)));
         let by_bytes = most(&self.bytes).filter(|&i| self.bytes[i] > 0);
         let cat = by_bytes.or_else(|| most(&self.files)).unwrap_or(0);
-        let avg_ctime = if self.ctime_weight > 0.0 {
-            (self.ctime_sum / self.ctime_weight) as i64
-        } else {
-            NO_TIME
-        };
         Look {
             cat: Category(cat),
-            avg_ctime,
+            newest: self.newest.unwrap_or(NO_TIME),
+            oldest: self.oldest.unwrap_or(NO_TIME),
             size,
         }
     }
@@ -114,7 +122,8 @@ impl Looks {
     }
 
     /// The look of several nodes together (an "other" slice): the category
-    /// with the most bytes among their looks, and their weighted age.
+    /// with the most bytes among their looks, and the newest and oldest of
+    /// their files.
     pub(crate) fn of_group<'a>(
         &self,
         nodes: impl Iterator<Item = &'a Node>,
@@ -126,11 +135,7 @@ impl Looks {
             let look = self.of(n, cats);
             totals.bytes[look.cat.0] = totals.bytes[look.cat.0].saturating_add(look.size);
             totals.files[look.cat.0] += 1;
-            if look.avg_ctime != NO_TIME {
-                let weight = look.size.max(1) as f64;
-                totals.ctime_sum += look.avg_ctime as f64 * weight;
-                totals.ctime_weight += weight;
-            }
+            totals.add_times(look.newest, look.oldest);
             size = size.saturating_add(look.size);
         }
         totals.look(size)
@@ -163,17 +168,19 @@ pub(crate) fn shade(color: Color32, step: u8) -> Color32 {
     Color32::from_rgb(scale(color.r()), scale(color.g()), scale(color.b()))
 }
 
-/// The color of a slice with look `look`.
-pub(crate) fn look_color(
+/// The colors a slice with look `look` blends between: the shade of its
+/// newest file, then of its oldest.
+pub(crate) fn look_colors(
     look: &Look,
     now: i64,
     age_days: u32,
     cats: &CategoryModel,
     dark: bool,
-) -> Color32 {
-    shade(
-        cats.color(look.cat, dark),
-        age_step(look.avg_ctime, now, age_days),
+) -> (Color32, Color32) {
+    let base = cats.color(look.cat, dark);
+    (
+        shade(base, age_step(look.newest, now, age_days)),
+        shade(base, age_step(look.oldest, now, age_days)),
     )
 }
 
@@ -208,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn folders_take_the_biggest_category_and_weighted_age() {
+    fn folders_take_the_biggest_category_and_their_age_range() {
         let cats = CategoryModel::defaults();
         let mut video = test_node("/r/d/a.mkv", 9000, false, vec![]);
         video.ctime = 1000;
@@ -226,8 +233,9 @@ mod tests {
         let look = looks.of(&root.children[0], &cats);
         // 9000 bytes of video beat 1000 bytes of documents.
         assert_eq!(cats.label(look.cat), "Video");
-        // (9000 × 1000 + 1000 × 2000) / 10000 = 1100.
-        assert_eq!(look.avg_ctime, 1100);
+        assert_eq!((look.newest, look.oldest), (2000, 1000));
+        let root_look = looks.of(&root, &cats);
+        assert_eq!((root_look.newest, root_look.oldest), (2000, 1000));
         let file = looks.of(&root.children[0].children[0], &cats);
         assert_eq!(cats.label(file.cat), "Documents");
     }

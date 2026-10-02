@@ -1583,8 +1583,8 @@ impl DiskScanApp {
         let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
         let dark = painter.ctx().global_style().visuals.dark_mode;
         let gray = self.cats.color(self.cats.other(), dark);
-        let color = if seg.is_free {
-            free_color
+        let colors = if seg.is_free {
+            (free_color, free_color)
         } else {
             match (view, &self.looks) {
                 (Some(view), Some((_, looks))) => {
@@ -1595,18 +1595,23 @@ impl DiskScanApp {
                     } else {
                         looks.of(get_node(view, &seg.idx_path), &self.cats)
                     };
-                    let color = look_color(&look, now, self.settings.age_days, &self.cats, dark);
-                    // "Other" is paler, to read as a group.
-                    let color = if seg.is_other {
-                        color.lerp_to_gamma(free_color, 0.35)
-                    } else {
-                        color
+                    let (newest, oldest) =
+                        look_colors(&look, now, self.settings.age_days, &self.cats, dark);
+                    let fade = self.color_fade();
+                    let finish = |c: Color32| {
+                        // "Other" is paler, to read as a group.
+                        let c = if seg.is_other {
+                            c.lerp_to_gamma(free_color, 0.35)
+                        } else {
+                            c
+                        };
+                        // Right after a scan, colors fade in from grey.
+                        gray.lerp_to_gamma(c, fade)
                     };
-                    // Right after a scan, colors fade in from grey.
-                    gray.lerp_to_gamma(color, self.color_fade())
+                    (finish(newest), finish(oldest))
                 }
                 // While scanning: grey until the colors are known.
-                _ => gray,
+                _ => (gray, gray),
             }
         };
         draw_arc_mesh(
@@ -1614,7 +1619,7 @@ impl DiskScanApp {
             center,
             radii,
             (seg.start_angle, seg.end_angle),
-            color,
+            colors,
             &self.settings,
         );
     }

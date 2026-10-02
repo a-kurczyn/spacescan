@@ -432,13 +432,14 @@ pub(crate) fn draw_arc_outline(
     ));
 }
 
-/// Draws one slice, filled with `color` and with a thin dark border.
+/// Draws one slice with a thin dark border, filled with a blend along its
+/// arc from `colors.0` at its start angle to `colors.1` at its end.
 pub(crate) fn draw_arc_mesh(
     painter: &egui::Painter,
     center: Pos2,
     radii: (f32, f32),
     angles: (f32, f32),
-    color: Color32,
+    colors: (Color32, Color32),
     settings: &Settings,
 ) {
     let ((r0, r1), (a0, a1)) = (radii, angles);
@@ -451,8 +452,10 @@ pub(crate) fn draw_arc_mesh(
     let mut mesh = egui::epaint::Mesh::default();
     let base = mesh.vertices.len() as u32;
     for i in 0..=steps {
-        let t = a0 + (a1 - a0) * (i as f32 / steps as f32);
+        let f = i as f32 / steps as f32;
+        let t = a0 + (a1 - a0) * f;
         let dir = arc_dir(t);
+        let color = colors.0.lerp_to_gamma(colors.1, f);
         mesh.vertices.push(egui::epaint::Vertex {
             pos: center + dir * r0,
             uv: egui::epaint::WHITE_UV,
