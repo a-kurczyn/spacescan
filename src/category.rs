@@ -115,7 +115,8 @@ impl CategoryModel {
             let at = format!("\"{}\"", tr(&name));
             // Other is built in: a category of that name would look like a
             // second one.
-            if name == "CAT_OTHER" || tr(&name).to_lowercase() == tr("CAT_OTHER").to_lowercase() {
+            let bare = |n: String| n.trim_matches(['(', ')', '（', '）']).to_lowercase();
+            if name == "CAT_OTHER" || bare(tr(&name)) == bare(tr("CAT_OTHER")) {
                 problems.push(trf("ERR_CATEGORIES_OTHER", &[&at]));
                 continue;
             }
@@ -459,7 +460,7 @@ mod tests {
             vec![
                 ("Documents".into(), 200, 1),
                 ("Video".into(), 150, 2),
-                ("Other".into(), 999, 1)
+                ("(other)".into(), 999, 1)
             ]
         );
         assert_eq!(
