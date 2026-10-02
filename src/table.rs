@@ -1435,7 +1435,7 @@ impl DiskScanApp {
         }
         // Ctrl+C / Ctrl+X take the marked rows (or the cursor row); Ctrl+V
         // pastes into the folder shown. Not while scanning.
-        let (copy, cut, paste) = clipboard_events(ctx);
+        let (copy, cut, paste) = self.clipboard_events(ctx);
         if !self.scanning {
             if copy || cut {
                 let mode = if cut { ClipMode::Move } else { ClipMode::Copy };

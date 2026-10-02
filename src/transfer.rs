@@ -81,6 +81,8 @@ struct Job {
 pub(crate) struct Transfer {
     pub clip: Option<Clip>,
     job: Option<Job>,
+    /// When the last paste with text arrived (see `clipboard_events`).
+    text_pasted_at: Option<Instant>,
 }
 
 /// The worker gave up: the user cancelled.
@@ -373,6 +375,27 @@ pub(crate) fn free_name(path: &Path) -> PathBuf {
         .expect("some number is free")
 }
 
+/// The files on the system clipboard as a file list (what file managers
+/// copy), if any.
+fn clipboard_files() -> Option<Vec<PathBuf>> {
+    use std::os::unix::ffi::OsStrExt;
+    let files: Vec<PathBuf> = arboard::Clipboard::new()
+        .ok()?
+        .get()
+        .file_list()
+        .ok()?
+        .into_iter()
+        // File lists end their lines with "\r\n"; a "\r" may be left on.
+        .map(|p| {
+            let bytes = p.as_os_str().as_bytes();
+            PathBuf::from(std::ffi::OsStr::from_bytes(
+                bytes.strip_suffix(b"\r").unwrap_or(bytes),
+            ))
+        })
+        .collect();
+    (!files.is_empty()).then_some(files)
+}
+
 /// The files in pasted text, if every line names an existing file or
 /// folder: absolute paths, or file:// links (as file managers copy them).
 fn paths_in_text(text: &str) -> Option<Vec<PathBuf>> {
@@ -419,6 +442,42 @@ fn percent_decode(s: &str) -> Vec<u8> {
 }
 
 impl DiskScanApp {
+    /// This frame's Ctrl+C, Ctrl+X, and Ctrl+V (with the pasted text, empty
+    /// if the clipboard holds no text). A Ctrl+V only arrives as a paste
+    /// when the clipboard has text, so a Ctrl+V whose key comes up without
+    /// one also counts.
+    pub(crate) fn clipboard_events(&mut self, ctx: &egui::Context) -> (bool, bool, Option<String>) {
+        let (mut copy, mut cut, mut text, mut v_released) = (false, false, None, false);
+        ctx.input(|i| {
+            for e in &i.events {
+                match e {
+                    egui::Event::Copy => copy = true,
+                    egui::Event::Cut => cut = true,
+                    egui::Event::Paste(t) => text = Some(t.clone()),
+                    egui::Event::Key {
+                        key: egui::Key::V,
+                        pressed: false,
+                        modifiers,
+                        ..
+                    } if modifiers.command => v_released = true,
+                    _ => {}
+                }
+            }
+        });
+        if text.is_some() {
+            self.transfer.text_pasted_at = Some(Instant::now());
+        } else if v_released {
+            let just_pasted = self
+                .transfer
+                .text_pasted_at
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1));
+            if !just_pasted {
+                text = Some(String::new());
+            }
+        }
+        (copy, cut, text)
+    }
+
     /// True while a copy or move runs (other changes to files wait).
     pub(crate) fn transfer_busy(&self) -> bool {
         self.transfer.job.is_some()
@@ -455,7 +514,8 @@ impl DiskScanApp {
         // Files copied in another program after spacemap's own Ctrl+C or
         // Ctrl+X replaced its paths on the clipboard, so they win. (With the
         // paths kept off the clipboard, spacemap's own pick always wins.)
-        let (paths, mode) = match (&self.transfer.clip, paths_in_text(text)) {
+        let copied = clipboard_files().or_else(|| paths_in_text(text));
+        let (paths, mode) = match (&self.transfer.clip, copied) {
             (Some(clip), Some(copied))
                 if self.settings.paths_to_clipboard && copied != clip.paths =>
             {

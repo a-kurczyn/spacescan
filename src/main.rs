@@ -1049,7 +1049,7 @@ impl eframe::App for DiskScanApp {
             }
             // Ctrl+C / Ctrl+X take the selected slice; Ctrl+V pastes into the
             // folder shown.
-            let (copy, cut, paste) = clipboard_events(&ctx);
+            let (copy, cut, paste) = self.clipboard_events(&ctx);
             if let Some(target) = self.selected_slice_path().filter(|_| copy || cut) {
                 let mode = if cut { ClipMode::Move } else { ClipMode::Copy };
                 self.clip(&ctx, vec![target], mode);
@@ -1072,22 +1072,6 @@ impl eframe::App for DiskScanApp {
         self.confirm_dialog(&ctx);
         self.transfer_ui(&ctx);
     }
-}
-
-/// This frame's Ctrl+C, Ctrl+X, and Ctrl+V (with the pasted text).
-fn clipboard_events(ctx: &egui::Context) -> (bool, bool, Option<String>) {
-    ctx.input(|i| {
-        let mut found = (false, false, None);
-        for e in &i.events {
-            match e {
-                egui::Event::Copy => found.0 = true,
-                egui::Event::Cut => found.1 = true,
-                egui::Event::Paste(text) => found.2 = Some(text.clone()),
-                _ => {}
-            }
-        }
-        found
-    })
 }
 
 /// Hides one harmless panic: with no accessibility service running, the
