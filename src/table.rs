@@ -99,33 +99,164 @@ struct OrderKey {
     show_dotfiles: bool,
     /// How many items are hidden (from the chart's right-click menu).
     hidden: usize,
+    /// The flat list's row limit, or None for the folder's own contents.
+    flat: Option<usize>,
 }
 
-/// The table's rows as indices into the viewed folder's children, in
-/// display order, plus totals derived from the same pass.
+/// The table's rows in display order.
+enum Rows {
+    /// The viewed folder's own contents, as indices into its children.
+    Children(Vec<usize>),
+    /// Files from the viewed folder and all its subfolders, as index paths
+    /// from the viewed folder.
+    Files(Vec<Vec<usize>>),
+}
+
+impl Rows {
+    fn len(&self) -> usize {
+        match self {
+            Rows::Children(idx) => idx.len(),
+            Rows::Files(paths) => paths.len(),
+        }
+    }
+
+    /// Row `i`'s node, in the viewed folder `view`.
+    fn node<'a>(&self, view: &'a Node, i: usize) -> &'a Node {
+        match self {
+            Rows::Children(idx) => &view.children[idx[i]],
+            Rows::Files(paths) => get_node(view, &paths[i]),
+        }
+    }
+}
+
+/// The table's rows, plus totals derived from the same pass.
 struct RowOrder {
     key: OrderKey,
-    idx: Vec<usize>,
+    rows: Rows,
+    /// Total size of everything listed (the flat list: of all its files,
+    /// shown or past the limit).
     shown_size: u64,
     dotfile_size: u64,
+    /// The flat list: how many files it has, shown or past the limit.
+    flat_files: u64,
 }
 
-/// Where `cursor` is in the rows `idx` (indices into `view`'s children).
-/// `pos` is the last answer, checked first, so large folders aren't
-/// searched every frame.
+/// Where `cursor` is in `rows`. `pos` is the last answer, checked first,
+/// so large folders aren't searched every frame.
 fn find_cursor(
     cursor: &Path,
     pos: &std::cell::Cell<Option<usize>>,
     view: &Node,
-    idx: &[usize],
+    rows: &Rows,
 ) -> Option<usize> {
-    let at = |i: usize| idx.get(i).is_some_and(|&k| view.children[k].path == cursor);
+    let n = rows.len();
+    let at = |i: usize| i < n && rows.node(view, i).path == cursor;
     if let Some(i) = pos.get().filter(|&i| at(i)) {
         return Some(i);
     }
-    let found = (0..idx.len()).find(|&i| at(i));
+    let found = (0..n).find(|&i| at(i));
     pos.set(found);
     found
+}
+
+/// Files of a flat list: the files under `view`, leaving out dot-named
+/// entries (and everything in them) unless `show_dotfiles`, and anything in
+/// `hidden`. Returns the first `limit` in `sort` order as index paths from
+/// `view`, how many files there are, their total size, and the total size
+/// of dot-named entries.
+fn flat_files(
+    view: &Node,
+    sort: SortState,
+    show_dotfiles: bool,
+    hidden: &HashSet<PathBuf>,
+    limit: usize,
+) -> (Vec<Vec<usize>>, u64, u64, u64) {
+    /// A file found: its node, its folder (an index into `folders`) and
+    /// its index in that folder.
+    struct Found<'a> {
+        node: &'a Node,
+        folder: u32,
+        child: u32,
+    }
+    struct Walk<'a, 'h> {
+        show_dotfiles: bool,
+        hidden: &'h HashSet<PathBuf>,
+        /// Index paths of the folders holding files, from `view`.
+        folders: Vec<Vec<usize>>,
+        files: Vec<Found<'a>>,
+        size: u64,
+        dot_size: u64,
+    }
+    fn walk<'a>(w: &mut Walk<'a, '_>, dir: &'a Node, at: &mut Vec<usize>, in_dot: bool) {
+        let mut folder = None;
+        for (i, c) in dir.children.iter().enumerate() {
+            let dot = c.name.starts_with('.');
+            if dot && !in_dot {
+                w.dot_size = w.dot_size.saturating_add(c.size);
+            }
+            if (dot && !w.show_dotfiles) || (!w.hidden.is_empty() && w.hidden.contains(&c.path)) {
+                continue;
+            }
+            if c.is_dir {
+                at.push(i);
+                deep(|| walk(w, c, at, in_dot || dot));
+                at.pop();
+            } else {
+                let folder = *folder.get_or_insert_with(|| {
+                    w.folders.push(at.clone());
+                    (w.folders.len() - 1) as u32
+                });
+                w.files.push(Found {
+                    node: c,
+                    folder,
+                    child: i as u32,
+                });
+                w.size = w.size.saturating_add(c.size);
+            }
+        }
+    }
+    let mut w = Walk {
+        show_dotfiles,
+        hidden,
+        folders: Vec::new(),
+        files: Vec::new(),
+        size: 0,
+        dot_size: 0,
+    };
+    walk(&mut w, view, &mut Vec::new(), false);
+    let count = w.files.len() as u64;
+
+    // Ties keep the order the files were found in.
+    let cmp = |a: &Found, b: &Found| {
+        let (x, y) = (a.node, b.node);
+        let by = match sort.column {
+            SortColumn::Size => x.size.cmp(&y.size),
+            SortColumn::Files => x.file_count.cmp(&y.file_count),
+            SortColumn::Modified => x.mtime.cmp(&y.mtime),
+            SortColumn::Changed => x.ctime.cmp(&y.ctime),
+            SortColumn::Perms => {
+                (x.mode & 0o7777, x.uid, x.gid).cmp(&(y.mode & 0o7777, y.uid, y.gid))
+            }
+            SortColumn::Name => natural_cmp(&x.name, &y.name),
+        };
+        let by = if sort.ascending { by } else { by.reverse() };
+        by.then((a.folder, a.child).cmp(&(b.folder, b.child)))
+    };
+    let mut files = w.files;
+    if files.len() > limit {
+        files.select_nth_unstable_by(limit, cmp);
+        files.truncate(limit);
+    }
+    files.sort_unstable_by(cmp);
+    let paths = files
+        .iter()
+        .map(|f| {
+            let mut p = w.folders[f.folder as usize].clone();
+            p.push(f.child as usize);
+            p
+        })
+        .collect();
+    (paths, count, w.size, w.dot_size)
 }
 
 /// A rescan of one folder ("r"), to be spliced back into the full tree
@@ -152,6 +283,9 @@ pub(crate) struct TableState {
     pub dirs_first: bool,
     /// What the left panel shows.
     pub side: SidePanel,
+    /// Files from all subfolders in one list, instead of the folder's own
+    /// contents.
+    pub flat: bool,
     /// Off only until the app is closed ("e"); never saved.
     show_dotfiles: bool,
     hidden_cols: HashSet<TableCol>,
@@ -180,6 +314,7 @@ impl Default for TableState {
             page_rows: 10,
             dirs_first: false,
             side: SidePanel::Categories,
+            flat: false,
             show_dotfiles: true,
             hidden_cols: HashSet::new(),
             col_order: TableCol::ALL.to_vec(),
@@ -248,6 +383,7 @@ const HELP_ROWS: &[(&str, &[(&str, &str)])] = &[
             ("HELP_KEYS_MOVE_COL", "HELP_MOVE_COL"),
             ("HELP_KEYS_DIRS_FIRST", "HELP_DIRS_FIRST"),
             ("HELP_KEYS_DOTFILES", "HELP_DOTFILES"),
+            ("HELP_KEYS_FLAT", "HELP_FLAT"),
         ],
     ),
     (
@@ -286,6 +422,7 @@ impl DiskScanApp {
             column_order: self.table.col_order.clone(),
             dirs_first: self.table.dirs_first,
             side: self.table.side,
+            flat: self.table.flat,
         }
     }
 
@@ -305,6 +442,7 @@ impl DiskScanApp {
         self.table.col_order = order;
         self.table.dirs_first = p.dirs_first;
         self.table.side = p.side;
+        self.table.flat = p.flat;
     }
 
     /// Start of every frame: keeps keyboard focus off the table's buttons,
@@ -345,20 +483,23 @@ impl DiskScanApp {
             dirs_first: self.table.dirs_first,
             show_dotfiles: self.table.show_dotfiles,
             hidden: self.hidden.len(),
+            // The live table during a scan always lists the folder's contents.
+            flat: (self.table.flat && !self.scanning).then_some(self.settings.flat_rows),
         };
         let order = match self.table.order.take() {
             Some(o) if o.key == key => o,
             _ => self.row_order(view_node, key),
         };
-        let row = |i: usize| &view_node.children[order.idx[i]];
-        let n_rows = order.idx.len();
+        let row = |i: usize| order.rows.node(view_node, i);
+        let n_rows = order.rows.len();
+        let flat = order.key.flat.is_some();
         let shown_size = order.shown_size;
         // The cursor goes to the first row when it isn't in this folder.
         let found = self
             .table
             .cursor
             .as_ref()
-            .and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.idx));
+            .and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.rows));
         let cursor_row = match found {
             Some(i) => Some(i),
             None => {
@@ -371,13 +512,38 @@ impl DiskScanApp {
         let scroll_to_cursor = std::mem::take(&mut self.table.scroll_pending);
 
         // Heading line: title, what's switched on, and where the keys are.
+        let mut set_flat = None;
         ui.horizontal(|ui| {
+            // Toggle: the folder's own contents, or files from all subfolders.
+            let views: [(bool, &str, DrawIcon); 2] = [
+                (false, "TABLE_VIEW_TREE", draw_tree_icon),
+                (true, "TABLE_VIEW_FLAT", draw_flat_list_icon),
+            ];
+            for (on, key, icon) in views {
+                if icon_toolbar_button(ui, self.table.flat == on, true, &tr(key), icon).clicked() {
+                    set_flat = Some(on);
+                }
+            }
             ui.heading(tr("SUMMARY_CONTENTS"));
+            if flat {
+                let shown = format_count(n_rows as u64);
+                let tag = if order.flat_files > n_rows as u64 {
+                    trf(
+                        "TABLE_TAG_FLAT_SOME",
+                        &[&shown, &format_count(order.flat_files)],
+                    )
+                } else {
+                    trf("TABLE_TAG_FLAT", &[&shown])
+                };
+                ui.label(format!("· {tag}"));
+            } else if self.table.flat {
+                ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
+            }
             if let Some(pick) = self.pick.as_ref().filter(|_| !self.scanning) {
                 let tag = trf("TABLE_TAG_CATEGORY", &[&self.cats.pick_label(pick)]);
                 ui.label(egui::RichText::new(format!("· {tag}")).color(ui.visuals().warn_fg_color));
             }
-            if self.table.dirs_first {
+            if self.table.dirs_first && !flat {
                 ui.weak(format!("· {}", tr("TABLE_TAG_DIRS_FIRST")));
             }
             if !self.table.show_dotfiles {
@@ -667,7 +833,36 @@ impl DiskScanApp {
                                 if is_marked {
                                     text = text.strong();
                                 }
-                                ui.add(egui::Label::new(text).truncate());
+                                // The flat list: the file's folder after its name.
+                                let folder = c
+                                    .path
+                                    .parent()
+                                    .and_then(|p| p.strip_prefix(&view_node.path).ok())
+                                    .filter(|p| !p.as_os_str().is_empty());
+                                match folder {
+                                    Some(folder) if flat => {
+                                        let style = ui.style().clone();
+                                        let mut job = egui::text::LayoutJob::default();
+                                        text.append_to(
+                                            &mut job,
+                                            &style,
+                                            egui::FontSelection::Default,
+                                            egui::Align::Center,
+                                        );
+                                        egui::RichText::new(format!("   {}", show_path(folder)))
+                                            .color(pick(ui.visuals().weak_text_color()))
+                                            .append_to(
+                                                &mut job,
+                                                &style,
+                                                egui::FontSelection::Default,
+                                                egui::Align::Center,
+                                            );
+                                        ui.add(egui::Label::new(job).truncate());
+                                    }
+                                    _ => {
+                                        ui.add(egui::Label::new(text).truncate());
+                                    }
+                                }
                             }
                         });
                     }
@@ -698,11 +893,36 @@ impl DiskScanApp {
         if double_clicked.is_some() {
             self.open_cursor();
         }
+        if let Some(on) = set_flat {
+            self.set_flat(on);
+        }
     }
 
-    /// Filters and sorts `view_node`'s children for the table (see
-    /// `OrderKey`), refreshing the row list the keys work on.
+    /// Switches between the folder's own contents and the flat list of all
+    /// its files. Marks go, so nothing marked out of sight gets deleted.
+    fn set_flat(&mut self, on: bool) {
+        if self.table.flat != on {
+            self.table.flat = on;
+            self.table.marked.clear();
+            self.table.scroll_pending = true;
+        }
+    }
+
+    /// Filters and sorts `view_node`'s children, or for the flat list all
+    /// the files under it, for the table (see `OrderKey`), refreshing the
+    /// row list the keys work on.
     fn row_order(&mut self, view_node: &Node, key: OrderKey) -> RowOrder {
+        if let Some(limit) = key.flat {
+            let (paths, count, size, dot_size) =
+                flat_files(view_node, key.sort, key.show_dotfiles, &self.hidden, limit);
+            return RowOrder {
+                rows: Rows::Files(paths),
+                shown_size: size,
+                dotfile_size: dot_size,
+                flat_files: count,
+                key,
+            };
+        }
         let children = &view_node.children;
         let hidden = &self.hidden;
         let mut idx: Vec<usize> = (0..children.len())
@@ -782,7 +1002,8 @@ impl DiskScanApp {
                 .filter(|c| c.name.starts_with('.'))
                 .map(|c| c.size)
                 .fold(0u64, u64::saturating_add),
-            idx,
+            rows: Rows::Children(idx),
+            flat_files: 0,
             key,
         }
     }
@@ -799,18 +1020,7 @@ impl DiskScanApp {
 
     /// Details of the row under the cursor, in the top-right corner.
     fn info_panel(&mut self, ctx: &egui::Context, area: egui::Rect) {
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        let Some(cursor) = self.table.cursor.clone() else {
-            return;
-        };
-        let Some(n) = self
-            .current_view_node(&root)
-            .children
-            .iter()
-            .find(|c| c.path == cursor)
-        else {
+        let Some(n) = self.cursor_node() else {
             return;
         };
         let h = HoverInfo {
@@ -980,6 +1190,7 @@ impl DiskScanApp {
                 '<' => self.move_col(false),
                 '>' => self.move_col(true),
                 'G' => self.toggle_col(TableCol::Bar),
+                'l' => self.set_flat(!self.table.flat),
                 't' => {
                     self.table.dirs_first = !self.table.dirs_first;
                     self.table.scroll_pending = true;
@@ -1007,14 +1218,14 @@ impl DiskScanApp {
         }
     }
 
-    /// The folder shown and its children's indices in display order; None if
-    /// the tree changed since the rows were computed.
-    fn listed(&self) -> Option<(&Node, &[usize])> {
+    /// The folder shown and the table's rows; None if the tree changed since
+    /// the rows were computed.
+    fn listed(&self) -> Option<(&Node, &Rows)> {
         let order = self.table.order.as_ref()?;
         if self.scanning {
             // The live table: rows of its snapshot of the preview tree.
             let current = order.key.live && order.key.tree_gen == self.live_gen;
-            return current.then_some((&self.live_view, &order.idx[..]));
+            return current.then_some((&self.live_view, &order.rows));
         }
         if order.key.live
             || order.key.tree_gen != self.tree_gen
@@ -1022,25 +1233,29 @@ impl DiskScanApp {
         {
             return None;
         }
-        Some((get_node(self.root.as_ref()?, &order.key.view), &order.idx))
+        Some((get_node(self.root.as_ref()?, &order.key.view), &order.rows))
     }
 
     fn cursor_index(&self) -> Option<usize> {
-        let (view, idx) = self.listed()?;
+        let (view, rows) = self.listed()?;
         find_cursor(
             self.table.cursor.as_ref()?,
             &self.table.cursor_pos,
             view,
-            idx,
+            rows,
         )
+    }
+
+    /// The cursor row's node.
+    fn cursor_node(&self) -> Option<&Node> {
+        let i = self.cursor_index()?;
+        let (view, rows) = self.listed()?;
+        Some(rows.node(view, i))
     }
 
     /// Path of the cursor row, and whether it's a folder.
     fn cursor_row(&self) -> Option<(PathBuf, bool)> {
-        let i = self.cursor_index()?;
-        let (view, idx) = self.listed()?;
-        let n = &view.children[idx[i]];
-        Some((n.path.clone(), n.is_dir))
+        self.cursor_node().map(|n| (n.path.clone(), n.is_dir))
     }
 
     /// Arrow keys: ⬆⬇ previous/next row, ⬅ parent folder, ➡ open the
@@ -1061,10 +1276,10 @@ impl DiskScanApp {
     /// Moves the cursor `delta` rows, stopping at the first/last row.
     fn move_cursor(&mut self, delta: isize) {
         let from = self.cursor_index();
-        let Some((view, idx)) = self.listed() else {
+        let Some((view, rows)) = self.listed() else {
             return;
         };
-        let n = idx.len();
+        let n = rows.len();
         if n == 0 {
             return;
         }
@@ -1072,7 +1287,7 @@ impl DiskScanApp {
             None => 0,
             Some(i) => (i as isize).saturating_add(delta).clamp(0, n as isize - 1) as usize,
         };
-        self.table.cursor = Some(view.children[idx[i]].path.clone());
+        self.table.cursor = Some(rows.node(view, i).path.clone());
         self.table.cursor_pos.set(Some(i));
         self.table.scroll_pending = true;
     }
@@ -1233,9 +1448,8 @@ impl DiskScanApp {
             self.table.cursor.iter().cloned().collect()
         } else {
             match self.listed() {
-                Some((view, idx)) => idx
-                    .iter()
-                    .map(|&k| &view.children[k].path)
+                Some((view, rows)) => (0..rows.len())
+                    .map(|i| &rows.node(view, i).path)
                     .filter(|p| self.table.marked.contains(*p))
                     .cloned()
                     .collect(),
@@ -1257,13 +1471,12 @@ impl DiskScanApp {
     /// the next row that stays, and their marks go.
     pub(crate) fn table_forget(&mut self, gone: &[PathBuf]) {
         let gone: HashSet<&PathBuf> = gone.iter().collect();
-        if let (Some(pos), Some((view, idx))) = (self.cursor_index(), self.listed()) {
-            let path = |k: &usize| &view.children[*k].path;
-            let next = idx[pos..]
-                .iter()
-                .find(|k| !gone.contains(path(k)))
-                .or_else(|| idx[..pos].iter().rev().find(|k| !gone.contains(path(k))));
-            self.table.cursor = next.map(|k| path(k).clone());
+        if let (Some(pos), Some((view, rows))) = (self.cursor_index(), self.listed()) {
+            let path = |i: usize| &rows.node(view, i).path;
+            let next = (pos..rows.len())
+                .find(|&i| !gone.contains(path(i)))
+                .or_else(|| (0..pos).rev().find(|&i| !gone.contains(path(i))));
+            self.table.cursor = next.map(|i| path(i).clone());
         }
         self.table.marked.retain(|p| !gone.contains(p));
         self.table.scroll_pending = true;
@@ -1328,6 +1541,40 @@ impl DiskScanApp {
 mod perf {
     use super::*;
 
+    /// Timing of the flat list on 1,000,000 files in 1,000 folders (run
+    /// with `cargo test --release flat_1m -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn flat_1m() {
+        let folders: Vec<Node> = (0..1000)
+            .map(|d| {
+                let files = (0..1000)
+                    .map(|f| {
+                        let mut n = test_node(
+                            &format!("/r/d{d}/f{f}"),
+                            (d * 7919 + f * 104_729) as u64 % 1_000_003,
+                            false,
+                            vec![],
+                        );
+                        n.mtime = (f * 31 + d) as i64;
+                        n
+                    })
+                    .collect();
+                test_node(&format!("/r/d{d}"), 0, true, files)
+            })
+            .collect();
+        let root = test_node("/r", 0, true, folders);
+        for column in [SortColumn::Size, SortColumn::Modified, SortColumn::Name] {
+            let sort = SortState {
+                column,
+                ascending: false,
+            };
+            let t = Instant::now();
+            let (paths, count, ..) = flat_files(&root, sort, true, &HashSet::new(), 1000);
+            eprintln!("{column:?}: {:?} ({} of {count})", t.elapsed(), paths.len());
+        }
+    }
+
     /// Timing of the row order on a 300k-entry folder (run with
     /// `cargo test --release -- --ignored --nocapture`).
     #[test]
@@ -1361,15 +1608,152 @@ mod perf {
                 show_dotfiles: true,
                 hidden: 0,
                 live: false,
+                flat: None,
             };
             let t = Instant::now();
             let order = app.row_order(&folder, key);
             eprintln!(
                 "{column:?} asc={ascending}: {:?} ({} rows)",
                 t.elapsed(),
-                order.idx.len()
+                order.rows.len()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod flat_tests {
+    use super::*;
+
+    fn file(path: &str, size: u64) -> Node {
+        test_node(path, size, false, vec![])
+    }
+
+    /// /v with files at three levels, a dot folder and a hidden folder.
+    fn tree() -> Node {
+        let deep = test_node("/v/a/b", 70, true, vec![file("/v/a/b/big", 70)]);
+        let a = test_node("/v/a", 100, true, vec![file("/v/a/mid", 30), deep]);
+        let dot = test_node("/v/.cache", 500, true, vec![file("/v/.cache/huge", 500)]);
+        let gone = test_node("/v/gone", 900, true, vec![file("/v/gone/x", 900)]);
+        test_node("/v", 1505, true, vec![a, dot, gone, file("/v/small", 5)])
+    }
+
+    fn names(view: &Node, paths: &[Vec<usize>]) -> Vec<String> {
+        paths
+            .iter()
+            .map(|p| get_node(view, p).name.clone())
+            .collect()
+    }
+
+    const BY_SIZE: SortState = SortState {
+        column: SortColumn::Size,
+        ascending: false,
+    };
+
+    #[test]
+    fn lists_files_from_all_subfolders_in_sort_order() {
+        let v = tree();
+        let hidden: HashSet<PathBuf> = [PathBuf::from("/v/gone")].into();
+        let (paths, count, size, dot) = flat_files(&v, BY_SIZE, true, &hidden, 1000);
+        assert_eq!(names(&v, &paths), ["huge", "big", "mid", "small"]);
+        assert_eq!((count, size, dot), (4, 605, 500));
+        // Dotfiles hidden: the dot folder's files go, its size is reported.
+        let (paths, count, size, dot) = flat_files(&v, BY_SIZE, false, &hidden, 1000);
+        assert_eq!(names(&v, &paths), ["big", "mid", "small"]);
+        assert_eq!((count, size, dot), (3, 105, 500));
+        let by_name = SortState {
+            column: SortColumn::Name,
+            ascending: true,
+        };
+        let (paths, ..) = flat_files(&v, by_name, false, &hidden, 1000);
+        assert_eq!(names(&v, &paths), ["big", "mid", "small"]);
+    }
+
+    #[test]
+    fn the_limit_keeps_the_first_rows_but_counts_them_all() {
+        let v = tree();
+        let (paths, count, size, _) = flat_files(&v, BY_SIZE, true, &HashSet::new(), 2);
+        assert_eq!(names(&v, &paths), ["x", "huge"]);
+        assert_eq!((count, size), (5, 1505));
+        let smallest = SortState {
+            column: SortColumn::Size,
+            ascending: true,
+        };
+        let (paths, ..) = flat_files(&v, smallest, true, &HashSet::new(), 2);
+        assert_eq!(names(&v, &paths), ["small", "mid"]);
+    }
+
+    /// Draws the contents table once, headless, and returns its row names.
+    fn draw(app: &mut DiskScanApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let root = app.root.clone().unwrap();
+            app.table_ui(ui, &root, 400.0);
+        });
+        let (view, rows) = app.listed().unwrap();
+        (0..rows.len())
+            .map(|i| rows.node(view, i).name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_flat_table_follows_the_pick_and_comes_back() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        let sub = test_node(
+            "/t/d",
+            60,
+            true,
+            vec![file("/t/d/a.eml", 50), file("/t/d/b.mkv", 10)],
+        );
+        app.full_root = Some(Arc::new(test_node(
+            "/t",
+            70,
+            true,
+            vec![sub, file("/t/c.txt", 10)],
+        )));
+        app.rebuild_view_tree();
+        assert_eq!(draw(&mut app), ["d", "c.txt"]);
+        app.table.flat = true;
+        assert_eq!(draw(&mut app), ["a.eml", "b.mkv", "c.txt"]);
+        app.pick = Some(Pick::Extension("eml".into()));
+        app.rebuild_view_tree();
+        assert_eq!(draw(&mut app), ["a.eml"]);
+        app.table.flat = false;
+        assert_eq!(draw(&mut app), ["d"]);
+    }
+
+    #[test]
+    fn keys_move_through_files_in_subfolders() {
+        let mut app = DiskScanApp::default();
+        let root = Arc::new(tree());
+        app.root = Some(root.clone());
+        app.summary_view = true;
+        let key = OrderKey {
+            tree_gen: app.tree_gen,
+            view: vec![],
+            sort: BY_SIZE,
+            dirs_first: false,
+            show_dotfiles: false,
+            hidden: 0,
+            live: false,
+            flat: Some(1000),
+        };
+        app.table.order = Some(app.row_order(&root, key));
+        app.table.cursor = Some(PathBuf::from("/v/gone/x"));
+        app.move_cursor(1);
+        assert_eq!(app.cursor_row(), Some((PathBuf::from("/v/a/b/big"), false)));
+        app.table.marked.insert(PathBuf::from("/v/small"));
+        app.table.marked.insert(PathBuf::from("/v/a/mid"));
+        assert_eq!(
+            app.selected_targets(),
+            [PathBuf::from("/v/a/mid"), PathBuf::from("/v/small")]
+        );
+        app.set_flat(true);
+        app.set_flat(false);
+        assert!(app.table.marked.is_empty(), "switching views drops marks");
     }
 }
 
@@ -1400,6 +1784,7 @@ mod cursor_tests {
             show_dotfiles: true,
             hidden: 0,
             live: false,
+            flat: None,
         };
         let order = app.row_order(&root, key);
         app.table.order = Some(order);
@@ -1469,6 +1854,7 @@ mod live_tests {
             show_dotfiles: true,
             hidden: 0,
             live: true,
+            flat: None,
         };
         let order = app.row_order(&partial, key);
         app.table.order = Some(order);
@@ -1476,8 +1862,10 @@ mod live_tests {
     }
 
     fn names(app: &DiskScanApp) -> Vec<String> {
-        let (view, idx) = app.listed().unwrap();
-        idx.iter().map(|&k| view.children[k].name.clone()).collect()
+        let (view, rows) = app.listed().unwrap();
+        (0..rows.len())
+            .map(|i| rows.node(view, i).name.clone())
+            .collect()
     }
 
     #[test]

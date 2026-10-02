@@ -693,6 +693,15 @@ impl DiskScanApp {
                         );
 
                         ui.separator();
+                        ui.label(tr("SETTINGS_TABLE"));
+                        ui.add(
+                            egui::Slider::new(&mut s.flat_rows, Settings::FLAT_ROWS)
+                                .logarithmic(true)
+                                .text(tr("SETTINGS_FLAT_ROWS")),
+                        )
+                        .on_hover_text(tr("SETTINGS_FLAT_ROWS_HOVER"));
+
+                        ui.separator();
                         ui.label(tr("SETTINGS_LOG"));
                         ui.add(
                             egui::Slider::new(&mut s.max_log_lines, Settings::LOG_LINES)

@@ -39,6 +39,8 @@ pub(crate) struct TablePrefs {
     pub dirs_first: bool,
     /// What the Summary view's left panel shows.
     pub side: SidePanel,
+    /// The contents table lists files from all subfolders.
+    pub flat: bool,
 }
 
 impl Default for TablePrefs {
@@ -50,6 +52,7 @@ impl Default for TablePrefs {
             column_order: TableCol::ALL.to_vec(),
             dirs_first: false,
             side: SidePanel::Categories,
+            flat: false,
         }
     }
 }

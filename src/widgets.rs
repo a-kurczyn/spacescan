@@ -168,6 +168,42 @@ pub(crate) fn draw_extension_icon(painter: &egui::Painter, rect: egui::Rect, col
     );
 }
 
+/// Folder contents icon: a top line with two indented lines hanging from
+/// it, like a folder tree.
+pub(crate) fn draw_tree_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.3, color);
+    let x = |f: f32| rect.left() + rect.width() * f;
+    let y = |f: f32| rect.top() + rect.height() * f;
+    painter.line_segment(
+        [Pos2::new(x(0.1), y(0.2)), Pos2::new(x(0.9), y(0.2))],
+        stroke,
+    );
+    // The trunk, from under the top line's start to the last branch.
+    painter.line_segment(
+        [Pos2::new(x(0.25), y(0.2)), Pos2::new(x(0.25), y(0.8))],
+        stroke,
+    );
+    for f in [0.5, 0.8] {
+        painter.line_segment([Pos2::new(x(0.25), y(f)), Pos2::new(x(0.45), y(f))], stroke);
+        painter.line_segment([Pos2::new(x(0.55), y(f)), Pos2::new(x(0.9), y(f))], stroke);
+    }
+}
+
+/// Flat list icon: four even lines.
+pub(crate) fn draw_flat_list_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.3, color);
+    for f in [0.2, 0.4, 0.6, 0.8] {
+        let y = rect.top() + rect.height() * f;
+        painter.line_segment(
+            [
+                Pos2::new(rect.left() + rect.width() * 0.1, y),
+                Pos2::new(rect.right() - rect.width() * 0.1, y),
+            ],
+            stroke,
+        );
+    }
+}
+
 /// Folder icon.
 pub(crate) fn draw_folder_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);

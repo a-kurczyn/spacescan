@@ -100,6 +100,8 @@ struct Settings {
     progress_interval_pow2: u32,
     /// Count file lengths instead of disk space used (from the next scan).
     apparent_size: bool,
+    /// Most rows in the contents table's flat list.
+    flat_rows: usize,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -115,6 +117,7 @@ impl Settings {
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
     const LOG_LINES: RangeInclusive<usize> = 50..=5000;
     const PROGRESS_POW2: RangeInclusive<u32> = 0..=16;
+    const FLAT_ROWS: RangeInclusive<usize> = 100..=100_000;
 
     fn sanitized(mut self) -> Self {
         self.max_render_depth = self
@@ -147,6 +150,9 @@ impl Settings {
         self.progress_interval_pow2 = self
             .progress_interval_pow2
             .clamp(*Self::PROGRESS_POW2.start(), *Self::PROGRESS_POW2.end());
+        self.flat_rows = self
+            .flat_rows
+            .clamp(*Self::FLAT_ROWS.start(), *Self::FLAT_ROWS.end());
         self
     }
 }
@@ -167,6 +173,7 @@ impl Default for Settings {
             max_log_lines: 500,
             progress_interval_pow2: 9, // every 512 entries
             apparent_size: false,
+            flat_rows: 1000,
         }
     }
 }

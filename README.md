@@ -15,7 +15,9 @@ or as an ncdu-style table you can drive from the keyboard.
   Hover for size, file count, owner, permissions and dates.
 - **Summary table.** Keyboard-driven, like ncdu: sort by size, name, file
   count, modified or changed time, or permissions; show, hide and reorder
-  columns; jump to a name; mark several rows. Press `?` for all shortcuts.
+  columns; jump to a name; mark several rows. A flat list shows the
+  largest (or newest, or any sort) files from all subfolders at once.
+  Press `?` for all shortcuts.
 - **Breakdown by file extension** for the folder you're viewing.
 - **Accurate numbers.** Sizes are real disk usage, like `du`: sparse files
   count what they actually use and hard-linked files count once. Switch to
@@ -74,6 +76,7 @@ trash or delete it. In the table, the main keys are:
 | ➡ / Enter | Open the folder (Enter opens a file with its default app) |
 | ⬅ / Backspace | Parent folder |
 | `/` | Jump to a name |
+| `l` | Flat list of files from all subfolders, or back to folders |
 | `s` `n` `f` `m` `c` `p` | Sort by size / name / files / modified / changed / permissions |
 | Space | Mark a row |
 | `T` / `D` | Move to the trash / delete permanently (asks first) |
