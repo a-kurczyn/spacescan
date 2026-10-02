@@ -452,15 +452,21 @@ impl DiskScanApp {
             self.status = tr("STATUS_TRANSFER_BUSY");
             return;
         }
-        let (paths, mode) = match &self.transfer.clip {
-            Some(clip) => (clip.paths.clone(), clip.mode),
-            None => match paths_in_text(text) {
-                Some(paths) => (paths, ClipMode::Copy),
-                None => {
-                    self.status = tr("STATUS_PASTE_NOTHING");
-                    return;
-                }
-            },
+        // Files copied in another program after spacemap's own Ctrl+C or
+        // Ctrl+X replaced its paths on the clipboard, so they win. (With the
+        // paths kept off the clipboard, spacemap's own pick always wins.)
+        let (paths, mode) = match (&self.transfer.clip, paths_in_text(text)) {
+            (Some(clip), Some(copied))
+                if self.settings.paths_to_clipboard && copied != clip.paths =>
+            {
+                (copied, ClipMode::Copy)
+            }
+            (Some(clip), _) => (clip.paths.clone(), clip.mode),
+            (None, Some(copied)) => (copied, ClipMode::Copy),
+            (None, None) => {
+                self.status = tr("STATUS_PASTE_NOTHING");
+                return;
+            }
         };
         let mut sources = Vec::new();
         for p in paths {
