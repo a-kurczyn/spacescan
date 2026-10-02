@@ -760,10 +760,15 @@ impl DiskScanApp {
             if show_info {
                 ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
             }
-            // Columns widened past the window scroll sideways.
-            egui::ScrollArea::horizontal()
-                .id_salt("contents_hscroll")
+            // One scroll area for both directions, so both bars stay at the
+            // window edges (the header row scrolls with the rows).
+            egui::ScrollArea::both()
+                .id_salt("contents_scroll")
+                .max_height(max_height)
                 .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                // Jump to the cursor row at once, without animation.
+                .animated(false)
                 .show(ui, |ui| {
                     let table_salt = ("contents_table", layout_key.join(","));
                     // A double-click on the divider after a column fits it to its
@@ -784,13 +789,8 @@ impl DiskScanApp {
                         .resizable(true)
                         .sense(egui::Sense::click())
                         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                        .min_scrolled_height(0.0)
-                        .max_scroll_height(table_h)
-                        // Scroll to the cursor row at once, without animation.
-                        .animate_scrolling(false)
-                        .scroll_bar_visibility(
-                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
-                        )
+                        // The scroll area around the table scrolls both ways.
+                        .vscroll(false)
                         .auto_shrink([false, true]);
                     for (i, cell) in cells.iter().enumerate() {
                         let column = match cell {
