@@ -481,15 +481,7 @@ impl DiskScanApp {
                 self.current_view().clone()
             },
             live: self.scanning,
-            sort: if flat_on && self.contents_sort.column == SortColumn::Files {
-                // Every file counts one: the flat list has no Files column.
-                SortState {
-                    column: SortColumn::Size,
-                    ascending: false,
-                }
-            } else {
-                self.contents_sort
-            },
+            sort: self.table_sort(),
             dirs_first: self.table.dirs_first,
             show_dotfiles: self.table.show_dotfiles,
             hidden: self.hidden.len(),
@@ -654,8 +646,9 @@ impl DiskScanApp {
         // (no mode yet).
         let live = self.scanning;
         let pending = |c: &Node| live && c.is_dir && c.mode == 0;
-        let sort_before = self.contents_sort;
-        let contents_sort = &mut self.contents_sort;
+        let sort_before = self.table_sort();
+        let mut shown_sort = sort_before;
+        let contents_sort = &mut shown_sort;
         let user_cache = &mut self.user_cache;
         let group_cache = &mut self.group_cache;
         // Column widths are remembered per set of visible columns, so hiding one
@@ -866,9 +859,11 @@ impl DiskScanApp {
             });
         });
 
-        // A clicked header's column becomes the one `<`/`>` move.
-        if self.contents_sort != sort_before {
-            self.table.active_col = self.contents_sort.column.table_col();
+        // A clicked header sorts by its column, which becomes the one `<`/`>`
+        // move.
+        if shown_sort != sort_before {
+            self.contents_sort = shown_sort;
+            self.table.active_col = shown_sort.column.table_col();
         }
         if let Some(i) = clicked.or(double_clicked).or(ctrl_clicked) {
             self.table.cursor = Some(row(i).path.clone());
@@ -882,6 +877,20 @@ impl DiskScanApp {
         }
         if let Some(on) = set_flat {
             self.set_flat(on);
+        }
+    }
+
+    /// The table's sort order. The flat list has no Files column: sorted by
+    /// files, it sorts by size the same way, and folder view sorts by files
+    /// again.
+    fn table_sort(&self) -> SortState {
+        if self.table.flat && !self.scanning && self.contents_sort.column == SortColumn::Files {
+            SortState {
+                column: SortColumn::Size,
+                ..self.contents_sort
+            }
+        } else {
+            self.contents_sort
         }
     }
 
@@ -1337,6 +1346,7 @@ impl DiskScanApp {
     /// s/n/f/m/c/p: sort by `col`, or flip the order if already sorted by it.
     /// A hidden column is shown again, so the sort is visible.
     fn sort_by(&mut self, col: SortColumn) {
+        self.contents_sort = self.table_sort();
         let s = &mut self.contents_sort;
         if s.column == col {
             s.ascending = !s.ascending;
@@ -1741,6 +1751,21 @@ mod flat_tests {
         app.set_flat(true);
         app.set_flat(false);
         assert!(app.table.marked.is_empty(), "switching views drops marks");
+
+        // Sorted by files, the flat list sorts by size the same way, and
+        // folder view sorts by files again.
+        app.contents_sort = SortState {
+            column: SortColumn::Files,
+            ascending: true,
+        };
+        app.set_flat(true);
+        let by_size_up = SortState {
+            column: SortColumn::Size,
+            ascending: true,
+        };
+        assert!(app.table_sort() == by_size_up);
+        app.set_flat(false);
+        assert!(app.table_sort().column == SortColumn::Files);
     }
 }
 
