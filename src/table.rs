@@ -707,7 +707,9 @@ impl DiskScanApp {
                             Cell::Mark => Column::exact(12.0),
                             Cell::Opt(TableCol::Bar) => Column::exact(92.0),
                             Cell::Opt(_) => Column::auto().at_least(40.0),
-                            Cell::Name => Column::remainder().at_least(120.0),
+                            // Clipped, so it can narrow again after showing a long
+                            // name in full (names cut themselves short with "…").
+                            Cell::Name => Column::remainder().at_least(120.0).clip(true),
                         };
                         tb = tb.column(column.auto_size_this_frame(fit[i]));
                     }
@@ -882,6 +884,8 @@ impl DiskScanApp {
                                         );
                                     }
                                     Cell::Name => {
+                                        #[cfg(test)]
+                                        tests_probe::NAME_WIDTH.set(ui.available_width());
                                         // The flat list shows each file's full path, shortened
                                         // in the middle when the column is too narrow.
                                         let mut text = if flat {
@@ -1680,6 +1684,15 @@ mod perf {
     }
 }
 
+/// What the tests read back from a drawn table.
+#[cfg(test)]
+mod tests_probe {
+    thread_local! {
+        /// Width of the Name column, as last drawn.
+        pub(super) static NAME_WIDTH: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+    }
+}
+
 #[cfg(test)]
 mod flat_tests {
     use super::*;
@@ -1782,6 +1795,40 @@ mod flat_tests {
         assert_eq!(draw(&mut app), ["a.eml"]);
         app.table.flat = false;
         assert_eq!(draw(&mut app), ["d"]);
+    }
+
+    /// After showing a long name in full in a wide window, the Name column
+    /// narrows again with the window.
+    #[test]
+    fn the_name_column_narrows_with_the_window() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        let long = format!("/v/{}", "a long file name ".repeat(12));
+        app.full_root = Some(Arc::new(test_node("/v", 10, true, vec![file(&long, 10)])));
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        let mut name_width = |window: f32| {
+            for _ in 0..3 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        Pos2::ZERO,
+                        Vec2::new(window, 600.0),
+                    )),
+                    ..Default::default()
+                };
+                let _ = ctx.run_ui(raw, |ui| {
+                    let root = app.root.clone().unwrap();
+                    app.table_ui(ui, &root, 400.0);
+                });
+            }
+            tests_probe::NAME_WIDTH.get()
+        };
+        let narrow = name_width(700.0);
+        let wide = name_width(3000.0);
+        assert!(wide > narrow + 1000.0, "{narrow} {wide}");
+        assert!((name_width(700.0) - narrow).abs() < 1.0);
     }
 
     /// A double-click on a column divider reaches the table.
