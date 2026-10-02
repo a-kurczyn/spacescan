@@ -1076,7 +1076,8 @@ impl DiskScanApp {
         let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);
         let dark = ui.visuals().dark_mode;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
-        let mut clicked: Option<String> = None;
+        // The extension clicked, and whether Ctrl was held.
+        let mut clicked: Option<(String, bool)> = None;
         // A steady scroll bar, beside the rows rather than over them.
         ui.spacing_mut().scroll = steady_scroll_style();
         let ext_sort = &mut self.ext_sort;
@@ -1106,12 +1107,14 @@ impl DiskScanApp {
             .body(|body| {
                 body.rows(row_h, rows.len(), |mut table_row| {
                     let row = &rows[table_row.index()];
-                    let pick = Pick::Extension(row.ext.clone());
-                    let picked = self.pick.as_ref() == Some(&pick);
+                    let picked = self
+                        .pick
+                        .as_ref()
+                        .is_some_and(|p| p.has_extension(&row.ext));
                     let dimmed = !picked
                         && self.pick.as_ref().is_some_and(|p| match p {
                             Pick::Category(c) => row.cat != *c,
-                            Pick::Extension(_) => true,
+                            Pick::Extensions(_) => true,
                         });
                     table_row.set_selected(picked);
                     let color = |ui: &egui::Ui| {
@@ -1179,23 +1182,23 @@ impl DiskScanApp {
                     });
                     let hit = hit
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(tr(if picked {
-                            "CAT_CLICK_AGAIN"
-                        } else {
-                            "CAT_CLICK"
-                        }));
+                        .on_hover_text(format!(
+                            "{}\n{}",
+                            tr(if picked {
+                                "CAT_CLICK_AGAIN"
+                            } else {
+                                "CAT_CLICK"
+                            }),
+                            tr("EXT_CTRL_CLICK")
+                        ));
                     if hit.clicked() {
-                        clicked = Some(row.ext.clone());
+                        let ctrl = hit.ctx.input(|i| i.modifiers.command);
+                        clicked = Some((row.ext.clone(), ctrl));
                     }
                 });
             });
-        if let Some(ext) = clicked {
-            let pick = Pick::Extension(ext);
-            self.pick_pending = Some(if self.pick.as_ref() == Some(&pick) {
-                None
-            } else {
-                Some(pick)
-            });
+        if let Some((ext, ctrl)) = clicked {
+            self.pick_pending = Some(pick_after_click(self.pick.as_ref(), &ext, ctrl));
         }
     }
 
@@ -1279,14 +1282,14 @@ impl DiskScanApp {
             && let Some(pick) = &self.pick
             && !self.cat_breakdown.iter().any(|r| match pick {
                 Pick::Category(c) => r.cat == *c,
-                Pick::Extension(e) => r.exts.iter().any(|x| x.0 == *e),
+                Pick::Extensions(set) => r.exts.iter().any(|x| set.contains(&x.0)),
             })
         {
             // The picked category or extension has no files in this folder.
             let hidden: u64 = self.cat_breakdown.iter().map(|r| r.files).sum();
             let key = match pick {
                 Pick::Category(_) => "CAT_NONE_HERE",
-                Pick::Extension(_) => "EXT_NONE_HERE",
+                Pick::Extensions(_) => "EXT_NONE_HERE",
             };
             let text = trf(key, &[&self.cats.pick_label(pick), &format_count(hidden)]);
             let label = ui.add(
@@ -1409,7 +1412,7 @@ impl DiskScanApp {
                 let dimmed = self
                     .pick
                     .as_ref()
-                    .is_some_and(|p| self.cats.pick_category(p) != row.cat);
+                    .is_some_and(|p| !self.cats.pick_in_category(p, row.cat));
 
                 let id = ui.id().with(("cat", i));
                 let mut hit = ui.interact(
@@ -2062,6 +2065,26 @@ fn age_legend_ui(ui: &mut egui::Ui, age_days: u32) {
     });
 }
 
+/// The pick after a click on extension `ext` in the extensions table. A
+/// click shows only that extension, or everything again if it was the only
+/// one picked; a Ctrl+click adds it to the picked extensions or takes it
+/// out.
+fn pick_after_click(pick: Option<&Pick>, ext: &str, ctrl: bool) -> Option<Pick> {
+    let mut set = match pick {
+        Some(Pick::Extensions(set)) => set.clone(),
+        _ => Default::default(),
+    };
+    if ctrl {
+        if !set.remove(ext) {
+            set.insert(ext.to_string());
+        }
+    } else if set.len() == 1 && set.contains(ext) {
+        set.clear();
+    } else {
+        set = [ext.to_string()].into();
+    }
+    (!set.is_empty()).then_some(Pick::Extensions(set))
+}
 #[cfg(test)]
 mod category_bar_tests {
     use super::*;
@@ -2107,6 +2130,43 @@ mod category_bar_tests {
         }
     }
 
+    /// A click picks one extension (or drops it if it's the only one);
+    /// Ctrl+click adds or removes extensions.
+    #[test]
+    fn ctrl_click_picks_several_extensions() {
+        let set = |exts: &[&str]| {
+            Some(Pick::Extensions(
+                exts.iter().map(|e| e.to_string()).collect(),
+            ))
+        };
+        let video = Pick::Category(Category(0));
+        assert_eq!(pick_after_click(None, "mkv", false), set(&["mkv"]));
+        assert_eq!(pick_after_click(set(&["mkv"]).as_ref(), "mkv", false), None);
+        assert_eq!(
+            pick_after_click(set(&["mkv"]).as_ref(), "mp4", true),
+            set(&["mkv", "mp4"])
+        );
+        assert_eq!(
+            pick_after_click(set(&["mkv", "mp4"]).as_ref(), "mkv", true),
+            set(&["mp4"])
+        );
+        assert_eq!(pick_after_click(set(&["mp4"]).as_ref(), "mp4", true), None);
+        // A plain click on one of several picks just that one.
+        assert_eq!(
+            pick_after_click(set(&["mkv", "mp4"]).as_ref(), "mkv", false),
+            set(&["mkv"])
+        );
+        // From a picked category, Ctrl+click starts an extension pick.
+        assert_eq!(pick_after_click(Some(&video), "pdf", true), set(&["pdf"]));
+
+        let cats = CategoryModel::defaults();
+        let five = Pick::Extensions(["a", "b", "c", "d", "e"].map(String::from).into());
+        assert_eq!(cats.pick_label(&five), ".a, .b, .c and 2 more");
+        let mkv_pdf = set(&["mkv", "pdf"]).unwrap();
+        assert!(cats.pick_matches(&mkv_pdf, "x.PDF") && !cats.pick_matches(&mkv_pdf, "x.mp4"));
+        assert!(cats.pick_in_category(&mkv_pdf, cats.of_name("x.pdf")));
+    }
+
     /// Picking a category (or dropping it) while the table is on screen
     /// takes effect after the frame, without mixing up the table's rows.
     #[test]
@@ -2134,7 +2194,7 @@ mod category_bar_tests {
 
         let video = Pick::Category(app.cats.of_name("x.mkv"));
         let other = Pick::Category(app.cats.other());
-        let eml = Pick::Extension("eml".into());
+        let eml = Pick::extension("eml");
         for (pick, rows) in [
             (Some(video), 1),
             (None, 22),
@@ -2285,7 +2345,7 @@ mod category_bar_tests {
         )));
         app.rebuild_view_tree();
         app.table.side = SidePanel::Extensions;
-        app.pick = Some(Pick::Extension("mkv".into()));
+        app.pick = Some(Pick::extension("mkv"));
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let mut update = None;

@@ -18,7 +18,9 @@ or as an ncdu-style table you can drive from the keyboard.
   columns; jump to a name; mark several rows. A flat list shows the
   largest (or newest, or any sort) files from all subfolders at once.
   Press `?` for all shortcuts.
-- **Breakdown by file extension** for the folder you're viewing.
+- **Breakdown by category and file extension** for the folder you're viewing:
+  click a category or extension to show only those files (Ctrl+click picks
+  several extensions).
 - **Accurate numbers.** Sizes are real disk usage, like `du`: sparse files
   count what they actually use and hard-linked files count once. Switch to
   apparent size for network or FUSE drives that don't report disk usage.

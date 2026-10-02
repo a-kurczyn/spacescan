@@ -196,12 +196,25 @@ impl CategoryModel {
     }
 }
 
-/// What the files are narrowed down to: one category, or one extension
-/// (an `ext_key`).
+/// What the files are narrowed down to: one category, or one or more
+/// extensions (`ext_key`s; never none).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Pick {
     Category(Category),
-    Extension(String),
+    Extensions(std::collections::BTreeSet<String>),
+}
+
+impl Pick {
+    /// A pick of the one extension `ext`.
+    #[cfg(test)]
+    pub(crate) fn extension(ext: &str) -> Pick {
+        Pick::Extensions([ext.to_string()].into())
+    }
+
+    /// True if `ext` is one of the picked extensions.
+    pub(crate) fn has_extension(&self, ext: &str) -> bool {
+        matches!(self, Pick::Extensions(set) if set.contains(ext))
+    }
 }
 
 impl CategoryModel {
@@ -209,23 +222,36 @@ impl CategoryModel {
     pub(crate) fn pick_matches(&self, pick: &Pick, name: &str) -> bool {
         match pick {
             Pick::Category(c) => self.of_name(name) == *c,
-            Pick::Extension(e) => ext_key(name) == *e,
+            Pick::Extensions(set) => set.contains(&ext_key(name)),
         }
     }
 
-    /// The category `pick` belongs to.
-    pub(crate) fn pick_category(&self, pick: &Pick) -> Category {
+    /// True if `pick` has files of category `cat`.
+    pub(crate) fn pick_in_category(&self, pick: &Pick, cat: Category) -> bool {
         match pick {
-            Pick::Category(c) => *c,
-            Pick::Extension(e) => self.of_ext(e),
+            Pick::Category(c) => *c == cat,
+            Pick::Extensions(set) => set.iter().any(|e| self.of_ext(e) == cat),
         }
     }
 
-    /// `pick` as shown: the category's name, or the extension.
+    /// `pick` as shown: the category's name, or the extensions (the first
+    /// three, then how many more).
     pub(crate) fn pick_label(&self, pick: &Pick) -> String {
+        const SHOWN: usize = 3;
         match pick {
             Pick::Category(c) => self.label(*c),
-            Pick::Extension(e) => ext_label(e),
+            Pick::Extensions(set) => {
+                let mut label = set
+                    .iter()
+                    .take(SHOWN)
+                    .map(|e| ext_label(e))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if set.len() > SHOWN {
+                    label.push_str(&trf("EXT_MORE", &[&(set.len() - SHOWN).to_string()]));
+                }
+                label
+            }
         }
     }
 }

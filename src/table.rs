@@ -1935,7 +1935,7 @@ mod flat_tests {
         assert_eq!(draw(&mut app), ["d", "c.txt"]);
         app.table.flat = true;
         assert_eq!(draw(&mut app), ["a.eml", "b.mkv", "c.txt"]);
-        app.pick = Some(Pick::Extension("eml".into()));
+        app.pick = Some(Pick::extension("eml"));
         app.rebuild_view_tree();
         assert_eq!(draw(&mut app), ["a.eml"]);
         app.table.flat = false;
