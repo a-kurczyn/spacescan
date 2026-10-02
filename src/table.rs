@@ -107,16 +107,29 @@ struct OrderKey {
 enum Rows {
     /// The viewed folder's own contents, as indices into its children.
     Children(Vec<usize>),
-    /// Files from the viewed folder and all its subfolders, as index paths
-    /// from the viewed folder.
-    Files(Vec<Vec<usize>>),
+    /// Files from the viewed folder and all its subfolders.
+    Files(FlatRows),
+}
+
+/// The flat list's files: each is a folder (an index path from the viewed
+/// folder, stored once per folder) and the file's index in it.
+struct FlatRows {
+    folders: Vec<Vec<usize>>,
+    files: Vec<(u32, u32)>,
+}
+
+impl FlatRows {
+    fn node<'a>(&self, view: &'a Node, i: usize) -> &'a Node {
+        let (folder, child) = self.files[i];
+        &get_node(view, &self.folders[folder as usize]).children[child as usize]
+    }
 }
 
 impl Rows {
     fn len(&self) -> usize {
         match self {
             Rows::Children(idx) => idx.len(),
-            Rows::Files(paths) => paths.len(),
+            Rows::Files(flat) => flat.files.len(),
         }
     }
 
@@ -124,7 +137,7 @@ impl Rows {
     fn node<'a>(&self, view: &'a Node, i: usize) -> &'a Node {
         match self {
             Rows::Children(idx) => &view.children[idx[i]],
-            Rows::Files(paths) => get_node(view, &paths[i]),
+            Rows::Files(flat) => flat.node(view, i),
         }
     }
 }
@@ -153,12 +166,20 @@ fn row_text(node: &Node, flat: bool) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// Width of the longest name in `rows`. Only the names with the most characters are measured, so huge folders
-/// stay fast.
+/// Width of the longest name in `rows`. Only the longest names are
+/// measured, so huge folders stay fast.
 fn widest_name(ui: &egui::Ui, rows: &Rows, view: &Node, flat: bool) -> f32 {
     const MEASURED: usize = 64;
+    // Length in bytes: quick to get, and close enough to pick them.
+    let len = |n: &Node| {
+        if flat {
+            n.path.as_os_str().len()
+        } else {
+            n.name.len()
+        }
+    };
     let mut by_len: Vec<(usize, usize)> = (0..rows.len())
-        .map(|i| (row_text(rows.node(view, i), flat).chars().count(), i))
+        .map(|i| (len(rows.node(view, i)), i))
         .collect();
     if by_len.len() > MEASURED {
         by_len.select_nth_unstable_by(MEASURED, |a, b| b.cmp(a));
@@ -199,16 +220,15 @@ fn find_cursor(
 
 /// Files of a flat list: the files under `view`, leaving out dot-named
 /// entries (and everything in them) unless `show_dotfiles`, and anything in
-/// `hidden`. Returns the first `limit` in `sort` order as index paths from
-/// `view`, how many files there are, their total size, and the total size
-/// of dot-named entries.
+/// `hidden`. Returns the first `limit` in `sort` order, how many files there
+/// are, their total size, and the total size of dot-named entries.
 fn flat_files(
     view: &Node,
     sort: SortState,
     show_dotfiles: bool,
     hidden: &HashSet<PathBuf>,
     limit: usize,
-) -> (Vec<Vec<usize>>, u64, u64, u64) {
+) -> (FlatRows, u64, u64, u64) {
     /// A file found: its node, its folder (an index into `folders`) and
     /// its index in that folder.
     struct Found<'a> {
@@ -285,16 +305,35 @@ fn flat_files(
         files.select_nth_unstable_by(limit, cmp);
         files.truncate(limit);
     }
-    files.sort_unstable_by(cmp);
-    let paths = files
-        .iter()
-        .map(|f| {
-            let mut p = w.folders[f.folder as usize].clone();
-            p.push(f.child as usize);
-            p
-        })
-        .collect();
-    (paths, count, w.size, w.dot_size)
+    let files: Vec<(u32, u32)> = if sort.column == SortColumn::Name {
+        // Name keys are built once per file, then sorted (much faster on
+        // long lists than building them at every comparison).
+        let mut keyed: Vec<(Vec<u8>, &str, u32, u32)> = files
+            .par_iter()
+            .map(|f| {
+                (
+                    natural_key(&f.node.name),
+                    f.node.name.as_str(),
+                    f.folder,
+                    f.child,
+                )
+            })
+            .collect();
+        keyed.par_sort_unstable_by(|a, b| {
+            let by = a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1));
+            let by = if sort.ascending { by } else { by.reverse() };
+            by.then((a.2, a.3).cmp(&(b.2, b.3)))
+        });
+        keyed.into_iter().map(|k| (k.2, k.3)).collect()
+    } else {
+        files.par_sort_unstable_by(cmp);
+        files.iter().map(|f| (f.folder, f.child)).collect()
+    };
+    let rows = FlatRows {
+        folders: w.folders,
+        files,
+    };
+    (rows, count, w.size, w.dot_size)
 }
 
 /// A rescan of one folder ("r"), to be spliced back into the full tree
@@ -526,7 +565,11 @@ impl DiskScanApp {
             dirs_first: self.table.dirs_first,
             show_dotfiles: self.table.show_dotfiles,
             hidden: self.hidden.len(),
-            flat: flat_on.then_some(self.settings.flat_rows),
+            flat: flat_on.then_some(if self.settings.flat_all {
+                usize::MAX
+            } else {
+                self.settings.flat_rows
+            }),
         };
         let order = match self.table.order.take() {
             Some(o) if o.key == key => o,
@@ -1008,10 +1051,10 @@ impl DiskScanApp {
     /// row list the keys work on.
     fn row_order(&mut self, view_node: &Node, key: OrderKey) -> RowOrder {
         if let Some(limit) = key.flat {
-            let (paths, count, size, dot_size) =
+            let (rows, count, size, dot_size) =
                 flat_files(view_node, key.sort, key.show_dotfiles, &self.hidden, limit);
             return RowOrder {
-                rows: Rows::Files(paths),
+                rows: Rows::Files(rows),
                 shown_size: size,
                 dotfile_size: dot_size,
                 flat_files: count,
@@ -1662,14 +1705,20 @@ mod perf {
             })
             .collect();
         let root = test_node("/r", 0, true, folders);
-        for column in [SortColumn::Size, SortColumn::Modified, SortColumn::Name] {
-            let sort = SortState {
-                column,
-                ascending: false,
-            };
-            let t = Instant::now();
-            let (paths, count, ..) = flat_files(&root, sort, true, &HashSet::new(), 1000);
-            eprintln!("{column:?}: {:?} ({} of {count})", t.elapsed(), paths.len());
+        for limit in [1000, usize::MAX] {
+            for column in [SortColumn::Size, SortColumn::Modified, SortColumn::Name] {
+                let sort = SortState {
+                    column,
+                    ascending: false,
+                };
+                let t = Instant::now();
+                let (rows, count, ..) = flat_files(&root, sort, true, &HashSet::new(), limit);
+                eprintln!(
+                    "{column:?}: {:?} ({} of {count})",
+                    t.elapsed(),
+                    rows.files.len()
+                );
+            }
         }
     }
 
@@ -1745,10 +1794,9 @@ mod flat_tests {
         test_node("/v", 1505, true, vec![a, dot, gone, file("/v/small", 5)])
     }
 
-    fn names(view: &Node, paths: &[Vec<usize>]) -> Vec<String> {
-        paths
-            .iter()
-            .map(|p| get_node(view, p).name.clone())
+    fn names(view: &Node, rows: &FlatRows) -> Vec<String> {
+        (0..rows.files.len())
+            .map(|i| rows.node(view, i).name.clone())
             .collect()
     }
 

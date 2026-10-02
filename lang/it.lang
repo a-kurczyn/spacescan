@@ -78,6 +78,8 @@ SETTINGS_CURVE_SMOOTH=Morbidezza delle curve (px/passo, più basso = più morbid
 SETTINGS_TABLE=Tabella dei contenuti
 SETTINGS_FLAT_ROWS=Righe dell'elenco piatto
 SETTINGS_FLAT_ROWS_HOVER=L'elenco piatto mostra al massimo questo numero di file, i primi nell'ordinamento attuale (i più grandi, ordinando per dimensione).
+SETTINGS_FLAT_ALL=Mostra tutti i file nell'elenco piatto
+SETTINGS_FLAT_ALL_HOVER=L'elenco piatto mostra tutti i file, senza limite di righe. Con milioni di file, ordinarlo richiede alcuni secondi.
 SETTINGS_LOG=Registro
 SETTINGS_MAX_LOG_LINES=Righe di problemi conservate (max.)
 SETTINGS_SCANNING=Analisi

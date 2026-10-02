@@ -78,6 +78,8 @@ SETTINGS_CURVE_SMOOTH=Kurvenglättung (px/Schritt, niedriger = glatter)
 SETTINGS_TABLE=Inhaltstabelle
 SETTINGS_FLAT_ROWS=Zeilen der flachen Liste
 SETTINGS_FLAT_ROWS_HOVER=Die flache Liste zeigt höchstens so viele Dateien, die ersten in der aktuellen Sortierung (die größten, nach Größe sortiert).
+SETTINGS_FLAT_ALL=Alle Dateien in der flachen Liste zeigen
+SETTINGS_FLAT_ALL_HOVER=Die flache Liste zeigt jede Datei, ohne Zeilenlimit. Bei Millionen Dateien dauert das Sortieren einige Sekunden.
 SETTINGS_LOG=Protokoll
 SETTINGS_MAX_LOG_LINES=Gespeicherte Problemzeilen (max.)
 SETTINGS_SCANNING=Durchsuchen

@@ -694,12 +694,15 @@ impl DiskScanApp {
 
                         ui.separator();
                         ui.label(tr("SETTINGS_TABLE"));
-                        ui.add(
+                        ui.add_enabled(
+                            !s.flat_all,
                             egui::Slider::new(&mut s.flat_rows, Settings::FLAT_ROWS)
                                 .logarithmic(true)
                                 .text(tr("SETTINGS_FLAT_ROWS")),
                         )
                         .on_hover_text(tr("SETTINGS_FLAT_ROWS_HOVER"));
+                        ui.checkbox(&mut s.flat_all, tr("SETTINGS_FLAT_ALL"))
+                            .on_hover_text(tr("SETTINGS_FLAT_ALL_HOVER"));
 
                         ui.separator();
                         ui.label(tr("SETTINGS_LOG"));
@@ -2071,6 +2074,37 @@ mod category_bar_tests {
             let view = get_node(&root, app.view_stack.last().unwrap());
             app.summary_ui(ui, view);
         });
+    }
+
+    /// The live table during a scan lists the folder's contents, with the
+    /// flat list switched on too.
+    #[test]
+    fn the_live_table_lists_rows_in_both_views() {
+        for flat in [false, true] {
+            let mut app = DiskScanApp {
+                summary_view: true,
+                scanning: true,
+                ..DiskScanApp::default()
+            };
+            app.table.flat = flat;
+            app.partial_root = test_node(
+                "/scan",
+                30,
+                true,
+                vec![test_node("/scan/a", 30, true, vec![])],
+            );
+            app.partial_gen = 1;
+            app.live_refreshed = Instant::now() - std::time::Duration::from_secs(1);
+            let ctx = egui::Context::default();
+            for _ in 0..2 {
+                let _ = ctx.run_ui(egui::RawInput::default(), |ui| app.live_table_ui(ui));
+            }
+            assert_eq!(
+                app.table.cursor,
+                Some(PathBuf::from("/scan/a")),
+                "flat: {flat}"
+            );
+        }
     }
 
     /// Picking a category (or dropping it) while the table is on screen

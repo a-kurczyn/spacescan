@@ -102,6 +102,8 @@ struct Settings {
     apparent_size: bool,
     /// Most rows in the contents table's flat list.
     flat_rows: usize,
+    /// The flat list shows every file (no row limit).
+    flat_all: bool,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -174,6 +176,7 @@ impl Default for Settings {
             progress_interval_pow2: 9, // every 512 entries
             apparent_size: false,
             flat_rows: 1000,
+            flat_all: false,
         }
     }
 }

@@ -79,6 +79,8 @@ SETTINGS_CURVE_SMOOTH=Suavidad de curvas (px/paso, menor = más suave)
 SETTINGS_TABLE=Tabla de contenido
 SETTINGS_FLAT_ROWS=Filas en la lista plana
 SETTINGS_FLAT_ROWS_HOVER=La lista plana muestra como máximo esta cantidad de archivos, los primeros según el orden actual (los más grandes, si se ordena por tamaño).
+SETTINGS_FLAT_ALL=Mostrar todos los archivos en la lista plana
+SETTINGS_FLAT_ALL_HOVER=La lista plana muestra todos los archivos, sin límite de filas. Con millones de archivos, ordenarla tarda unos segundos.
 SETTINGS_LOG=Registro
 SETTINGS_MAX_LOG_LINES=Máx. líneas de incidencias guardadas
 SETTINGS_SCANNING=Escaneo

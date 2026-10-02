@@ -78,6 +78,8 @@ SETTINGS_CURVE_SMOOTH=Lissage des courbes (px/pas, plus bas = plus lisse)
 SETTINGS_TABLE=Tableau du contenu
 SETTINGS_FLAT_ROWS=Lignes de la liste à plat
 SETTINGS_FLAT_ROWS_HOVER=La liste à plat affiche au plus ce nombre de fichiers, les premiers dans l'ordre de tri actuel (les plus gros, triés par taille).
+SETTINGS_FLAT_ALL=Afficher tous les fichiers dans la liste à plat
+SETTINGS_FLAT_ALL_HOVER=La liste à plat affiche tous les fichiers, sans limite de lignes. Avec des millions de fichiers, la trier prend quelques secondes.
 SETTINGS_LOG=Journal
 SETTINGS_MAX_LOG_LINES=Lignes de problèmes conservées (max.)
 SETTINGS_SCANNING=Analyse

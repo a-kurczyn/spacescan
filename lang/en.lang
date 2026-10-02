@@ -92,6 +92,8 @@ SETTINGS_CURVE_SMOOTH=Curve smoothness (px/step, lower = smoother)
 SETTINGS_TABLE=Contents table
 SETTINGS_FLAT_ROWS=Rows in the flat list
 SETTINGS_FLAT_ROWS_HOVER=The flat list shows this many files at most, the first ones in the current sort order (the largest, when sorted by size).
+SETTINGS_FLAT_ALL=Show all files in the flat list
+SETTINGS_FLAT_ALL_HOVER=The flat list shows every file, with no row limit. On millions of files, sorting it takes a few seconds.
 SETTINGS_LOG=Log
 SETTINGS_MAX_LOG_LINES=Max stored issue lines
 SETTINGS_SCANNING=Scanning
