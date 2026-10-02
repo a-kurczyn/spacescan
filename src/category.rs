@@ -298,8 +298,8 @@ pub(crate) fn add_ext(totals: &mut ExtTotals, ext: String, size: u64, files: u64
     e.1 += files;
 }
 
-/// How the files under `node` split into categories, largest first with
-/// Other last; categories with no files are left out.
+/// How the files under `node` split into categories, largest first;
+/// categories with no files are left out.
 pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<CategoryRow> {
     fn walk(n: &Node, acc: &mut ExtTotals) {
         if n.is_dir {
@@ -315,7 +315,7 @@ pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<Cate
     category_rows(&acc, model)
 }
 
-/// Extension totals grouped into categories, largest first with Other last.
+/// Extension totals grouped into categories, largest first.
 pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<CategoryRow> {
     let mut rows: Vec<CategoryRow> = Vec::new();
     for (ext, &(size, files)) in totals {
@@ -341,9 +341,8 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
         r.exts
             .sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     }
-    // Other always last; the rest by size, ties in list order.
-    let other = model.other();
-    rows.sort_by_key(|r| (r.cat == other, std::cmp::Reverse(r.size), r.cat.0));
+    // By size, ties in list order (Other last among equals).
+    rows.sort_by_key(|r| (std::cmp::Reverse(r.size), r.cat.0));
     rows
 }
 
@@ -458,13 +457,13 @@ mod tests {
         assert_eq!(
             b,
             vec![
+                ("(other)".into(), 999, 1),
                 ("Documents".into(), 200, 1),
-                ("Video".into(), 150, 2),
-                ("(other)".into(), 999, 1)
+                ("Video".into(), 150, 2)
             ]
         );
         assert_eq!(
-            rows[1].exts,
+            rows[2].exts,
             vec![("mkv".to_string(), 100, 1), ("mp4".to_string(), 50, 1)]
         );
         assert_eq!(
