@@ -673,216 +673,252 @@ impl DiskScanApp {
             if show_info {
                 ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
             }
-            let table_salt = ("contents_table", layout_key.join(","));
-            // A double-click on the divider after a column fits it to its
-            // widest visible cell.
-            // The id the table gives its state (it turns its salt into an IdSalt).
-            let table_id = ui.id().with(egui::IdSalt::new(&table_salt));
-            table_id_out.set(Some(table_id));
-            let fit: Vec<bool> = (0..cells.len())
-                .map(|i| {
-                    ui.ctx()
-                        .read_response(table_id.with("resize_column").with(i))
-                        .is_some_and(|r| r.double_clicked())
-                })
-                .collect();
-            let mut tb = TableBuilder::new(ui)
-                .id_salt(table_salt.clone())
-                .striped(true)
-                .resizable(true)
-                .sense(egui::Sense::click())
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .min_scrolled_height(0.0)
-                .max_scroll_height(table_h)
-                // Scroll to the cursor row at once, without animation.
-                .animate_scrolling(false)
-                .auto_shrink([false, true]);
-            for (i, cell) in cells.iter().enumerate() {
-                let column = match cell {
-                    Cell::Mark => Column::exact(12.0),
-                    Cell::Opt(TableCol::Bar) => Column::exact(92.0),
-                    Cell::Opt(_) => Column::auto().at_least(40.0),
-                    Cell::Name => Column::remainder().at_least(120.0),
-                };
-                tb = tb.column(column.auto_size_this_frame(fit[i]));
-            }
-            if let (true, Some(r)) = (scroll_to_cursor, cursor_row) {
-                tb = tb.scroll_to_row(r, None);
-            }
-            tb.header(header_h, |mut header| {
-                for cell in &cells {
-                    header.col(|ui| match cell {
-                        Cell::Mark | Cell::Opt(TableCol::Bar) => {}
-                        Cell::Opt(TableCol::Percent) => {
-                            ui.strong(tr("COL_PERCENT"));
-                        }
-                        Cell::Opt(TableCol::Size) => {
-                            sortable_header(ui, &tr("COL_SIZE"), SortColumn::Size, contents_sort);
-                        }
-                        Cell::Opt(TableCol::Files) => {
-                            sortable_header(ui, &tr("COL_FILES"), SortColumn::Files, contents_sort);
-                        }
-                        Cell::Opt(TableCol::Modified) => {
-                            sortable_header(
-                                ui,
-                                &tr("COL_MODIFIED"),
-                                SortColumn::Modified,
-                                contents_sort,
-                            )
-                            .on_hover_text(tr("COL_MODIFIED_TIP"));
-                        }
-                        Cell::Opt(TableCol::Changed) => {
-                            sortable_header(
-                                ui,
-                                &tr("COL_CHANGED"),
-                                SortColumn::Changed,
-                                contents_sort,
-                            )
-                            .on_hover_text(tr("COL_CHANGED_TIP"));
-                        }
-                        Cell::Opt(TableCol::Perms) => {
-                            sortable_header(ui, &tr("COL_PERMS"), SortColumn::Perms, contents_sort);
-                        }
-                        Cell::Name => {
-                            sortable_header(ui, &tr("COL_NAME"), SortColumn::Name, contents_sort);
-                        }
-                    });
-                }
-            })
-            .body(|body| {
-                body.rows(row_h, n_rows, |mut tr_row| {
-                    let i = tr_row.index();
-                    let c = row(i);
-                    let is_marked = marked.contains(&c.path);
-                    let selected = Some(i) == cursor_row;
-                    tr_row.set_selected(selected);
-                    let pick = |normal: Color32| if selected { selected_fg } else { normal };
-                    for cell in &cells {
-                        tr_row.col(|ui| match cell {
-                            Cell::Mark => {
-                                if is_marked {
-                                    let (r, _) = ui.allocate_exact_size(
-                                        Vec2::splat(10.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    let stroke = egui::Stroke::new(1.8, pick(mark_color));
-                                    ui.painter().add(egui::Shape::line(
-                                        vec![
-                                            Pos2::new(r.left(), r.center().y),
-                                            Pos2::new(r.left() + r.width() * 0.4, r.bottom() - 1.0),
-                                            Pos2::new(r.right(), r.top() + 1.0),
-                                        ],
-                                        stroke,
-                                    ));
+            // Columns widened past the window scroll sideways.
+            egui::ScrollArea::horizontal()
+                .id_salt("contents_hscroll")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    let table_salt = ("contents_table", layout_key.join(","));
+                    // A double-click on the divider after a column fits it to its
+                    // widest visible cell.
+                    // The id the table gives its state (it turns its salt into an IdSalt).
+                    let table_id = ui.id().with(egui::IdSalt::new(&table_salt));
+                    table_id_out.set(Some(table_id));
+                    let fit: Vec<bool> = (0..cells.len())
+                        .map(|i| {
+                            ui.ctx()
+                                .read_response(table_id.with("resize_column").with(i))
+                                .is_some_and(|r| r.double_clicked())
+                        })
+                        .collect();
+                    let mut tb = TableBuilder::new(ui)
+                        .id_salt(table_salt.clone())
+                        .striped(true)
+                        .resizable(true)
+                        .sense(egui::Sense::click())
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .min_scrolled_height(0.0)
+                        .max_scroll_height(table_h)
+                        // Scroll to the cursor row at once, without animation.
+                        .animate_scrolling(false)
+                        .auto_shrink([false, true]);
+                    for (i, cell) in cells.iter().enumerate() {
+                        let column = match cell {
+                            Cell::Mark => Column::exact(12.0),
+                            Cell::Opt(TableCol::Bar) => Column::exact(92.0),
+                            Cell::Opt(_) => Column::auto().at_least(40.0),
+                            Cell::Name => Column::remainder().at_least(120.0),
+                        };
+                        tb = tb.column(column.auto_size_this_frame(fit[i]));
+                    }
+                    if let (true, Some(r)) = (scroll_to_cursor, cursor_row) {
+                        tb = tb.scroll_to_row(r, None);
+                    }
+                    tb.header(header_h, |mut header| {
+                        for cell in &cells {
+                            header.col(|ui| match cell {
+                                Cell::Mark | Cell::Opt(TableCol::Bar) => {}
+                                Cell::Opt(TableCol::Percent) => {
+                                    ui.strong(tr("COL_PERCENT"));
                                 }
-                            }
-                            Cell::Opt(TableCol::Bar) => {
-                                // Share of the folder, matching the % column.
-                                let (r, _) = ui.allocate_exact_size(
-                                    Vec2::new(86.0, row_h * 0.55),
-                                    egui::Sense::hover(),
-                                );
-                                let frac = c.size as f32 / total as f32;
-                                if selected {
-                                    // A dark track under the fill.
-                                    ui.painter()
-                                        .rect_filled(r, egui::CornerRadius::ZERO, panel_bg);
-                                }
-                                if frac > 0.0 {
-                                    let filled = egui::Rect::from_min_size(
-                                        r.min,
-                                        Vec2::new((r.width() * frac).max(1.0), r.height()),
-                                    );
-                                    ui.painter().rect_filled(
-                                        filled,
-                                        egui::CornerRadius::ZERO,
-                                        bar_fill,
-                                    );
-                                }
-                                ui.painter().rect_stroke(
-                                    r,
-                                    egui::CornerRadius::ZERO,
-                                    egui::Stroke::new(
-                                        1.0,
-                                        if selected { panel_bg } else { bar_frame },
-                                    ),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            Cell::Opt(TableCol::Percent) => {
-                                ui.label(format!("{:.1}%", c.size as f64 * 100.0 / total as f64));
-                            }
-                            Cell::Opt(TableCol::Size) => {
-                                // Right-aligned, so sizes line up by unit.
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(human_size(c.size));
-                                    },
-                                );
-                            }
-                            Cell::Opt(TableCol::Files) => {
-                                ui.label(format_count(c.file_count));
-                            }
-                            // A folder still being scanned shows "…".
-                            Cell::Opt(TableCol::Modified | TableCol::Changed | TableCol::Perms)
-                                if pending(c) =>
-                            {
-                                ui.weak("…");
-                            }
-                            Cell::Opt(TableCol::Modified) => {
-                                ui.label(format_epoch(c.mtime));
-                            }
-                            Cell::Opt(TableCol::Changed) => {
-                                ui.label(format_epoch(c.ctime));
-                            }
-                            Cell::Opt(TableCol::Perms) => {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} {}",
-                                        format_mode_ls(c.mode, c.is_dir),
-                                        format_owner(c.uid, c.gid, user_cache, group_cache)
-                                    ))
-                                    .monospace(),
-                                );
-                            }
-                            Cell::Name => {
-                                // The flat list shows each file's full path, shortened
-                                // in the middle when the column is too narrow.
-                                let mut text = if flat {
-                                    let font = egui::TextStyle::Body.resolve(ui.style());
-                                    let width = ui.available_width();
-                                    egui::RichText::new(fit_middle(
+                                Cell::Opt(TableCol::Size) => {
+                                    sortable_header(
                                         ui,
-                                        &show_path(&c.path),
-                                        &font,
-                                        width,
-                                    ))
-                                } else {
-                                    egui::RichText::new(&c.name)
-                                };
-                                // Folders stand out by color alone.
-                                if c.is_dir || selected {
-                                    text = text.color(pick(dir_color));
+                                        &tr("COL_SIZE"),
+                                        SortColumn::Size,
+                                        contents_sort,
+                                    );
                                 }
-                                if is_marked {
-                                    text = text.strong();
+                                Cell::Opt(TableCol::Files) => {
+                                    sortable_header(
+                                        ui,
+                                        &tr("COL_FILES"),
+                                        SortColumn::Files,
+                                        contents_sort,
+                                    );
                                 }
-                                ui.add(egui::Label::new(text).truncate());
+                                Cell::Opt(TableCol::Modified) => {
+                                    sortable_header(
+                                        ui,
+                                        &tr("COL_MODIFIED"),
+                                        SortColumn::Modified,
+                                        contents_sort,
+                                    )
+                                    .on_hover_text(tr("COL_MODIFIED_TIP"));
+                                }
+                                Cell::Opt(TableCol::Changed) => {
+                                    sortable_header(
+                                        ui,
+                                        &tr("COL_CHANGED"),
+                                        SortColumn::Changed,
+                                        contents_sort,
+                                    )
+                                    .on_hover_text(tr("COL_CHANGED_TIP"));
+                                }
+                                Cell::Opt(TableCol::Perms) => {
+                                    sortable_header(
+                                        ui,
+                                        &tr("COL_PERMS"),
+                                        SortColumn::Perms,
+                                        contents_sort,
+                                    );
+                                }
+                                Cell::Name => {
+                                    sortable_header(
+                                        ui,
+                                        &tr("COL_NAME"),
+                                        SortColumn::Name,
+                                        contents_sort,
+                                    );
+                                }
+                            });
+                        }
+                    })
+                    .body(|body| {
+                        body.rows(row_h, n_rows, |mut tr_row| {
+                            let i = tr_row.index();
+                            let c = row(i);
+                            let is_marked = marked.contains(&c.path);
+                            let selected = Some(i) == cursor_row;
+                            tr_row.set_selected(selected);
+                            let pick =
+                                |normal: Color32| if selected { selected_fg } else { normal };
+                            for cell in &cells {
+                                tr_row.col(|ui| match cell {
+                                    Cell::Mark => {
+                                        if is_marked {
+                                            let (r, _) = ui.allocate_exact_size(
+                                                Vec2::splat(10.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            let stroke = egui::Stroke::new(1.8, pick(mark_color));
+                                            ui.painter().add(egui::Shape::line(
+                                                vec![
+                                                    Pos2::new(r.left(), r.center().y),
+                                                    Pos2::new(
+                                                        r.left() + r.width() * 0.4,
+                                                        r.bottom() - 1.0,
+                                                    ),
+                                                    Pos2::new(r.right(), r.top() + 1.0),
+                                                ],
+                                                stroke,
+                                            ));
+                                        }
+                                    }
+                                    Cell::Opt(TableCol::Bar) => {
+                                        // Share of the folder, matching the % column.
+                                        let (r, _) = ui.allocate_exact_size(
+                                            Vec2::new(86.0, row_h * 0.55),
+                                            egui::Sense::hover(),
+                                        );
+                                        let frac = c.size as f32 / total as f32;
+                                        if selected {
+                                            // A dark track under the fill.
+                                            ui.painter().rect_filled(
+                                                r,
+                                                egui::CornerRadius::ZERO,
+                                                panel_bg,
+                                            );
+                                        }
+                                        if frac > 0.0 {
+                                            let filled = egui::Rect::from_min_size(
+                                                r.min,
+                                                Vec2::new((r.width() * frac).max(1.0), r.height()),
+                                            );
+                                            ui.painter().rect_filled(
+                                                filled,
+                                                egui::CornerRadius::ZERO,
+                                                bar_fill,
+                                            );
+                                        }
+                                        ui.painter().rect_stroke(
+                                            r,
+                                            egui::CornerRadius::ZERO,
+                                            egui::Stroke::new(
+                                                1.0,
+                                                if selected { panel_bg } else { bar_frame },
+                                            ),
+                                            egui::StrokeKind::Inside,
+                                        );
+                                    }
+                                    Cell::Opt(TableCol::Percent) => {
+                                        ui.label(format!(
+                                            "{:.1}%",
+                                            c.size as f64 * 100.0 / total as f64
+                                        ));
+                                    }
+                                    Cell::Opt(TableCol::Size) => {
+                                        // Right-aligned, so sizes line up by unit.
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(human_size(c.size));
+                                            },
+                                        );
+                                    }
+                                    Cell::Opt(TableCol::Files) => {
+                                        ui.label(format_count(c.file_count));
+                                    }
+                                    // A folder still being scanned shows "…".
+                                    Cell::Opt(
+                                        TableCol::Modified | TableCol::Changed | TableCol::Perms,
+                                    ) if pending(c) => {
+                                        ui.weak("…");
+                                    }
+                                    Cell::Opt(TableCol::Modified) => {
+                                        ui.label(format_epoch(c.mtime));
+                                    }
+                                    Cell::Opt(TableCol::Changed) => {
+                                        ui.label(format_epoch(c.ctime));
+                                    }
+                                    Cell::Opt(TableCol::Perms) => {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} {}",
+                                                format_mode_ls(c.mode, c.is_dir),
+                                                format_owner(c.uid, c.gid, user_cache, group_cache)
+                                            ))
+                                            .monospace(),
+                                        );
+                                    }
+                                    Cell::Name => {
+                                        // The flat list shows each file's full path, shortened
+                                        // in the middle when the column is too narrow.
+                                        let mut text = if flat {
+                                            let font = egui::TextStyle::Body.resolve(ui.style());
+                                            let width = ui.available_width();
+                                            egui::RichText::new(fit_middle(
+                                                ui,
+                                                &show_path(&c.path),
+                                                &font,
+                                                width,
+                                            ))
+                                        } else {
+                                            egui::RichText::new(&c.name)
+                                        };
+                                        // Folders stand out by color alone.
+                                        if c.is_dir || selected {
+                                            text = text.color(pick(dir_color));
+                                        }
+                                        if is_marked {
+                                            text = text.strong();
+                                        }
+                                        ui.add(egui::Label::new(text).truncate());
+                                    }
+                                });
+                            }
+                            let r = tr_row.response();
+                            // Ctrl+click marks like Space (a second click unmarks, never opens).
+                            if r.clicked() && r.ctx.input(|i| i.modifiers.command) {
+                                ctrl_clicked = Some(i);
+                            } else if r.double_clicked() {
+                                double_clicked = Some(i);
+                            } else if r.clicked() {
+                                clicked = Some(i);
                             }
                         });
-                    }
-                    let r = tr_row.response();
-                    // Ctrl+click marks like Space (a second click unmarks, never opens).
-                    if r.clicked() && r.ctx.input(|i| i.modifiers.command) {
-                        ctrl_clicked = Some(i);
-                    } else if r.double_clicked() {
-                        double_clicked = Some(i);
-                    } else if r.clicked() {
-                        clicked = Some(i);
-                    }
+                    });
                 });
-            });
         });
 
         // A clicked header sorts by its column, which becomes the one `<`/`>`
