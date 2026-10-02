@@ -466,6 +466,8 @@ impl DiskScanApp {
             self.table.marks_for = Some(view_node.path.clone());
         }
 
+        // The live table during a scan always lists the folder's contents.
+        let flat_on = self.table.flat && !self.scanning;
         // The row order is recomputed only when something it depends on changes.
         let key = OrderKey {
             tree_gen: if self.scanning {
@@ -479,12 +481,19 @@ impl DiskScanApp {
                 self.current_view().clone()
             },
             live: self.scanning,
-            sort: self.contents_sort,
+            sort: if flat_on && self.contents_sort.column == SortColumn::Files {
+                // Every file counts one: the flat list has no Files column.
+                SortState {
+                    column: SortColumn::Size,
+                    ascending: false,
+                }
+            } else {
+                self.contents_sort
+            },
             dirs_first: self.table.dirs_first,
             show_dotfiles: self.table.show_dotfiles,
             hidden: self.hidden.len(),
-            // The live table during a scan always lists the folder's contents.
-            flat: (self.table.flat && !self.scanning).then_some(self.settings.flat_rows),
+            flat: flat_on.then_some(self.settings.flat_rows),
         };
         let order = match self.table.order.take() {
             Some(o) if o.key == key => o,
@@ -613,6 +622,8 @@ impl DiskScanApp {
                 .col_order
                 .iter()
                 .filter(|c| !self.table.hidden_cols.contains(c))
+                // The flat list has only files: no Files column.
+                .filter(|c| !(flat && **c == TableCol::Files))
                 .map(|c| Cell::Opt(*c)),
         );
         cells.push(Cell::Name);
@@ -825,44 +836,20 @@ impl DiskScanApp {
                                 );
                             }
                             Cell::Name => {
+                                // The flat list shows each file's full path.
+                                let mut text = if flat {
+                                    egui::RichText::new(show_path(&c.path))
+                                } else {
+                                    egui::RichText::new(&c.name)
+                                };
                                 // Folders stand out by color alone.
-                                let mut text = egui::RichText::new(&c.name);
                                 if c.is_dir || selected {
                                     text = text.color(pick(dir_color));
                                 }
                                 if is_marked {
                                     text = text.strong();
                                 }
-                                // The flat list: the file's folder after its name.
-                                let folder = c
-                                    .path
-                                    .parent()
-                                    .and_then(|p| p.strip_prefix(&view_node.path).ok())
-                                    .filter(|p| !p.as_os_str().is_empty());
-                                match folder {
-                                    Some(folder) if flat => {
-                                        let style = ui.style().clone();
-                                        let mut job = egui::text::LayoutJob::default();
-                                        text.append_to(
-                                            &mut job,
-                                            &style,
-                                            egui::FontSelection::Default,
-                                            egui::Align::Center,
-                                        );
-                                        egui::RichText::new(format!("   {}", show_path(folder)))
-                                            .color(pick(ui.visuals().weak_text_color()))
-                                            .append_to(
-                                                &mut job,
-                                                &style,
-                                                egui::FontSelection::Default,
-                                                egui::Align::Center,
-                                            );
-                                        ui.add(egui::Label::new(job).truncate());
-                                    }
-                                    _ => {
-                                        ui.add(egui::Label::new(text).truncate());
-                                    }
-                                }
+                                ui.add(egui::Label::new(text).truncate());
                             }
                         });
                     }
