@@ -6,7 +6,7 @@ use super::*;
 use egui_extras::{Column, TableBuilder};
 
 const FILTER_PANEL_WIDTH: f32 = 340.0;
-const SETTINGS_PANEL_WIDTH: f32 = 320.0;
+const SETTINGS_PANEL_WIDTH: f32 = 480.0;
 
 /// A window of its own (it can be moved anywhere, even off the app's
 /// window), titled `title`, first `size` big; `open` turns false when it's
