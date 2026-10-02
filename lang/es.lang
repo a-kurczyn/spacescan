@@ -290,6 +290,7 @@ CAT_CLEAR=Mostrar todas las categorías
 CAT_NO_FILES=No hay archivos aquí
 CAT_ACTIVE=Solo se muestra: %s
 TABLE_TAG_CATEGORY=solo %s
+TABLE_TAG_CATEGORY_AFTER_SCAN=solo %s, al terminar el escaneo
 CAT_NONE_HERE=Aquí no hay archivos de la categoría %s (%s archivos más ocultos)
 EXT_NONE_HERE=Aquí no hay archivos %s (%s archivos más ocultos)
 EXT_MORE= y %s más

@@ -285,6 +285,7 @@ CAT_CLEAR=모든 분류 보기
 CAT_NO_FILES=여기에는 파일이 없습니다
 CAT_ACTIVE=표시 중: %s만
 TABLE_TAG_CATEGORY=%s만
+TABLE_TAG_CATEGORY_AFTER_SCAN=%s만 (검사가 끝난 뒤)
 CAT_NONE_HERE=여기에는 %s 파일이 없습니다 (다른 파일 %s개 숨김)
 EXT_NONE_HERE=여기에는 %s 파일이 없습니다 (다른 파일 %s개 숨김)
 EXT_MORE= 외 %s개

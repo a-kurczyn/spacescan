@@ -674,8 +674,14 @@ impl DiskScanApp {
             } else if self.table.flat {
                 ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
             }
-            if let Some(pick) = self.pick.as_ref().filter(|_| !self.scanning) {
-                let tag = trf("TABLE_TAG_CATEGORY", &[&self.cats.pick_label(pick)]);
+            // During a scan the pick waits for the end, and says so.
+            if let Some(pick) = &self.pick {
+                let key = if self.scanning {
+                    "TABLE_TAG_CATEGORY_AFTER_SCAN"
+                } else {
+                    "TABLE_TAG_CATEGORY"
+                };
+                let tag = trf(key, &[&self.cats.pick_label(pick)]);
                 ui.label(egui::RichText::new(format!("· {tag}")).color(ui.visuals().warn_fg_color));
             }
             if self.table.dirs_first && !flat {
