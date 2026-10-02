@@ -126,6 +126,18 @@ pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: C
     }
 }
 
+/// Scroll bars that stay on screen beside the content: wide enough to
+/// grab, with the handle always shown.
+pub(crate) fn steady_scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle {
+        bar_width: 10.0,
+        handle_min_length: 24.0,
+        dormant_background_opacity: 0.3,
+        dormant_handle_opacity: 0.6,
+        ..egui::style::ScrollStyle::solid()
+    }
+}
+
 /// A function that paints an icon into a rectangle in a color.
 pub(crate) type DrawIcon = fn(&egui::Painter, egui::Rect, Color32);
 

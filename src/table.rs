@@ -753,6 +753,8 @@ impl DiskScanApp {
         ui.scope(|ui| {
             // Cell text isn't selectable, so a click reaches the row.
             ui.style_mut().interaction.selectable_labels = false;
+            // Steady scroll bars, beside the rows rather than over them.
+            ui.spacing_mut().scroll = steady_scroll_style();
             // Column resize handles show only while hovered or dragged.
             ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
             if show_info {
@@ -786,6 +788,9 @@ impl DiskScanApp {
                         .max_scroll_height(table_h)
                         // Scroll to the cursor row at once, without animation.
                         .animate_scrolling(false)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
                         .auto_shrink([false, true]);
                     for (i, cell) in cells.iter().enumerate() {
                         let column = match cell {

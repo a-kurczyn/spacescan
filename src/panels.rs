@@ -1077,8 +1077,8 @@ impl DiskScanApp {
         let dark = ui.visuals().dark_mode;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         let mut clicked: Option<String> = None;
-        // A solid scroll bar, beside the rows rather than over them.
-        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+        // A steady scroll bar, beside the rows rather than over them.
+        ui.spacing_mut().scroll = steady_scroll_style();
         let ext_sort = &mut self.ext_sort;
         TableBuilder::new(ui)
             .id_salt("ext_table")
