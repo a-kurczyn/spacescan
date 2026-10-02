@@ -127,13 +127,18 @@ pub(crate) fn draw_file_icon(painter: &egui::Painter, rect: egui::Rect, color: C
 }
 
 /// Scroll bars that stay on screen beside the content: wide enough to
-/// grab, with the handle always shown.
+/// grab, with a clearly visible track and a handle in the text color.
 pub(crate) fn steady_scroll_style() -> egui::style::ScrollStyle {
     egui::style::ScrollStyle {
         bar_width: 10.0,
-        handle_min_length: 24.0,
-        dormant_background_opacity: 0.3,
-        dormant_handle_opacity: 0.6,
+        handle_min_length: 40.0,
+        foreground_color: true,
+        dormant_background_opacity: 0.8,
+        active_background_opacity: 0.9,
+        interact_background_opacity: 1.0,
+        dormant_handle_opacity: 0.5,
+        active_handle_opacity: 0.7,
+        interact_handle_opacity: 0.9,
         ..egui::style::ScrollStyle::solid()
     }
 }
