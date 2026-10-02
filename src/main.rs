@@ -106,6 +106,8 @@ struct Settings {
     flat_rows: usize,
     /// The flat list shows every file (no row limit).
     flat_all: bool,
+    /// Ctrl+C / Ctrl+X also put the picked paths on the clipboard as text.
+    paths_to_clipboard: bool,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -179,6 +181,7 @@ impl Default for Settings {
             apparent_size: false,
             flat_rows: 1000,
             flat_all: false,
+            paths_to_clipboard: true,
         }
     }
 }

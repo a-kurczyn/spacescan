@@ -661,6 +661,8 @@ impl DiskScanApp {
                     .on_hover_text(tr("SETTINGS_FLAT_ROWS_HOVER"));
                     ui.checkbox(&mut s.flat_all, tr("SETTINGS_FLAT_ALL"))
                         .on_hover_text(tr("SETTINGS_FLAT_ALL_HOVER"));
+                    ui.checkbox(&mut s.paths_to_clipboard, tr("SETTINGS_PATHS_CLIPBOARD"))
+                        .on_hover_text(tr("SETTINGS_PATHS_CLIPBOARD_HOVER"));
 
                     ui.separator();
                     ui.label(tr("SETTINGS_LOG"));

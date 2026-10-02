@@ -424,17 +424,19 @@ impl DiskScanApp {
         self.transfer.job.is_some()
     }
 
-    /// Ctrl+C / Ctrl+X: remembers `paths` for Ctrl+V, and puts them on the
-    /// clipboard as text.
+    /// Ctrl+C / Ctrl+X: remembers `paths` for Ctrl+V, and (if set) puts
+    /// them on the clipboard as text.
     pub(crate) fn clip(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>, mode: ClipMode) {
         if paths.is_empty() {
             return;
         }
-        let text: Vec<String> = paths
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect();
-        ctx.copy_text(text.join("\n"));
+        if self.settings.paths_to_clipboard {
+            let text: Vec<String> = paths
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            ctx.copy_text(text.join("\n"));
+        }
         let key = match mode {
             ClipMode::Copy => "STATUS_CLIP_COPY",
             ClipMode::Move => "STATUS_CLIP_MOVE",
