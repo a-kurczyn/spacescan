@@ -8,19 +8,27 @@ use egui_extras::{Column, TableBuilder};
 const FILTER_PANEL_WIDTH: f32 = 340.0;
 const SETTINGS_PANEL_WIDTH: f32 = 320.0;
 
-/// A window over the app, first shown at its center: draggable,
-/// resizable, closed with its ×. At most 80% of the app's height, scrolling
-/// inside if need be.
-fn floating_window<'a>(ctx: &egui::Context, id: &str, title: &str, width: f32) -> egui::Window<'a> {
-    let area = ctx.content_rect();
-    egui::Window::new(title.to_string())
-        .id(egui::Id::new(id))
-        .collapsible(false)
-        .resizable(true)
-        .default_width(width)
-        .max_height(area.height() * 0.8)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(area.center())
+/// A window of its own (it can be moved anywhere, even off the app's
+/// window), titled `title`, first `size` big; `open` turns false when it's
+/// closed. Where separate windows aren't possible, it floats over the app.
+fn tool_window(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    size: [f32; 2],
+    open: &mut bool,
+    mut add_contents: impl FnMut(&mut egui::Ui),
+) {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_inner_size(size)
+        .with_min_inner_size([240.0, 200.0]);
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), viewport, |ui, _| {
+        if ui.input(|i| i.viewport().close_requested()) {
+            *open = false;
+        }
+        egui::CentralPanel::default().show(ui, |ui| add_contents(ui));
+    });
 }
 
 impl DiskScanApp {
@@ -400,183 +408,189 @@ impl DiskScanApp {
         // that match.
         if self.show_filters {
             let mut open = true;
-            floating_window(
+            // Wide enough for a label and two date fields.
+            let size = [FILTER_PANEL_WIDTH, 420.0];
+            tool_window(
                 ui.ctx(),
                 "filters_window",
                 &tr("FILTER_TITLE"),
-                FILTER_PANEL_WIDTH,
-            )
-            // Wide enough for a label and two date fields.
-            .min_width(300.0)
-            .open(&mut open)
-            .show(ui.ctx(), |ui| {
-                let mut submitted = false;
-                // A fixed-size field, checked as it's typed: an invalid value gets a red
-                // outline with the reason on hover. True when Enter was pressed.
-                let mut invalid_fields = 0;
-                let error_color = ui.visuals().error_fg_color;
-                let mut field = |ui: &mut egui::Ui,
-                                 value: &mut String,
-                                 hint: &str,
-                                 check: &dyn Fn(&str) -> Result<(), String>|
-                 -> bool {
-                    let size = Vec2::new(130.0, ui.spacing().interact_size.y);
-                    let mut r =
-                        ui.add_sized(size, egui::TextEdit::singleline(value).hint_text(hint));
-                    if value.trim().is_empty() {
-                        // empty: no limit
-                    } else if let Err(e) = check(value) {
-                        invalid_fields += 1;
-                        ui.painter().rect_stroke(
-                            r.rect,
-                            2.0,
-                            egui::Stroke::new(1.5, error_color),
-                            egui::StrokeKind::Outside,
-                        );
-                        r = r.on_hover_text(e);
-                    }
-                    r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                };
-                let size_ok = |s: &str| parse_size(s).map(|_| ());
-                let date_ok = |s: &str| parse_date(s, false).map(|_| ());
-                let f = &mut self.filter_form;
-
-                ui.label(tr("FILTER_NAME_LABEL"));
-                // The Aa toggle first; the name field fills the room left.
-                let r = ui
-                    .horizontal(|ui| {
-                        let case_tip = if f.case_sensitive {
-                            tr("FILTER_CASE_SENSITIVE")
-                        } else {
-                            tr("FILTER_CASE_INSENSITIVE")
-                        };
-                        if ui
-                            .add(egui::Button::new("Aa").selected(f.case_sensitive))
-                            .on_hover_text(case_tip)
-                            .clicked()
-                        {
-                            f.case_sensitive = !f.case_sensitive;
+                size,
+                &mut open,
+                |ui| {
+                    let mut submitted = false;
+                    // A fixed-size field, checked as it's typed: an invalid value gets a red
+                    // outline with the reason on hover. True when Enter was pressed.
+                    let mut invalid_fields = 0;
+                    let error_color = ui.visuals().error_fg_color;
+                    let mut field = |ui: &mut egui::Ui,
+                                     value: &mut String,
+                                     hint: &str,
+                                     check: &dyn Fn(&str) -> Result<(), String>|
+                     -> bool {
+                        let size = Vec2::new(130.0, ui.spacing().interact_size.y);
+                        let mut r =
+                            ui.add_sized(size, egui::TextEdit::singleline(value).hint_text(hint));
+                        if value.trim().is_empty() {
+                            // empty: no limit
+                        } else if let Err(e) = check(value) {
+                            invalid_fields += 1;
+                            ui.painter().rect_stroke(
+                                r.rect,
+                                2.0,
+                                egui::Stroke::new(1.5, error_color),
+                                egui::StrokeKind::Outside,
+                            );
+                            r = r.on_hover_text(e);
                         }
-                        ui.add(
-                            egui::TextEdit::singleline(&mut f.name)
-                                .hint_text(tr("FILTER_NAME_HINT"))
-                                .desired_width(f32::INFINITY),
-                        )
-                        .on_hover_text(tr("FILTER_NAME_HOVER"))
-                    })
-                    .inner;
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    submitted = true;
-                }
-                ui.add_space(6.0);
+                        r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    };
+                    let size_ok = |s: &str| parse_size(s).map(|_| ());
+                    let date_ok = |s: &str| parse_date(s, false).map(|_| ());
+                    let f = &mut self.filter_form;
 
-                let grid_enter = egui::Grid::new("filter_grid")
-                    .num_columns(3)
-                    .spacing([6.0, 6.0])
-                    .show(ui, |ui| {
-                        let mut enter = false;
-                        ui.label("");
-                        ui.weak(tr("FILTER_COL_FROM_MIN"));
-                        ui.weak(tr("FILTER_COL_TO_MAX"));
-                        ui.end_row();
-                        ui.label(tr("FILTER_ROW_SIZE"));
-                        enter |= field(ui, &mut f.min_size, &tr("FILTER_HINT_SIZE_MIN"), &size_ok);
-                        enter |= field(ui, &mut f.max_size, &tr("FILTER_HINT_SIZE_MAX"), &size_ok);
-                        ui.end_row();
-                        ui.label(tr("FILTER_ROW_CREATED"));
-                        enter |= field(ui, &mut f.min_created, &tr("FILTER_HINT_DATE"), &date_ok);
-                        enter |= field(ui, &mut f.max_created, &tr("FILTER_HINT_DATE"), &date_ok);
-                        ui.end_row();
-                        ui.label(tr("FILTER_ROW_MODIFIED"));
-                        enter |= field(ui, &mut f.min_modified, &tr("FILTER_HINT_DATE"), &date_ok);
-                        enter |= field(ui, &mut f.max_modified, &tr("FILTER_HINT_DATE"), &date_ok);
-                        ui.end_row();
-                        enter
-                    });
-                submitted |= grid_enter.inner;
-                ui.add_space(6.0);
-
-                let dirty = self.filter_form != self.filter_applied;
-                let valid = invalid_fields == 0;
-                let mut clear = false;
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(dirty && valid, egui::Button::new(tr("FILTER_APPLY")))
-                        .clicked()
-                    {
+                    ui.label(tr("FILTER_NAME_LABEL"));
+                    // The Aa toggle first; the name field fills the room left.
+                    let r = ui
+                        .horizontal(|ui| {
+                            let case_tip = if f.case_sensitive {
+                                tr("FILTER_CASE_SENSITIVE")
+                            } else {
+                                tr("FILTER_CASE_INSENSITIVE")
+                            };
+                            if ui
+                                .add(egui::Button::new("Aa").selected(f.case_sensitive))
+                                .on_hover_text(case_tip)
+                                .clicked()
+                            {
+                                f.case_sensitive = !f.case_sensitive;
+                            }
+                            ui.add(
+                                egui::TextEdit::singleline(&mut f.name)
+                                    .hint_text(tr("FILTER_NAME_HINT"))
+                                    .desired_width(f32::INFINITY),
+                            )
+                            .on_hover_text(tr("FILTER_NAME_HOVER"))
+                        })
+                        .inner;
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         submitted = true;
                     }
-                    if ui
-                        .add_enabled(
-                            self.filter.is_some()
-                                || self.pick.is_some()
-                                || self.filter_form != FilterForm::default(),
-                            egui::Button::new(tr("FILTER_CLEAR")),
-                        )
-                        .clicked()
-                    {
-                        clear = true;
-                    }
-                });
-                if clear {
-                    self.filter_form = FilterForm::default();
-                    self.pick = None;
-                    submitted = true;
-                } else if !valid {
-                    // Enter with an invalid field applies nothing.
-                    submitted = false;
-                }
-                if submitted {
-                    self.apply_filter_form();
-                }
+                    ui.add_space(6.0);
 
-                if !valid {
-                    // With an invalid field, say what the table is really showing.
-                    ui.colored_label(
-                        ui.visuals().error_fg_color,
-                        tr(if self.filter.is_some() {
-                            "FILTER_INVALID_KEEPS_PREVIOUS"
-                        } else {
-                            "FILTER_INVALID"
-                        }),
-                    );
-                } else if let Some(e) = &self.filter_error {
-                    ui.colored_label(ui.visuals().error_fg_color, e);
-                } else if self.filter.is_some() {
-                    match (&self.root, &self.full_root) {
-                        (Some(r), Some(full)) => {
-                            ui.label(trf(
-                                "FILTER_SHOWING",
-                                &[
-                                    &format_count(r.file_count),
-                                    &format_count(full.file_count),
-                                    &human_size(r.size),
-                                    &human_size(full.size),
-                                ],
-                            ));
-                        }
-                        _ => {
-                            ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
-                        }
-                    }
-                    if self.scanning {
-                        ui.weak(tr("FILTER_LIVE_UNFILTERED"));
-                    }
-                }
-                if let Some(pick) = &self.pick {
-                    let mut clear_category = false;
+                    let grid_enter = egui::Grid::new("filter_grid")
+                        .num_columns(3)
+                        .spacing([6.0, 6.0])
+                        .show(ui, |ui| {
+                            let mut enter = false;
+                            ui.label("");
+                            ui.weak(tr("FILTER_COL_FROM_MIN"));
+                            ui.weak(tr("FILTER_COL_TO_MAX"));
+                            ui.end_row();
+                            ui.label(tr("FILTER_ROW_SIZE"));
+                            enter |=
+                                field(ui, &mut f.min_size, &tr("FILTER_HINT_SIZE_MIN"), &size_ok);
+                            enter |=
+                                field(ui, &mut f.max_size, &tr("FILTER_HINT_SIZE_MAX"), &size_ok);
+                            ui.end_row();
+                            ui.label(tr("FILTER_ROW_CREATED"));
+                            enter |=
+                                field(ui, &mut f.min_created, &tr("FILTER_HINT_DATE"), &date_ok);
+                            enter |=
+                                field(ui, &mut f.max_created, &tr("FILTER_HINT_DATE"), &date_ok);
+                            ui.end_row();
+                            ui.label(tr("FILTER_ROW_MODIFIED"));
+                            enter |=
+                                field(ui, &mut f.min_modified, &tr("FILTER_HINT_DATE"), &date_ok);
+                            enter |=
+                                field(ui, &mut f.max_modified, &tr("FILTER_HINT_DATE"), &date_ok);
+                            ui.end_row();
+                            enter
+                        });
+                    submitted |= grid_enter.inner;
+                    ui.add_space(6.0);
+
+                    let dirty = self.filter_form != self.filter_applied;
+                    let valid = invalid_fields == 0;
+                    let mut clear = false;
                     ui.horizontal(|ui| {
-                        ui.label(trf("CAT_ACTIVE", &[&self.cats.pick_label(pick)]));
-                        clear_category = ui.small_button("×").named(&tr("CAT_CLEAR")).clicked();
+                        if ui
+                            .add_enabled(dirty && valid, egui::Button::new(tr("FILTER_APPLY")))
+                            .clicked()
+                        {
+                            submitted = true;
+                        }
+                        if ui
+                            .add_enabled(
+                                self.filter.is_some()
+                                    || self.pick.is_some()
+                                    || self.filter_form != FilterForm::default(),
+                                egui::Button::new(tr("FILTER_CLEAR")),
+                            )
+                            .clicked()
+                        {
+                            clear = true;
+                        }
                     });
-                    if clear_category {
+                    if clear {
+                        self.filter_form = FilterForm::default();
                         self.pick = None;
-                        self.rebuild_view_tree();
+                        submitted = true;
+                    } else if !valid {
+                        // Enter with an invalid field applies nothing.
+                        submitted = false;
                     }
-                }
-                ui.add_space(6.0);
-                ui.weak(tr("FILTER_HELP"));
-            });
+                    if submitted {
+                        self.apply_filter_form();
+                    }
+
+                    if !valid {
+                        // With an invalid field, say what the table is really showing.
+                        ui.colored_label(
+                            ui.visuals().error_fg_color,
+                            tr(if self.filter.is_some() {
+                                "FILTER_INVALID_KEEPS_PREVIOUS"
+                            } else {
+                                "FILTER_INVALID"
+                            }),
+                        );
+                    } else if let Some(e) = &self.filter_error {
+                        ui.colored_label(ui.visuals().error_fg_color, e);
+                    } else if self.filter.is_some() {
+                        match (&self.root, &self.full_root) {
+                            (Some(r), Some(full)) => {
+                                ui.label(trf(
+                                    "FILTER_SHOWING",
+                                    &[
+                                        &format_count(r.file_count),
+                                        &format_count(full.file_count),
+                                        &human_size(r.size),
+                                        &human_size(full.size),
+                                    ],
+                                ));
+                            }
+                            _ => {
+                                ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
+                            }
+                        }
+                        if self.scanning {
+                            ui.weak(tr("FILTER_LIVE_UNFILTERED"));
+                        }
+                    }
+                    if let Some(pick) = &self.pick {
+                        let mut clear_category = false;
+                        ui.horizontal(|ui| {
+                            ui.label(trf("CAT_ACTIVE", &[&self.cats.pick_label(pick)]));
+                            clear_category = ui.small_button("×").named(&tr("CAT_CLEAR")).clicked();
+                        });
+                        if clear_category {
+                            self.pick = None;
+                            self.rebuild_view_tree();
+                        }
+                    }
+                    ui.add_space(6.0);
+                    ui.weak(tr("FILTER_HELP"));
+                },
+            );
             if !open {
                 self.show_filters = false;
             }
@@ -588,95 +602,97 @@ impl DiskScanApp {
         let mut lang_problem = None;
         if self.show_settings {
             let mut open = true;
-            floating_window(
+            let size = [SETTINGS_PANEL_WIDTH, 620.0];
+            tool_window(
                 ui.ctx(),
                 "settings_window",
                 &tr("SETTINGS_TITLE"),
-                SETTINGS_PANEL_WIDTH,
-            )
-            .min_width(240.0)
-            .open(&mut open)
-            .show(ui.ctx(), |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let s = &mut self.settings;
+                size,
+                &mut open,
+                |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let s = &mut self.settings;
 
-                    ui.label(tr("SETTINGS_DEPTH_GROUPING"));
-                    ui.add(
-                        egui::Slider::new(&mut s.max_render_depth, Settings::DEPTH)
-                            .text(tr("SETTINGS_DEPTH_LEVELS")),
-                    );
-                    ui.add_enabled(
-                        !s.unlimited_slices,
-                        egui::Slider::new(&mut s.min_segment_angle_deg, Settings::MIN_ANGLE)
-                            .text(tr("SETTINGS_MIN_SLICE_ANGLE")),
-                    );
-                    ui.add_enabled(
-                        !s.unlimited_slices,
-                        egui::Slider::new(&mut s.max_children_shown, Settings::MAX_CHILDREN)
-                            .text(tr("SETTINGS_MAX_SLICES")),
-                    );
-                    ui.checkbox(&mut s.unlimited_slices, tr("SETTINGS_UNLIMITED_SLICES"))
-                        .on_hover_text(tr("SETTINGS_UNLIMITED_SLICES_HOVER"));
-                    ui.add(
-                        egui::Slider::new(&mut s.hub_radius_frac, Settings::HUB)
-                            .text(tr("SETTINGS_HUB_SIZE")),
-                    );
+                        ui.label(tr("SETTINGS_DEPTH_GROUPING"));
+                        ui.add(
+                            egui::Slider::new(&mut s.max_render_depth, Settings::DEPTH)
+                                .text(tr("SETTINGS_DEPTH_LEVELS")),
+                        );
+                        ui.add_enabled(
+                            !s.unlimited_slices,
+                            egui::Slider::new(&mut s.min_segment_angle_deg, Settings::MIN_ANGLE)
+                                .text(tr("SETTINGS_MIN_SLICE_ANGLE")),
+                        );
+                        ui.add_enabled(
+                            !s.unlimited_slices,
+                            egui::Slider::new(&mut s.max_children_shown, Settings::MAX_CHILDREN)
+                                .text(tr("SETTINGS_MAX_SLICES")),
+                        );
+                        ui.checkbox(&mut s.unlimited_slices, tr("SETTINGS_UNLIMITED_SLICES"))
+                            .on_hover_text(tr("SETTINGS_UNLIMITED_SLICES_HOVER"));
+                        ui.add(
+                            egui::Slider::new(&mut s.hub_radius_frac, Settings::HUB)
+                                .text(tr("SETTINGS_HUB_SIZE")),
+                        );
 
-                    ui.separator();
-                    ui.label(tr("SETTINGS_COLORS"));
-                    ui.add(
-                        egui::Slider::new(&mut s.age_days, Settings::AGE_DAYS)
-                            .logarithmic(true)
-                            .text(tr("SETTINGS_AGE_DAYS")),
-                    )
-                    .on_hover_text(tr("SETTINGS_AGE_DAYS_HOVER"));
-                    ui.add(
-                        egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
-                            .text(tr("SETTINGS_FREE_GAMMA")),
-                    );
+                        ui.separator();
+                        ui.label(tr("SETTINGS_COLORS"));
+                        ui.add(
+                            egui::Slider::new(&mut s.age_days, Settings::AGE_DAYS)
+                                .logarithmic(true)
+                                .text(tr("SETTINGS_AGE_DAYS")),
+                        )
+                        .on_hover_text(tr("SETTINGS_AGE_DAYS_HOVER"));
+                        ui.add(
+                            egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
+                                .text(tr("SETTINGS_FREE_GAMMA")),
+                        );
 
-                    ui.separator();
-                    ui.label(tr("SETTINGS_LINE_RENDERING"));
-                    ui.add(
-                        egui::Slider::new(&mut s.stroke_width, Settings::STROKE_WIDTH)
-                            .text(tr("SETTINGS_BORDER_THICKNESS")),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut s.stroke_alpha, 0..=255)
-                            .text(tr("SETTINGS_BORDER_DARKNESS")),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut s.tess_px_per_step, Settings::TESS)
-                            .text(tr("SETTINGS_CURVE_SMOOTH")),
-                    );
+                        ui.separator();
+                        ui.label(tr("SETTINGS_LINE_RENDERING"));
+                        ui.add(
+                            egui::Slider::new(&mut s.stroke_width, Settings::STROKE_WIDTH)
+                                .text(tr("SETTINGS_BORDER_THICKNESS")),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut s.stroke_alpha, 0..=255)
+                                .text(tr("SETTINGS_BORDER_DARKNESS")),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut s.tess_px_per_step, Settings::TESS)
+                                .text(tr("SETTINGS_CURVE_SMOOTH")),
+                        );
 
-                    ui.separator();
-                    ui.label(tr("SETTINGS_TABLE"));
-                    ui.add_enabled(
-                        !s.flat_all,
-                        egui::Slider::new(&mut s.flat_rows, Settings::FLAT_ROWS)
-                            .logarithmic(true)
-                            .text(tr("SETTINGS_FLAT_ROWS")),
-                    )
-                    .on_hover_text(tr("SETTINGS_FLAT_ROWS_HOVER"));
-                    ui.checkbox(&mut s.flat_all, tr("SETTINGS_FLAT_ALL"))
-                        .on_hover_text(tr("SETTINGS_FLAT_ALL_HOVER"));
-                    ui.checkbox(&mut s.paths_to_clipboard, tr("SETTINGS_PATHS_CLIPBOARD"))
-                        .on_hover_text(tr("SETTINGS_PATHS_CLIPBOARD_HOVER"));
+                        ui.separator();
+                        ui.label(tr("SETTINGS_TABLE"));
+                        ui.add_enabled(
+                            !s.flat_all,
+                            egui::Slider::new(&mut s.flat_rows, Settings::FLAT_ROWS)
+                                .logarithmic(true)
+                                .text(tr("SETTINGS_FLAT_ROWS")),
+                        )
+                        .on_hover_text(tr("SETTINGS_FLAT_ROWS_HOVER"));
+                        ui.checkbox(&mut s.flat_all, tr("SETTINGS_FLAT_ALL"))
+                            .on_hover_text(tr("SETTINGS_FLAT_ALL_HOVER"));
+                        ui.checkbox(&mut s.paths_to_clipboard, tr("SETTINGS_PATHS_CLIPBOARD"))
+                            .on_hover_text(tr("SETTINGS_PATHS_CLIPBOARD_HOVER"));
 
-                    ui.separator();
-                    ui.label(tr("SETTINGS_LOG"));
-                    ui.add(
-                        egui::Slider::new(&mut s.max_log_lines, Settings::LOG_LINES)
-                            .text(tr("SETTINGS_MAX_LOG_LINES")),
-                    );
+                        ui.separator();
+                        ui.label(tr("SETTINGS_LOG"));
+                        ui.add(
+                            egui::Slider::new(&mut s.max_log_lines, Settings::LOG_LINES)
+                                .text(tr("SETTINGS_MAX_LOG_LINES")),
+                        );
 
-                    ui.separator();
-                    ui.label(tr("SETTINGS_SCANNING"));
-                    ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
-                        .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
-                    ui.add(
-                        egui::Slider::new(&mut s.progress_interval_pow2, Settings::PROGRESS_POW2)
+                        ui.separator();
+                        ui.label(tr("SETTINGS_SCANNING"));
+                        ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
+                            .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
+                        ui.add(
+                            egui::Slider::new(
+                                &mut s.progress_interval_pow2,
+                                Settings::PROGRESS_POW2,
+                            )
                             .custom_formatter(|v, _| format!("{}", 1u64 << (v as u32)))
                             .custom_parser(|s| {
                                 s.parse::<u64>().ok().map(|v| {
@@ -684,34 +700,35 @@ impl DiskScanApp {
                                 })
                             })
                             .text(tr("SETTINGS_PROGRESS_INTERVAL")),
-                    );
+                        );
 
-                    ui.separator();
-                    if ui.button(tr("SETTINGS_DEFAULTS")).clicked() {
-                        *s = Settings::default();
-                    }
+                        ui.separator();
+                        if ui.button(tr("SETTINGS_DEFAULTS")).clicked() {
+                            *s = Settings::default();
+                        }
 
-                    ui.separator();
-                    ui.label(tr("SETTINGS_LANGUAGE"));
-                    let langs = available_languages();
-                    let current = current_lang_code();
-                    let current_name = langs
-                        .iter()
-                        .find(|(c, _)| *c == current)
-                        .map(|(_, n)| n.clone())
-                        .unwrap_or_else(|| current.clone());
-                    egui::ComboBox::from_id_salt("lang_combo")
-                        .selected_text(current_name)
-                        .show_ui(ui, |ui| {
-                            for (code, name) in &langs {
-                                if ui.selectable_label(*code == current, name).clicked() {
-                                    set_language(code);
-                                    lang_problem = lang_file_problem(code);
+                        ui.separator();
+                        ui.label(tr("SETTINGS_LANGUAGE"));
+                        let langs = available_languages();
+                        let current = current_lang_code();
+                        let current_name = langs
+                            .iter()
+                            .find(|(c, _)| *c == current)
+                            .map(|(_, n)| n.clone())
+                            .unwrap_or_else(|| current.clone());
+                        egui::ComboBox::from_id_salt("lang_combo")
+                            .selected_text(current_name)
+                            .show_ui(ui, |ui| {
+                                for (code, name) in &langs {
+                                    if ui.selectable_label(*code == current, name).clicked() {
+                                        set_language(code);
+                                        lang_problem = lang_file_problem(code);
+                                    }
                                 }
-                            }
-                        });
-                });
-            });
+                            });
+                    });
+                },
+            );
             if !open {
                 self.show_settings = false;
             }
