@@ -1657,13 +1657,11 @@ impl DiskScanApp {
         }
     }
 
-    /// Space: marks/unmarks the cursor row and moves down, like ncdu.
+    /// Space: marks or unmarks the cursor row; the cursor stays.
     fn toggle_mark(&mut self) {
-        let Some(c) = self.table.cursor.clone() else {
-            return;
-        };
-        self.toggle_mark_of(c);
-        self.move_cursor(1);
+        if let Some(c) = self.table.cursor.clone() {
+            self.toggle_mark_of(c);
+        }
     }
 
     fn toggle_mark_of(&mut self, path: PathBuf) {
