@@ -375,6 +375,84 @@ pub(crate) fn free_name(path: &Path) -> PathBuf {
         .expect("some number is free")
 }
 
+/// `path` as a file:// link, with anything but plain characters escaped.
+fn file_uri(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut uri = String::from("file://");
+    for &b in path.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    uri
+}
+
+/// True on a Wayland desktop, where clipboard formats can be chosen freely.
+fn on_wayland() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+/// Puts `paths` on the system clipboard as files (as file managers copy
+/// them, marked as cut after Ctrl+X, the way KDE and GNOME mark it) and as
+/// text. False if that failed.
+fn offer_on_clipboard(paths: &[PathBuf], mode: ClipMode) -> bool {
+    let uris: Vec<String> = paths.iter().map(|p| file_uri(p)).collect();
+    if !on_wayland() {
+        // Elsewhere, the files only.
+        return arboard::Clipboard::new()
+            .and_then(|mut c| c.set().file_list(paths))
+            .is_ok();
+    }
+    use wl_clipboard_rs::copy::{MimeSource, MimeType, Options, Source};
+    let cut = mode == ClipMode::Move;
+    let text: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let offer = |data: String, mime_type: MimeType| MimeSource {
+        source: Source::Bytes(data.into_bytes().into_boxed_slice()),
+        mime_type,
+    };
+    let specific = |m: &str| MimeType::Specific(m.to_string());
+    let sources = vec![
+        offer(uris.join("\r\n") + "\r\n", specific("text/uri-list")),
+        offer(
+            format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n")),
+            specific("x-special/gnome-copied-files"),
+        ),
+        offer(
+            (if cut { "1" } else { "0" }).to_string(),
+            specific("application/x-kde-cutselection"),
+        ),
+        offer(text.join("\n"), MimeType::Text),
+    ];
+    Options::new().copy_multi(sources).is_ok()
+}
+
+/// True if the files on the system clipboard were cut (to be moved), going
+/// by KDE's or GNOME's mark.
+fn clipboard_cut() -> bool {
+    if !on_wayland() {
+        return false;
+    }
+    use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents};
+    let read = |mime: &str| -> Option<String> {
+        let (mut pipe, _) = get_contents(
+            ClipboardType::Regular,
+            Seat::Unspecified,
+            MimeType::Specific(mime),
+        )
+        .ok()?;
+        let mut data = String::new();
+        std::io::Read::read_to_string(&mut pipe, &mut data).ok()?;
+        Some(data)
+    };
+    read("application/x-kde-cutselection").is_some_and(|d| d.trim() == "1")
+        || read("x-special/gnome-copied-files").is_some_and(|d| d.lines().next() == Some("cut"))
+}
+
 /// The files on the system clipboard as a file list (what file managers
 /// copy), if any.
 fn clipboard_files() -> Option<Vec<PathBuf>> {
@@ -394,6 +472,15 @@ fn clipboard_files() -> Option<Vec<PathBuf>> {
         })
         .collect();
     (!files.is_empty()).then_some(files)
+}
+
+/// How to paste files copied in another program: a move if they were cut.
+fn external_mode() -> ClipMode {
+    if clipboard_cut() {
+        ClipMode::Move
+    } else {
+        ClipMode::Copy
+    }
 }
 
 /// The files in pasted text, if every line names an existing file or
@@ -484,12 +571,13 @@ impl DiskScanApp {
     }
 
     /// Ctrl+C / Ctrl+X: remembers `paths` for Ctrl+V, and (if set) puts
-    /// them on the clipboard as text.
+    /// them on the system clipboard, for file managers and as text.
     pub(crate) fn clip(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>, mode: ClipMode) {
         if paths.is_empty() {
             return;
         }
-        if self.settings.paths_to_clipboard {
+        if self.settings.paths_to_clipboard && !offer_on_clipboard(&paths, mode) {
+            // At least as text.
             let text: Vec<String> = paths
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
@@ -519,10 +607,10 @@ impl DiskScanApp {
             (Some(clip), Some(copied))
                 if self.settings.paths_to_clipboard && copied != clip.paths =>
             {
-                (copied, ClipMode::Copy)
+                (copied, external_mode())
             }
             (Some(clip), _) => (clip.paths.clone(), clip.mode),
-            (None, Some(copied)) => (copied, ClipMode::Copy),
+            (None, Some(copied)) => (copied, external_mode()),
             (None, None) => {
                 self.status = tr("STATUS_PASTE_NOTHING");
                 return;
