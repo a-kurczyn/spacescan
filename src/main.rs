@@ -22,6 +22,7 @@ mod panels;
 mod scan;
 mod table;
 mod theme;
+mod transfer;
 mod widgets;
 use category::*;
 use chart::*;
@@ -32,6 +33,7 @@ use look::*;
 use scan::*;
 use table::{Graft, SidePanel, TableState};
 use theme::*;
+use transfer::ClipMode;
 use widgets::*;
 
 #[derive(Clone)]
@@ -253,6 +255,11 @@ struct DiskScanApp {
     korean_font: bool,
     /// Pending deletes and their confirmation (see delete.rs).
     removal: delete::Removal,
+    /// Copy and move (Ctrl+C / Ctrl+X, then Ctrl+V).
+    transfer: transfer::Transfer,
+    /// The status line to show when the folder rescan running now ends,
+    /// instead of the scan time.
+    status_after_rescan: Option<String>,
     /// Item the chart's right-click menu acts on, fixed when it opens.
     context_target: Option<PathBuf>,
     summary_view: bool,
@@ -327,6 +334,8 @@ impl Default for DiskScanApp {
             hovered: None,
             context_target: None,
             removal: Default::default(),
+            transfer: Default::default(),
+            status_after_rescan: None,
             saw_hangul: Default::default(),
             korean_font: false,
             unreadable: Vec::new(),
@@ -437,6 +446,7 @@ impl DiskScanApp {
     }
 
     fn start_scan(&mut self, path: PathBuf) {
+        self.status_after_rescan = None;
         // The canonical path, so no "..", "./" or doubled slashes show up.
         let path = true_case(&std::fs::canonicalize(&path).unwrap_or(path));
         // Any new scan supersedes a pending folder rescan ("r").
@@ -879,7 +889,9 @@ impl DiskScanApp {
                             self.rebuild_view_tree();
                         }
                         self.scanning = false;
-                        self.status = trf("STATUS_SCAN_COMPLETED", &[&format!("{:.1}", secs)]);
+                        self.status = self.status_after_rescan.take().unwrap_or_else(|| {
+                            trf("STATUS_SCAN_COMPLETED", &[&format!("{:.1}", secs)])
+                        });
                         self.scan_rx = None;
                         self.scan_ended();
                         break;
@@ -1035,6 +1047,17 @@ impl eframe::App for DiskScanApp {
             if typed.contains('r') {
                 self.rescan_current();
             }
+            // Ctrl+C / Ctrl+X take the selected slice; Ctrl+V pastes into the
+            // folder shown.
+            let (copy, cut, paste) = clipboard_events(&ctx);
+            if let Some(target) = self.selected_slice_path().filter(|_| copy || cut) {
+                let mode = if cut { ClipMode::Move } else { ClipMode::Copy };
+                self.clip(&ctx, vec![target], mode);
+            }
+            if let (Some(text), Some(root)) = (paste, self.root.clone()) {
+                let dest = self.current_view_node(&root).path.clone();
+                self.paste_into(dest, &text);
+            }
             if (typed.contains('D') || typed.contains('T'))
                 && let Some(target) = self.selected_slice_path()
             {
@@ -1047,7 +1070,24 @@ impl eframe::App for DiskScanApp {
             }
         }
         self.confirm_dialog(&ctx);
+        self.transfer_ui(&ctx);
     }
+}
+
+/// This frame's Ctrl+C, Ctrl+X, and Ctrl+V (with the pasted text).
+fn clipboard_events(ctx: &egui::Context) -> (bool, bool, Option<String>) {
+    ctx.input(|i| {
+        let mut found = (false, false, None);
+        for e in &i.events {
+            match e {
+                egui::Event::Copy => found.0 = true,
+                egui::Event::Cut => found.1 = true,
+                egui::Event::Paste(text) => found.2 = Some(text.clone()),
+                _ => {}
+            }
+        }
+        found
+    })
 }
 
 /// Hides one harmless panic: with no accessibility service running, the

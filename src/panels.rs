@@ -1844,6 +1844,26 @@ impl DiskScanApp {
                 self.hidden.insert(target.clone());
                 ui.close();
             }
+            // Like Ctrl+C, Ctrl+X and Ctrl+V.
+            if ui.button(tr("MENU_COPY")).clicked() {
+                self.clip(&ctx, vec![target.clone()], ClipMode::Copy);
+                ui.close();
+            }
+            if ui.button(tr("MENU_CUT")).clicked() {
+                self.clip(&ctx, vec![target.clone()], ClipMode::Move);
+                ui.close();
+            }
+            if target.is_dir()
+                && ui
+                    .add_enabled(
+                        self.transfer.clip.is_some(),
+                        egui::Button::new(tr("MENU_PASTE_INTO")),
+                    )
+                    .clicked()
+            {
+                self.paste_into(target.clone(), "");
+                ui.close();
+            }
             // Like T and D; a permanent delete asks first.
             if ui.button(tr("MENU_TRASH")).clicked() {
                 self.queue_trash(vec![target.clone()]);

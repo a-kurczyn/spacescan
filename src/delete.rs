@@ -24,7 +24,7 @@ fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
 /// Err (for the Issues log) if deleting or trashing `path` would touch a
 /// mounted filesystem: it is a mount point, or has one somewhere inside.
 /// A symlink is only ever removed itself, so it's always fine.
-fn mount_guard(path: &Path) -> Result<(), String> {
+pub(crate) fn mount_guard(path: &Path) -> Result<(), String> {
     match std::fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_symlink() => return Ok(()),
         Ok(m) if !m.is_dir() => return Ok(()),
@@ -78,7 +78,7 @@ fn trash_reason(e: &trash::Error) -> String {
 /// Like `remove_dir_all`, but stops with an error at a folder where another
 /// filesystem is mounted (one of `mounts`), and works in trees deeper than
 /// the path length limit. btrfs subvolumes inside are removed like folders.
-fn remove_dir_one_fs(dir: &Path, mounts: &HashSet<PathBuf>) -> std::io::Result<()> {
+pub(crate) fn remove_dir_one_fs(dir: &Path, mounts: &HashSet<PathBuf>) -> std::io::Result<()> {
     remove_dir_in(dir, &None, mounts)
 }
 
@@ -553,7 +553,7 @@ impl DiskScanApp {
 
     /// Drops `gone` from the scanned tree in place, keeping the view (and
     /// the table's cursor) where they were as far as possible.
-    fn drop_from_tree(&mut self, gone: &[PathBuf]) {
+    pub(crate) fn drop_from_tree(&mut self, gone: &[PathBuf]) {
         if gone.is_empty() {
             return;
         }

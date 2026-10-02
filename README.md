@@ -79,9 +79,10 @@ trash or delete it. In the table, the main keys are:
 | ⬅ / Backspace | Parent folder |
 | `/` | Jump to a name |
 | `l` | Flat list of files from all subfolders, or back to folders |
-| `s` `n` `f` `m` `c` `p` | Sort by size / name / files / modified / changed / permissions |
+| `s` `n` `f` `m` `c` `a` | Sort by size / name / files / modified / changed / permissions (access) |
 | Space | Mark a row |
 | `T` / `D` | Move to the trash / delete permanently (asks first) |
+| Ctrl+C / Ctrl+X, Ctrl+V | Copy / cut, then paste into the folder shown (asks on name clashes) |
 | `r` | Rescan this folder |
 | `?` | All keyboard shortcuts |
 

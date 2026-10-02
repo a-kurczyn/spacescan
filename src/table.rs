@@ -504,6 +504,9 @@ const HELP_ROWS: &[(&str, &[(&str, &str)])] = &[
             ("HELP_KEYS_MARK", "HELP_MARK"),
             ("HELP_KEYS_DELETE", "HELP_DELETE"),
             ("HELP_KEYS_TRASH", "HELP_TRASH"),
+            ("HELP_KEYS_COPY", "HELP_COPY"),
+            ("HELP_KEYS_CUT", "HELP_CUT"),
+            ("HELP_KEYS_PASTE", "HELP_PASTE"),
             ("HELP_KEYS_RESCAN", "HELP_RESCAN"),
             ("HELP_KEYS_INFO", "HELP_INFO"),
             ("HELP_KEYS_ESC", "HELP_ESC"),
@@ -702,6 +705,16 @@ impl DiskScanApp {
                             &human_size(size)
                         ]
                     )
+                ));
+            }
+            if let Some(clip) = &self.transfer.clip {
+                let key = match clip.mode {
+                    ClipMode::Copy => "TABLE_TAG_CLIP_COPY",
+                    ClipMode::Move => "TABLE_TAG_CLIP_MOVE",
+                };
+                ui.weak(format!(
+                    "· {}",
+                    trf(key, &[&format_count(clip.paths.len() as u64)])
                 ));
             }
             if self.scanning {
@@ -1382,12 +1395,12 @@ impl DiskScanApp {
                 'f' => self.sort_by(SortColumn::Files),
                 'm' => self.sort_by(SortColumn::Modified),
                 'c' => self.sort_by(SortColumn::Changed),
-                'p' => self.sort_by(SortColumn::Perms),
+                'a' => self.sort_by(SortColumn::Perms),
                 'S' => self.toggle_col(TableCol::Size),
                 'F' => self.toggle_col(TableCol::Files),
                 'M' => self.toggle_col(TableCol::Modified),
                 'C' => self.toggle_col(TableCol::Changed),
-                'P' => self.toggle_col(TableCol::Perms),
+                'A' => self.toggle_col(TableCol::Perms),
                 '%' => self.toggle_col(TableCol::Percent),
                 '<' => self.move_col(false),
                 '>' => self.move_col(true),
@@ -1409,13 +1422,28 @@ impl DiskScanApp {
                     self.table.jump = Some(String::new());
                     self.table.jump_focus_pending = true;
                 }
+                'D' if self.transfer_busy() => self.status = tr("STATUS_TRANSFER_BUSY"),
                 'D' => self.request_delete(),
                 'T' if self.scanning => {}
+                'T' if self.transfer_busy() => self.status = tr("STATUS_TRANSFER_BUSY"),
                 'T' => {
                     self.queue_trash(self.selected_targets());
                     ctx.request_repaint();
                 }
                 _ => {}
+            }
+        }
+        // Ctrl+C / Ctrl+X take the marked rows (or the cursor row); Ctrl+V
+        // pastes into the folder shown. Not while scanning.
+        let (copy, cut, paste) = clipboard_events(ctx);
+        if !self.scanning {
+            if copy || cut {
+                let mode = if cut { ClipMode::Move } else { ClipMode::Copy };
+                self.clip(ctx, self.selected_targets(), mode);
+            }
+            if let (Some(text), Some(root)) = (paste, self.root.clone()) {
+                let dest = self.current_view_node(&root).path.clone();
+                self.paste_into(dest, &text);
             }
         }
     }
@@ -1692,6 +1720,15 @@ impl DiskScanApp {
             return;
         };
         let target = self.current_view_node(&root).path.clone();
+        self.rescan_folder(target);
+    }
+
+    /// Rescans folder `target` of the tree; the result is spliced in when
+    /// done, keeping the view where it is.
+    pub(crate) fn rescan_folder(&mut self, target: PathBuf) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         let graft = Graft {
             target: target.clone(),
             view_paths: self.view_paths(&root),
