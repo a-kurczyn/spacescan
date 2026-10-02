@@ -274,6 +274,8 @@ pub(crate) struct TableState {
     pub cursor: Option<PathBuf>,
     /// Where `cursor` was last found in the rows (see `find_cursor`).
     cursor_pos: std::cell::Cell<Option<usize>>,
+    /// The contents table's egui id, as last drawn.
+    table_id: std::cell::Cell<Option<egui::Id>>,
     /// Row order as last computed (see `OrderKey`).
     order: Option<RowOrder>,
     /// Scroll the table to the cursor row on the next draw.
@@ -310,6 +312,7 @@ impl Default for TableState {
             cursor: None,
             order: None,
             cursor_pos: Default::default(),
+            table_id: Default::default(),
             scroll_pending: false,
             page_rows: 10,
             dirs_first: false,
@@ -637,6 +640,7 @@ impl DiskScanApp {
         // ...and its size bar gets a track in the window background color.
         let panel_bg = ui.visuals().panel_fill;
         let marked = &self.table.marked;
+        let table_id_out = &self.table.table_id;
 
         let mut clicked: Option<usize> = None;
         let mut double_clicked: Option<usize> = None;
@@ -669,8 +673,21 @@ impl DiskScanApp {
             if show_info {
                 ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
             }
+            let table_salt = ("contents_table", layout_key.join(","));
+            // A double-click on the divider after a column fits it to its
+            // widest visible cell.
+            // The id the table gives its state (it turns its salt into an IdSalt).
+            let table_id = ui.id().with(egui::IdSalt::new(&table_salt));
+            table_id_out.set(Some(table_id));
+            let fit: Vec<bool> = (0..cells.len())
+                .map(|i| {
+                    ui.ctx()
+                        .read_response(table_id.with("resize_column").with(i))
+                        .is_some_and(|r| r.double_clicked())
+                })
+                .collect();
             let mut tb = TableBuilder::new(ui)
-                .id_salt(("contents_table", layout_key.join(",")))
+                .id_salt(table_salt.clone())
                 .striped(true)
                 .resizable(true)
                 .sense(egui::Sense::click())
@@ -680,13 +697,14 @@ impl DiskScanApp {
                 // Scroll to the cursor row at once, without animation.
                 .animate_scrolling(false)
                 .auto_shrink([false, true]);
-            for cell in &cells {
-                tb = tb.column(match cell {
+            for (i, cell) in cells.iter().enumerate() {
+                let column = match cell {
                     Cell::Mark => Column::exact(12.0),
                     Cell::Opt(TableCol::Bar) => Column::exact(92.0),
                     Cell::Opt(_) => Column::auto().at_least(40.0),
                     Cell::Name => Column::remainder().at_least(120.0),
-                });
+                };
+                tb = tb.column(column.auto_size_this_frame(fit[i]));
             }
             if let (true, Some(r)) = (scroll_to_cursor, cursor_row) {
                 tb = tb.scroll_to_row(r, None);
@@ -1728,6 +1746,54 @@ mod flat_tests {
         assert_eq!(draw(&mut app), ["a.eml"]);
         app.table.flat = false;
         assert_eq!(draw(&mut app), ["d"]);
+    }
+
+    /// A double-click on a column divider reaches the table.
+    #[test]
+    fn double_clicking_a_divider_is_seen() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        app.full_root = Some(Arc::new(tree()));
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        let run = |app: &mut DiskScanApp, events: Vec<egui::Event>| {
+            let raw = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(raw, |ui| {
+                let root = app.root.clone().unwrap();
+                app.table_ui(ui, &root, 400.0);
+            });
+        };
+        // The first frame only measures the columns.
+        run(&mut app, vec![]);
+        run(&mut app, vec![]);
+        // Columns: mark, bar (fixed width), then %: its divider is the third.
+        let divider = app
+            .table
+            .table_id
+            .get()
+            .unwrap()
+            .with("resize_column")
+            .with(2usize);
+        let at = ctx
+            .read_response(divider)
+            .expect("divider drawn")
+            .rect
+            .center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(&mut app, vec![egui::Event::PointerMoved(at)]);
+        run(&mut app, vec![press(true), press(false)]);
+        run(&mut app, vec![press(true), press(false)]);
+        assert!(ctx.read_response(divider).unwrap().double_clicked());
     }
 
     #[test]
