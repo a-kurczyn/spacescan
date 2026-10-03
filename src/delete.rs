@@ -765,6 +765,7 @@ mod tests {
         // Scan.
         let (tx, rx) = channel();
         std::thread::spawn(move || for _ in rx {});
+        let live = LiveTree::new(Arc::new(CategoryModel::defaults()));
         let ctx = ScanCtx {
             mounts: &HashSet::new(),
             progress: &tx,
@@ -775,7 +776,7 @@ mod tests {
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
             in_file_order: false,
-            live: None,
+            live: Some(&live),
         };
         let tree = scan_dir(&top, &ctx);
         assert_eq!(tree.file_count, files);
@@ -784,11 +785,12 @@ mod tests {
             Some(10)
         );
 
-        // Live-preview graft of the deepest folder.
-        let mut partial = empty_node();
-        partial.path = top.clone();
-        graft_slice(&mut partial, &bottom, 10, 1, 0, 0, 0, 0, 0);
+        // The live tree, read in full and as the chart shows it.
+        let mut looks = LiveLooks::default();
+        let partial = live.snapshot(usize::MAX, 0.0, &mut looks).unwrap();
+        assert_eq!(partial.file_count, files);
         assert!(find_node(&partial, &bottom).is_some());
+        assert!(live.snapshot(12, 1.3 / 360.0, &mut looks).is_some());
 
         // Categories, filter, clone.
         let cats = CategoryModel::defaults();
@@ -821,6 +823,7 @@ mod tests {
         assert_eq!(copy.file_count, files - 1);
         drop(copy);
         drop(partial);
+        drop(live);
         drop(tree);
 
         // Delete from disk.

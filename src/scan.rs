@@ -216,88 +216,6 @@ pub(crate) fn empty_node() -> Node {
 /// `target_path`, creating the folders above it as needed. Each folder
 /// above gets the sum of what's known so far, until its own totals arrive.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn graft_slice(
-    node: &mut Node,
-    target_path: &Path,
-    size: u64,
-    file_count: u64,
-    mode: u32,
-    mtime: i64,
-    ctime: i64,
-    uid: u32,
-    gid: u32,
-) {
-    let Ok(rel) = target_path.strip_prefix(&node.path) else {
-        return; // not inside `node`
-    };
-    // Split once, so each level compares just one name.
-    let parts: Vec<&std::ffi::OsStr> = rel.components().map(|c| c.as_os_str()).collect();
-    graft_at(node, &parts, &|n: &mut Node| {
-        n.size = size;
-        n.file_count = file_count;
-        n.mode = mode;
-        n.mtime = mtime;
-        n.ctime = ctime;
-        n.uid = uid;
-        n.gid = gid;
-    });
-}
-
-/// `graft_slice` one level down: `rest` are the remaining path components
-/// to the target folder, `set` fills in its values.
-fn graft_at(node: &mut Node, rest: &[&std::ffi::OsStr], set: &dyn Fn(&mut Node)) {
-    let Some((first, rest)) = rest.split_first() else {
-        set(node);
-        return;
-    };
-    // Compare last path components as bytes: fast on wide folders.
-    let idx = match node
-        .children
-        .iter()
-        .position(|c| c.path.file_name() == Some(*first))
-    {
-        Some(i) => i,
-        None => {
-            let mut child = empty_node();
-            child.name = show_os(first);
-            child.path = node.path.join(first);
-            child.is_dir = true;
-            node.children.push(child);
-            node.children.len() - 1
-        }
-    };
-    deep(|| graft_at(&mut node.children[idx], rest, set));
-    node.size = node
-        .children
-        .iter()
-        .fold(0u64, |t, c| t.saturating_add(c.size));
-    node.file_count = node
-        .children
-        .iter()
-        .fold(0u64, |t, c| t.saturating_add(c.file_count));
-    // Only children[idx] changed: move it into place instead of re-sorting.
-    reposition_by_size(&mut node.children, idx);
-}
-
-/// Restores descending-by-size order after only `children[idx]` changed,
-/// giving the same result as a stable sort: equal-sized siblings keep their
-/// original order relative to the moved child.
-pub(crate) fn reposition_by_size(children: &mut [Node], idx: usize) {
-    let size = children[idx].size;
-    // Moving up: pass earlier siblings that are smaller; equal ones stay ahead.
-    let dest = children[..idx].partition_point(|c| c.size >= size);
-    if dest < idx {
-        children[dest..=idx].rotate_right(1);
-        return;
-    }
-    // Moving down: pass later siblings that are larger; equal ones stay behind.
-    let after = &children[idx + 1..];
-    let dest = idx + after.partition_point(|c| c.size > size);
-    if dest > idx {
-        children[idx..=dest].rotate_left(1);
-    }
-}
-
 pub(crate) fn file_name_of(p: &Path) -> String {
     p.file_name().map(show_os).unwrap_or_else(|| show_path(p))
 }
@@ -546,8 +464,8 @@ pub(crate) struct ScanCtx<'a> {
     /// Read each folder's entries in file-number order (for spinning disks,
     /// see `is_rotational`).
     pub(crate) in_file_order: bool,
-    /// The live chart's counters, updated for every file read.
-    pub(crate) live: Option<&'a LiveCounters>,
+    /// The live tree, updated for every folder and file read.
+    pub(crate) live: Option<&'a LiveTree>,
 }
 
 impl ScanCtx<'_> {
@@ -604,7 +522,7 @@ pub(crate) fn scan_entry(
     parent: &Path,
     dir: &DirHandle,
     ctx: &ScanCtx,
-    place: LivePlace,
+    live_parent: Option<&LiveFolder>,
 ) -> Node {
     let ScanCtx {
         mounts,
@@ -651,11 +569,7 @@ pub(crate) fn scan_entry(
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
                 }
             } else {
-                let place = LivePlace {
-                    depth: place.depth + 1,
-                    ..place
-                };
-                deep(|| scan_dir_in(&p, name, meta, dir, ctx, place))
+                deep(|| scan_dir_in(&p, name, meta, dir, ctx, live_parent))
             }
         }
         _ => {
@@ -716,31 +630,27 @@ fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
 }
 
 pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
-    let place = LivePlace {
-        depth: 0,
-        chain: None,
-    };
     scan_dir_in(
         path,
         file_name_of(path),
         std::fs::metadata(path).ok(),
         &None,
         ctx,
-        place,
+        None,
     )
 }
 
 /// Scans `path`, whose parent folder is open as `parent` when the path is
 /// long (see `DirHandle`).
-/// `name` is its name as shown, `self_meta` its details, `place` where it
-/// is for the live counters.
+/// `name` is its name as shown, `self_meta` its details, `live_parent` its
+/// parent in the live tree (None: the scanned folder).
 fn scan_dir_in(
     path: &Path,
     name: String,
     self_meta: Option<std::fs::Metadata>,
     parent: &DirHandle,
     ctx: &ScanCtx,
-    place: LivePlace,
+    live_parent: Option<&LiveFolder>,
 ) -> Node {
     let ScanCtx {
         progress, cancel, ..
@@ -801,49 +711,40 @@ fn scan_dir_in(
         use std::os::unix::fs::DirEntryExt;
         entries.sort_by_key(|e| e.ino());
     }
-    // Every file read counts at once in the live chart's counters: this
-    // folder's, if the chart can show it, and those above.
-    let counters = ctx.live.and_then(|live| live.open(path, place.depth));
-    let link = counters.as_ref().map(|o| Chain {
-        counters: &o.counters,
-        up: place.chain,
-    });
-    let place = LivePlace {
-        chain: link.as_ref().or(place.chain),
-        ..place
-    };
+    // The folder's own entry uses space too.
+    let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
+    // In the live tree, every file read counts at once in its folder.
+    let folder = ctx.live.map(|live| live.open(live_parent, path, own_size));
     let mut children: Vec<Node> = entries
         .par_iter()
         .map(|entry| {
-            let node = scan_entry(entry, path, &handle, ctx, place);
-            if let (Some(live), Some(chain)) = (ctx.live, place.chain) {
-                live.count(chain, &node);
+            let node = scan_entry(
+                entry,
+                path,
+                &handle,
+                ctx,
+                folder.as_ref().map(|o| &*o.folder),
+            );
+            if let (Some(live), Some(f)) = (ctx.live, &folder) {
+                live.count(f, &node);
             }
             node
         })
         .collect();
 
     children.sort_by_key(|c| std::cmp::Reverse(c.size));
-    // The folder's own entry uses space too. Saturating: apparent sizes of
-    // sparse files can add up past u64.
-    let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
+    // Saturating: apparent sizes of sparse files can add up past u64.
     let size = children
         .iter()
         .fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
-    if let (Some(live), Some(open)) = (ctx.live, &counters) {
-        live.close(open);
+    if let (Some(live), Some(open)) = (ctx.live, folder) {
+        live.close(
+            open, size, file_count, self_mode, self_mtime, self_ctime, self_uid, self_gid,
+        );
     }
     let _ = progress.send(ScanMsg::SliceDone {
-        path: path.to_path_buf(),
-        size,
-        file_count,
-        mode: self_mode,
-        mtime: self_mtime,
-        ctime: self_ctime,
-        uid: self_uid,
-        gid: self_gid,
         exts: file_summary(&children),
     });
 
@@ -865,19 +766,10 @@ fn scan_dir_in(
 
 pub(crate) enum ScanMsg {
     Progress(u64),
-    /// A folder (at any depth) finished scanning: its totals, for the live
-    /// chart and table.
+    /// A folder (at any depth) finished scanning: (extension, size, file
+    /// count) of the files directly in it, for the category bar's live
+    /// totals (see `ext_key`). Sizes and colors come from the live tree.
     SliceDone {
-        path: PathBuf,
-        size: u64,
-        file_count: u64,
-        mode: u32,
-        mtime: i64,
-        ctime: i64,
-        uid: u32,
-        gid: u32,
-        /// (extension, size, file count) of the files directly in it, for
-        /// the category bar's live totals (see `ext_key`).
         exts: Vec<(String, u64, u64)>,
     },
     Done(Node, f64),
@@ -1390,16 +1282,33 @@ mod scan_perf {
         let threads = env_num("SPACEMAP_THREADS", 0);
         // $SPACEMAP_FILE_ORDER=1 reads entries in file-number order.
         let in_file_order = std::env::var_os("SPACEMAP_FILE_ORDER").is_some();
-        // $SPACEMAP_LIVE=1 counts every file for the live chart, as the app does.
-        let live = std::env::var_os("SPACEMAP_LIVE")
-            .map(|_| LiveCounters::new(Arc::new(CategoryModel::defaults()), 7));
+        // $SPACEMAP_LIVE=1 counts every file for the live chart, as the app
+        // does; $SPACEMAP_WINDOW=1 also does the window's work meanwhile
+        // (extension totals, reading the live tree every 100 ms).
+        let with_live = std::env::var_os("SPACEMAP_LIVE").is_some();
+        let window = std::env::var_os("SPACEMAP_WINDOW").is_some();
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
             .build()
             .unwrap();
         for run in 0..env_num("SPACEMAP_RUNS", 5) {
+            let live = with_live
+                .then(|| pool.install(|| LiveTree::new(Arc::new(CategoryModel::defaults()))));
             let (tx, rx) = channel();
-            let drain = std::thread::spawn(move || rx.into_iter().count());
+            let drain = std::thread::spawn(move || {
+                let mut exts = ExtTotals::new();
+                let mut n = 0;
+                for msg in rx {
+                    n += 1;
+                    if let (true, ScanMsg::SliceDone { exts: e }) = (window, msg) {
+                        for (ext, size, files) in e {
+                            add_ext(&mut exts, ext, size, files);
+                        }
+                    }
+                }
+                n
+            });
+            let scanning = std::sync::atomic::AtomicBool::new(true);
             let ctx = ScanCtx {
                 mounts: &HashSet::new(),
                 progress: &tx,
@@ -1413,7 +1322,21 @@ mod scan_perf {
                 live: live.as_ref(),
             };
             let t = Instant::now();
-            let tree = pool.install(|| scan_dir(&dir, &ctx));
+            let tree = std::thread::scope(|scope| {
+                if let (true, Some(live)) = (window, &live) {
+                    let scanning = &scanning;
+                    scope.spawn(move || {
+                        let mut looks = LiveLooks::default();
+                        while scanning.load(std::sync::atomic::Ordering::Relaxed) {
+                            std::hint::black_box(live.snapshot(7, 1.3 / 360.0, &mut looks));
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    });
+                }
+                let tree = pool.install(|| scan_dir(&dir, &ctx));
+                scanning.store(false, std::sync::atomic::Ordering::Relaxed);
+                tree
+            });
             let took = t.elapsed();
             drop(tx);
             let msgs = drain.join().unwrap();
@@ -1536,21 +1459,10 @@ mod scan_dump {
             let mut lines = Vec::new();
             for msg in rx {
                 match msg {
-                    ScanMsg::SliceDone {
-                        path,
-                        size,
-                        file_count,
-                        mode,
-                        mtime,
-                        ctime,
-                        uid,
-                        gid,
-                        exts,
-                        ..
-                    } => {
+                    ScanMsg::SliceDone { exts } => {
                         let mut exts = exts;
                         exts.sort();
-                        lines.push(format!("DONE {} {size} {file_count} {mode} {mtime} {ctime} {uid} {gid} {exts:?}", path.as_os_str().as_bytes().escape_ascii()));
+                        lines.push(format!("DONE {exts:?}"));
                     }
                     ScanMsg::LogError(e) => lines.push(format!("ERR {e}")),
                     ScanMsg::Unreadable(p) => lines.push(format!(

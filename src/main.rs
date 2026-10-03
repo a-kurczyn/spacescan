@@ -235,7 +235,9 @@ struct DiskScanApp {
     /// kept for the finished chart.
     live_looks: LiveLooks,
     /// The running scan's counters, read every 100 ms into `live_looks`.
-    live_counters: Option<Arc<LiveCounters>>,
+    live_tree: Option<Arc<LiveTree>>,
+    /// When the live tree was last read.
+    live_read_at: Option<Instant>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -404,7 +406,8 @@ impl Default for DiskScanApp {
             looks: None,
             colored_at: None,
             live_looks: Default::default(),
-            live_counters: None,
+            live_tree: None,
+            live_read_at: None,
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::new(),
@@ -530,12 +533,10 @@ impl DiskScanApp {
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
-        // Folders as deep as the chart shows get live colors.
-        let live = Arc::new(LiveCounters::new(
-            self.cats.clone(),
-            self.settings.max_render_depth,
-        ));
-        self.live_counters = Some(live.clone());
+        // Every folder and file counts in the live tree as it's read.
+        let live = Arc::new(LiveTree::new(self.cats.clone()));
+        self.live_tree = Some(live.clone());
+        self.live_read_at = None;
         // A whole drive's progress is measured against its used space; other
         // folders need a counted total.
         let entry_count = self
@@ -713,7 +714,7 @@ impl DiskScanApp {
     /// returns the memory.
     fn scan_ended(&mut self) {
         self.partial_root = empty_node();
-        self.live_counters = None;
+        self.live_tree = None;
         after_tree_dropped();
     }
 
@@ -898,38 +899,15 @@ impl DiskScanApp {
                             self.log_truncated += 1;
                         }
                     }
-                    Ok(ScanMsg::SliceDone {
-                        path,
-                        size,
-                        file_count,
-                        mode,
-                        mtime,
-                        ctime,
-                        uid,
-                        gid,
-                        exts,
-                    }) => {
-                        graft_slice(
-                            &mut self.partial_root,
-                            &path,
-                            size,
-                            file_count,
-                            mode,
-                            mtime,
-                            ctime,
-                            uid,
-                            gid,
-                        );
+                    Ok(ScanMsg::SliceDone { exts }) => {
+                        // Per-extension totals for the category bar; sizes
+                        // come from the live tree.
                         for (ext, size, files) in exts {
                             add_ext(&mut self.live_exts, ext, size, files);
                         }
-                        self.partial_gen += 1;
                     }
                     Ok(ScanMsg::Done(node, secs)) => {
-                        // A last read, so nothing waits for the next 100 ms.
-                        if let Some(counters) = self.live_counters.take() {
-                            self.live_looks.refresh_now(&counters);
-                        }
+                        self.live_tree = None;
                         self.colored_at = Some(Instant::now());
                         if self.graft.is_some() {
                             self.finish_graft(node);
@@ -973,11 +951,30 @@ impl eframe::App for DiskScanApp {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
         let scan_backlog = self.poll_scan();
-        // The live chart's colors: the scan's counters, every 100 ms.
+        // The live chart and table: the live tree, read every 100 ms as deep
+        // as the chart currently shows.
         if self.scanning
-            && let Some(counters) = self.live_counters.clone()
+            && let Some(tree) = self.live_tree.clone()
+            && self
+                .live_read_at
+                .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(100))
         {
-            self.live_looks.refresh(&counters);
+            self.live_read_at = Some(Instant::now());
+            // The smallest slice the chart can draw, as a share of the circle.
+            let min_angle = if self.settings.unlimited_slices {
+                0.02
+            } else {
+                self.settings.min_segment_angle_deg
+            };
+            let min_share = f64::from(min_angle) / 360.0;
+            if let Some(root) = tree.snapshot(
+                self.settings.max_render_depth,
+                min_share,
+                &mut self.live_looks,
+            ) {
+                self.partial_root = root;
+                self.partial_gen += 1;
+            }
         }
         // The live looks' fade-in times are done with once the chart has
         // faded in.
