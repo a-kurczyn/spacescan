@@ -12,7 +12,7 @@ const SETTINGS_PANEL_WIDTH: f32 = 480.0;
 /// window), titled `title`, first `size` big; `open` turns false when it's
 /// closed. Where separate windows aren't possible, and while a screen
 /// reader is in use (it only sees the app's main window), it floats over
-/// the app instead. `ui` is the one opening it.
+/// the app instead.
 fn tool_window(
     ui: &egui::Ui,
     id: &str,
@@ -22,11 +22,14 @@ fn tool_window(
     mut add_contents: impl FnMut(&mut egui::Ui),
 ) {
     let ctx = ui.ctx();
-    // The accessibility tree is only built while a screen reader asks for it.
-    let screen_reader = ctx.accesskit_node_builder(ui.id(), |_| ()).is_some();
+    // The accessibility tree is only built while a screen reader asks for
+    // it. (Asked with the floating window's own id, so no stray entry is
+    // added: the window fills it in.)
+    let window_id = egui::Id::new(id);
+    let screen_reader = ctx.accesskit_node_builder(window_id, |_| ()).is_some();
     if screen_reader {
         egui::Window::new(title)
-            .id(egui::Id::new(id))
+            .id(window_id)
             .default_size(size)
             .collapsible(false)
             .open(open)

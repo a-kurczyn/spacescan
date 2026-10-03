@@ -359,3 +359,4 @@ STATUS_NOT_ALL_MOVED=%s elementos no se movieron por completo: lo que no se pudo
 STATUS_NOT_ALL_MOVED_ONE=%s elemento no se movió por completo: lo que no se pudo mover sigue donde estaba (ver Incidencias)
 FILTER_CASE_NAME=Distinguir mayúsculas
 A11Y_PATH_BAR=Ruta de la carpeta
+ERR_CLIPBOARD_NO_ANSWER=El portapapeles no respondió: no se pegó nada

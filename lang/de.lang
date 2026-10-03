@@ -353,3 +353,4 @@ STATUS_NOT_ALL_MOVED=%s Elemente nicht vollständig verschoben: Was nicht versch
 STATUS_NOT_ALL_MOVED_ONE=%s Element nicht vollständig verschoben: Was nicht verschoben werden konnte, ist noch am alten Ort (siehe Probleme)
 FILTER_CASE_NAME=Groß-/Kleinschreibung beachten
 A11Y_PATH_BAR=Ordnerpfad
+ERR_CLIPBOARD_NO_ANSWER=Die Zwischenablage hat nicht geantwortet: nichts eingefügt

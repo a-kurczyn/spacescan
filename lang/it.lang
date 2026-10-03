@@ -352,3 +352,4 @@ STATUS_NOT_ALL_MOVED=%s elementi non spostati del tutto: ciò che non è stato p
 STATUS_NOT_ALL_MOVED_ONE=%s elemento non spostato del tutto: ciò che non è stato possibile spostare è rimasto al suo posto (vedi Problemi)
 FILTER_CASE_NAME=Maiuscole/minuscole
 A11Y_PATH_BAR=Percorso della cartella
+ERR_CLIPBOARD_NO_ANSWER=Gli appunti non hanno risposto: non è stato incollato nulla

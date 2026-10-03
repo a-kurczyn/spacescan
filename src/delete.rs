@@ -560,6 +560,10 @@ impl DiskScanApp {
         if gone.is_empty() {
             return;
         }
+        // A file counted under a name that's gone counts at another of its
+        // names on the next scan.
+        self.link_owners
+            .retain(|_, at| !gone.iter().any(|g| at.starts_with(g)));
         self.table_forget(gone);
         let Some(root) = self.root.take() else { return };
         let view_paths = self.view_paths(&root);

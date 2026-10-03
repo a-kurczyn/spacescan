@@ -10,8 +10,16 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::wrapper::ConnectionExt as _;
 
-/// How long to wait for the clipboard's owner to answer.
-const WAIT: Duration = Duration::from_secs(1);
+/// How long to wait for the clipboard's owner to answer (and for each
+/// piece of big data).
+pub(crate) const WAIT: Duration = Duration::from_secs(1);
+
+/// The most clipboard data read; a file list is never near it.
+pub(crate) const MAX_READ: usize = 256 << 20;
+
+/// The clipboard's owner didn't answer in time (or sent too much).
+#[derive(Debug, PartialEq)]
+pub(crate) struct NoAnswer;
 
 /// An invisible window to talk to the clipboard through.
 fn hidden_window(
@@ -142,30 +150,52 @@ fn answer(
     let _ = conn.flush();
 }
 
-/// The clipboard's contents in format `format`, if its owner offers it.
-pub(crate) fn read(format: &str) -> Option<Vec<u8>> {
-    let (conn, screen) = x11rb::connect(None).ok()?;
-    let win = hidden_window(&conn, screen, EventMask::PROPERTY_CHANGE)?;
-    let clipboard = atom(&conn, "CLIPBOARD")?;
-    let target = atom(&conn, format)?;
-    let property = atom(&conn, "SPACEMAP_CLIPBOARD")?;
-    let incr = atom(&conn, "INCR")?;
-    conn.convert_selection(win, clipboard, target, property, x11rb::CURRENT_TIME)
-        .ok()?;
-    conn.flush().ok()?;
-    let deadline = Instant::now() + WAIT;
-    let next_event = || loop {
+/// The clipboard's contents in format `format`: None if nobody owns the
+/// clipboard or its owner doesn't offer that format.
+pub(crate) fn read(format: &str) -> Result<Option<Vec<u8>>, NoAnswer> {
+    let Ok((conn, screen)) = x11rb::connect(None) else {
+        return Ok(None);
+    };
+    let setup = || -> Option<_> {
+        let win = hidden_window(&conn, screen, EventMask::PROPERTY_CHANGE)?;
+        let clipboard = atom(&conn, "CLIPBOARD")?;
+        let owner = conn
+            .get_selection_owner(clipboard)
+            .ok()?
+            .reply()
+            .ok()?
+            .owner;
+        let target = atom(&conn, format)?;
+        let property = atom(&conn, "SPACEMAP_CLIPBOARD")?;
+        let incr = atom(&conn, "INCR")?;
+        Some((win, clipboard, owner, target, property, incr))
+    };
+    let Some((win, clipboard, owner, target, property, incr)) = setup() else {
+        return Ok(None);
+    };
+    if owner == x11rb::NONE {
+        return Ok(None);
+    }
+    if conn
+        .convert_selection(win, clipboard, target, property, x11rb::CURRENT_TIME)
+        .is_err()
+        || conn.flush().is_err()
+    {
+        return Ok(None);
+    }
+    let mut deadline = Instant::now() + WAIT;
+    let next_event = |deadline: Instant| loop {
         match conn.poll_for_event() {
-            Ok(Some(event)) => return Some(event),
+            Ok(Some(event)) => return Ok(event),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(2)),
-            _ => return None,
+            _ => return Err(NoAnswer),
         }
     };
     // The owner puts the data in our window's property and says so.
     loop {
-        if let Event::SelectionNotify(n) = next_event()? {
+        if let Event::SelectionNotify(n) = next_event(deadline)? {
             if n.property == x11rb::NONE {
-                return None;
+                return Ok(None);
             }
             break;
         }
@@ -176,19 +206,23 @@ pub(crate) fn read(format: &str) -> Option<Vec<u8>> {
             .reply()
             .ok()
     };
-    let first = take()?;
+    let first = take().ok_or(NoAnswer)?;
     if first.type_ != incr {
-        return Some(first.value);
+        return Ok(Some(first.value));
     }
     // Big data comes in pieces, each announced by a new property value,
     // until an empty one.
     let mut data = Vec::new();
     loop {
-        match next_event()? {
+        deadline = Instant::now() + WAIT;
+        match next_event(deadline)? {
             Event::PropertyNotify(p) if p.atom == property && p.state == Property::NEW_VALUE => {
-                let piece = take()?;
+                let piece = take().ok_or(NoAnswer)?;
                 if piece.value.is_empty() {
-                    return Some(data);
+                    return Ok(Some(data));
+                }
+                if data.len() + piece.value.len() > MAX_READ {
+                    return Err(NoAnswer);
                 }
                 data.extend_from_slice(&piece.value);
             }

@@ -278,6 +278,7 @@ impl std::hash::Hasher for FxHasher {
 pub(crate) type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 /// A HashMap with the fast hash.
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, FxBuild>;
+pub(crate) type FxHashSet<K> = HashSet<K, FxBuild>;
 
 pub(crate) const NO_TIME: i64 = i64::MIN;
 
@@ -610,6 +611,24 @@ pub(crate) struct HardLinks {
     /// By (device, inode), split by inode so scan threads rarely wait for
     /// each other.
     shards: [std::sync::Mutex<FxHashMap<(u64, u64), HardLink>>; 16],
+    /// Files counted under a name outside the scanned folder (when only a
+    /// part of a scanned tree is scanned again): none of their names in it
+    /// count.
+    pub(crate) elsewhere: FxHashSet<(u64, u64)>,
+    /// After the scan: where each file with several names in it was
+    /// counted.
+    pub(crate) counted_at: std::sync::Mutex<Vec<((u64, u64), PathBuf)>>,
+}
+
+impl HardLinks {
+    /// For scanning a folder of a scanned tree again: the files in
+    /// `elsewhere` are counted outside it.
+    pub(crate) fn counted_elsewhere(elsewhere: FxHashSet<(u64, u64)>) -> HardLinks {
+        HardLinks {
+            elsewhere,
+            ..Default::default()
+        }
+    }
 }
 
 /// A file with several hard links met during a scan.
@@ -677,6 +696,9 @@ impl ScanCtx<'_> {
         name: &std::ffi::OsStr,
     ) -> u64 {
         use std::os::unix::fs::MetadataExt;
+        if self.hard_links.elsewhere.contains(&(m.dev(), m.ino())) {
+            return 0;
+        }
         let this = || LinkName {
             dir: here.clone(),
             name: name.into(),
@@ -797,9 +819,11 @@ pub(crate) fn scan_entry(
                 Ok(m) => (
                     match ctx.size_of(&m) {
                         size if m.nlink() > 1 => {
-                            parent
-                                .links
-                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            // Read first: files with links come in crowds.
+                            let links = parent.links;
+                            if !links.load(std::sync::atomic::Ordering::Relaxed) {
+                                links.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
                             ctx.link_size(&m, size, here, &os_name)
                         }
                         size => size,
@@ -883,8 +907,9 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
         .hard_links
         .shards
         .iter()
-        .flat_map(|s| std::mem::take(&mut *s.lock().unwrap()).into_values());
-    count_links_at_first_names(&mut root, path, links);
+        .flat_map(|s| std::mem::take(&mut *s.lock().unwrap()));
+    let counted_at = count_links_at_first_names(&mut root, path, links);
+    *ctx.hard_links.counted_at.lock().unwrap() = counted_at;
     root
 }
 
@@ -909,10 +934,20 @@ impl SizeChanges {
 /// Moves the size of each hard-linked file from the name it was counted
 /// under to its first name in byte order, so the same files always give the
 /// same folder sizes, however the scan's threads met them. `path` is the
-/// path `root` was scanned at.
-fn count_links_at_first_names(root: &mut Node, path: &Path, links: impl Iterator<Item = HardLink>) {
+/// path `root` was scanned at. Returns where each file is counted.
+fn count_links_at_first_names(
+    root: &mut Node,
+    path: &Path,
+    links: impl Iterator<Item = ((u64, u64), HardLink)>,
+) -> Vec<((u64, u64), PathBuf)> {
     let mut changes = SizeChanges::default();
-    for link in links.filter(|l| l.size > 0) {
+    let mut counted_at = Vec::new();
+    for (key, link) in links {
+        let owner = link.first.as_ref().unwrap_or(&link.counted);
+        counted_at.push((key, owner.dir.join(&*owner.name)));
+        if link.size == 0 {
+            continue;
+        }
         let Some(first) = link.first else { continue };
         let size = i128::from(link.size);
         for (at, delta) in [(link.counted, -size), (first, size)] {
@@ -926,6 +961,7 @@ fn count_links_at_first_names(root: &mut Node, path: &Path, links: impl Iterator
     if !changes.files.is_empty() || !changes.folders.is_empty() {
         apply_size_changes(root, &changes);
     }
+    counted_at
 }
 
 /// Applies `changes` inside folder `n`, re-sorting each folder whose
@@ -1137,7 +1173,9 @@ pub(crate) enum ScanMsg {
     SliceDone {
         exts: Vec<(String, u64, u64)>,
     },
-    Done(Node, f64),
+    /// The scan finished: the tree, how long it took in seconds, and where
+    /// each file with several hard links was counted.
+    Done(Node, f64, Vec<((u64, u64), PathBuf)>),
     Error(String),
     LogError(String),
     /// A folder whose contents couldn't be listed (its size is unknown).
@@ -2196,6 +2234,65 @@ mod hard_link_tests {
             let sum = n.children.iter().map(|c| c.size).sum::<u64>();
             assert!(n.size == sum + own || n.size == sum + n.size.saturating_sub(sum));
         }
+    }
+
+    /// Scanning one folder of a scanned tree again gives exactly the sizes
+    /// the full scan gave it: a file counted under a name outside the folder
+    /// counts nothing in it (three names, two of them inside, one deeper),
+    /// one counted inside still counts there.
+    #[test]
+    fn rescanned_folders_match_the_full_scan() {
+        let dir = std::env::temp_dir().join(format!("spacemap-relinks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["a", "b/c", "z"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        let data = vec![9u8; 300_000];
+        std::fs::write(dir.join("a/x"), &data).unwrap();
+        std::fs::hard_link(dir.join("a/x"), dir.join("b/x")).unwrap();
+        std::fs::hard_link(dir.join("a/x"), dir.join("b/c/x")).unwrap();
+        std::fs::write(dir.join("b/y"), &data[..100_000]).unwrap();
+        std::fs::hard_link(dir.join("b/y"), dir.join("z/y")).unwrap();
+        let scan_with = |p: &Path, elsewhere: FxHashSet<(u64, u64)>| {
+            let (tx, rx) = channel();
+            std::thread::spawn(move || for _ in rx {});
+            let ctx = ScanCtx {
+                mounts: &HashSet::new(),
+                progress: &tx,
+                cancel: &Default::default(),
+                apparent_size: false,
+                hard_links: HardLinks::counted_elsewhere(elsewhere),
+                saw_hangul: &Default::default(),
+                in_file_order: false,
+                live: None,
+            };
+            let node = scan_dir(p, &ctx);
+            let counted_at = std::mem::take(&mut *ctx.hard_links.counted_at.lock().unwrap());
+            (node, counted_at)
+        };
+        let (full, counted_at) = scan_with(&dir, Default::default());
+        let owners: HashMap<(u64, u64), PathBuf> = counted_at.into_iter().collect();
+        assert_eq!(owners.len(), 2);
+        let mut seen = Vec::new();
+        sizes(&full, &mut seen);
+        for part in ["a", "b", "b/c", "z"] {
+            let at = dir.join(part);
+            let elsewhere = owners
+                .iter()
+                .filter(|(_, o)| !o.starts_with(&at))
+                .map(|(k, _)| *k)
+                .collect();
+            let (again, _) = scan_with(&at, elsewhere);
+            let mut got = Vec::new();
+            sizes(&again, &mut got);
+            let want: Vec<_> = seen
+                .iter()
+                .filter(|(p, ..)| p.starts_with(&at))
+                .cloned()
+                .collect();
+            assert_eq!(got, want, "{part}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Hard links across folders at different depths, in one folder, three

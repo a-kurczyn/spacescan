@@ -353,3 +353,4 @@ STATUS_NOT_ALL_MOVED=%s éléments pas entièrement déplacés : ce qui n'a pas 
 STATUS_NOT_ALL_MOVED_ONE=%s élément pas entièrement déplacé : ce qui n'a pas pu être déplacé est resté en place (voir Problèmes)
 FILTER_CASE_NAME=Respecter la casse
 A11Y_PATH_BAR=Chemin du dossier
+ERR_CLIPBOARD_NO_ANSWER=Le presse-papiers n'a pas répondu : rien n'a été collé

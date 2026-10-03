@@ -381,7 +381,7 @@ fn flat_files(
 /// A rescan of one folder ("r"), to be spliced back into the full tree
 /// when it finishes rather than replacing it.
 pub(crate) struct Graft {
-    target: PathBuf,
+    pub(crate) target: PathBuf,
     /// The zoom history and cursor to come back to afterwards (or on abort).
     view_paths: Vec<PathBuf>,
     cursor: Option<PathBuf>,
@@ -1780,6 +1780,7 @@ impl DiskScanApp {
             cursor: self.table.cursor.clone(),
             free_space: self.free_space,
         };
+        self.rescanning_part = true;
         self.start_scan(target);
         self.graft = Some(graft);
     }

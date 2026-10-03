@@ -371,3 +371,4 @@ STATUS_NOT_ALL_MOVED=%s items not fully moved: what couldn't be moved is still w
 STATUS_NOT_ALL_MOVED_ONE=%s item not fully moved: what couldn't be moved is still where it was (see Issues)
 FILTER_CASE_NAME=Match case
 A11Y_PATH_BAR=Folder path
+ERR_CLIPBOARD_NO_ANSWER=The clipboard didn't answer: nothing was pasted

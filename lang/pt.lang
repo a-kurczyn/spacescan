@@ -354,3 +354,4 @@ STATUS_NOT_ALL_MOVED=%s itens não movidos por completo: o que não pôde ser mo
 STATUS_NOT_ALL_MOVED_ONE=%s item não movido por completo: o que não pôde ser movido continua onde estava (veja Problemas)
 FILTER_CASE_NAME=Diferenciar maiúsculas
 A11Y_PATH_BAR=Caminho da pasta
+ERR_CLIPBOARD_NO_ANSWER=A área de transferência não respondeu: nada foi colado

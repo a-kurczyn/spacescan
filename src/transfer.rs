@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::delete::{find_node, mount_guard};
+use crate::x11clip::NoAnswer;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -119,6 +120,11 @@ pub(crate) struct Transfer {
     text_pasted_at: Option<Instant>,
     /// A V key press reached the app and its release hasn't yet.
     v_down: bool,
+    /// This frame's keys amount to Ctrl+V (see `note_paste_key`).
+    paste_key: bool,
+    /// Whether the window had the keyboard last frame, and since when.
+    focused: bool,
+    focused_at: Option<Instant>,
 }
 
 /// The worker gave up: the user cancelled.
@@ -202,7 +208,7 @@ impl Worker {
             if mode == ClipMode::Move && dev(p) == dev(target) {
                 continue;
             }
-            let size = size.unwrap_or_else(|| disk_usage(p, &self.mounts, &mut seen));
+            let size = size.unwrap_or_else(|| disk_usage(p, &self.mounts, &mut seen, &self.cancel));
             needs = needs.saturating_add(size);
         }
         match fs_space(target) {
@@ -245,7 +251,12 @@ impl Worker {
         };
         let mut dst = dst.to_path_buf();
         if let Ok(there) = std::fs::symlink_metadata(&dst) {
-            let same = src == dst;
+            // The same file under that name (itself, a hard link to it, or a
+            // link pointing at it) is never replaced: that would destroy it.
+            let same_file = |m: &std::fs::Metadata| (m.dev(), m.ino()) == (meta.dev(), meta.ino());
+            let same = src == dst
+                || same_file(&there)
+                || std::fs::metadata(&dst).is_ok_and(|m| same_file(&m));
             let merge = !same && meta.is_dir() && there.is_dir();
             let can_replace = !same && (merge || (!meta.is_dir() && !there.is_dir()));
             match self.choose(Clash {
@@ -253,7 +264,9 @@ impl Worker {
                 merge,
                 can_replace,
             })? {
+                // Replace only where it was offered.
                 ClashChoice::Skip => return Ok(Outcome::Skipped),
+                ClashChoice::Replace if !can_replace => return Ok(Outcome::Skipped),
                 ClashChoice::KeepBoth => dst = free_name(&dst),
                 ClashChoice::Replace if merge => return self.merge(src, &dst, mode),
                 ClashChoice::Replace => {}
@@ -280,6 +293,10 @@ impl Worker {
     /// Puts the contents of folder `src` into the folder `dst` that's
     /// already there; a move then removes `src` if nothing is left in it.
     fn merge(&mut self, src: &Path, dst: &Path, mode: ClipMode) -> Result<Outcome, Stop> {
+        if self.mounts.contains(src) {
+            self.issue(trf("ERR_OTHER_FS_SKIPPED", &[&show_path(src)]));
+            return Ok(Outcome::Incomplete);
+        }
         let entries = match std::fs::read_dir(src) {
             Ok(rd) => rd.filter_map(|e| e.ok()).collect::<Vec<_>>(),
             Err(e) => {
@@ -376,14 +393,8 @@ impl Worker {
         } else if ft.is_file() {
             match self.copy_file(src, dst) {
                 Ok(()) => Ok(()),
-                Err(e) => {
-                    // No half-written file is left behind.
-                    let _ = std::fs::remove_file(dst);
-                    match e {
-                        Some(e) => Err(e),
-                        None => return Err(Stop),
-                    }
-                }
+                Err(Some(e)) => Err(e),
+                Err(None) => return Err(Stop),
             }
         } else {
             self.issue(trf("ERR_SPECIAL_FILE", &[&show_path(src)]));
@@ -412,11 +423,40 @@ impl Worker {
     /// Copies one file's contents, in pieces so progress shows and Cancel
     /// works inside big files. Err(None): cancelled.
     fn copy_file(&mut self, src: &Path, dst: &Path) -> Result<(), Option<std::io::Error>> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut from = std::fs::File::options()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(src)?;
+        // Swapped for something else since it was listed: not copied.
+        if !from.metadata()?.is_file() {
+            return Err(Some(std::io::ErrorKind::InvalidInput.into()));
+        }
+        // Written under a new name next to `dst`, then put in its place: a
+        // file already at `dst` (or what a link there points to) is never
+        // written through, and a failed copy leaves it as it was.
+        let (part, mut to) = new_part_file(dst)?;
+        let result = self.copy_contents(&mut from, &mut to);
+        drop(to);
+        match result.and_then(|()| std::fs::rename(&part, dst).map_err(Some)) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&part);
+                Err(e)
+            }
+        }
+    }
+
+    /// Copies everything from `from` to `to`, in pieces so progress shows
+    /// and Cancel works inside big files. Err(None): cancelled.
+    fn copy_contents(
+        &mut self,
+        from: &mut std::fs::File,
+        to: &mut std::fs::File,
+    ) -> Result<(), Option<std::io::Error>> {
         use std::io::{Read, Write};
         use std::os::fd::AsRawFd;
         const PIECE: usize = 16 << 20;
-        let mut from = std::fs::File::open(src)?;
-        let mut to = std::fs::File::create(dst)?;
         // The kernel copies directly where it can.
         let mut in_kernel = true;
         let mut buf = Vec::new();
@@ -462,6 +502,28 @@ impl Worker {
     }
 }
 
+/// A new, empty file next to `dst` to write its copy into, with a name
+/// nothing else uses.
+fn new_part_file(dst: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let name = dst.file_name().unwrap_or_default().to_string_lossy();
+    for n in 0u32.. {
+        let part = dst.with_file_name(format!(".{name}.spacemap-part{n}"));
+        match std::fs::File::options()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&part)
+        {
+            Ok(f) => return Ok((part, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
+}
+
 /// Makes `dst` with `make`, first removing a file already there (a clash
 /// answered with Replace).
 fn replace_with(
@@ -488,7 +550,15 @@ fn make_fifo(path: &Path, mode: u32) -> std::io::Result<()> {
 
 /// Disk space the files under `path` use (each file with several hard
 /// links once), without entering other filesystems.
-fn disk_usage(path: &Path, mounts: &HashSet<PathBuf>, seen: &mut HashSet<(u64, u64)>) -> u64 {
+fn disk_usage(
+    path: &Path,
+    mounts: &HashSet<PathBuf>,
+    seen: &mut HashSet<(u64, u64)>,
+    cancel: &AtomicBool,
+) -> u64 {
+    if cancel.load(Ordering::Relaxed) {
+        return 0;
+    }
     let Ok(m) = std::fs::symlink_metadata(path) else {
         return 0;
     };
@@ -503,7 +573,7 @@ fn disk_usage(path: &Path, mounts: &HashSet<PathBuf>, seen: &mut HashSet<(u64, u
         return own;
     };
     rd.filter_map(|e| e.ok())
-        .map(|e| deep(|| disk_usage(&e.path(), mounts, seen)))
+        .map(|e| deep(|| disk_usage(&e.path(), mounts, seen, cancel)))
         .fold(own, u64::saturating_add)
 }
 
@@ -621,36 +691,72 @@ fn offer_on_clipboard(paths: &[PathBuf], mode: ClipMode) -> bool {
     Options::new().copy_multi(sources).is_ok()
 }
 
-/// The system clipboard's contents in format `format`, if it has them.
-fn clipboard_read(format: &str) -> Option<Vec<u8>> {
+/// The system clipboard's contents in format `format`: None if it has
+/// none in that format.
+fn clipboard_read(format: &str) -> Result<Option<Vec<u8>>, NoAnswer> {
     if !on_wayland() {
         return crate::x11clip::read(format);
     }
     use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents};
-    let (mut pipe, _) = get_contents(
+    let Ok((pipe, _)) = get_contents(
         ClipboardType::Regular,
         Seat::Unspecified,
         MimeType::Specific(format),
-    )
-    .ok()?;
+    ) else {
+        return Ok(None);
+    };
+    read_with_deadline(&pipe).map(Some)
+}
+
+/// Everything from the pipe the clipboard's owner writes into, giving up if
+/// it stalls for `WAIT` (a hung owner mustn't freeze the app).
+fn read_with_deadline(pipe: &impl std::os::fd::AsRawFd) -> Result<Vec<u8>, NoAnswer> {
+    use crate::x11clip::{MAX_READ, WAIT};
+    let fd = pipe.as_raw_fd();
     let mut data = Vec::new();
-    std::io::Read::read_to_end(&mut pipe, &mut data).ok()?;
-    Some(data)
+    let mut buf = vec![0u8; 64 << 10];
+    loop {
+        let mut poll = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `poll` is one valid pollfd for the duration of the call.
+        let ready = unsafe { libc::poll(&mut poll, 1, WAIT.as_millis() as libc::c_int) };
+        if ready <= 0 {
+            return Err(NoAnswer);
+        }
+        // SAFETY: `buf` is valid for writes of its length, and `fd` is the
+        // open pipe `pipe` owns.
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+        match n {
+            0 => return Ok(data),
+            n if n < 0 => return Err(NoAnswer),
+            n => data.extend_from_slice(&buf[..n as usize]),
+        }
+        if data.len() > MAX_READ {
+            return Err(NoAnswer);
+        }
+    }
 }
 
 /// True if the files on the system clipboard were cut (to be moved), going
-/// by KDE's or GNOME's mark.
+/// by KDE's or GNOME's mark. Unclear means copied: a copy loses nothing.
 fn clipboard_cut() -> bool {
-    clipboard_read("application/x-kde-cutselection").is_some_and(|d| d.trim_ascii() == b"1")
-        || clipboard_read("x-special/gnome-copied-files")
+    let mark = |format: &str| clipboard_read(format).ok().flatten();
+    mark("application/x-kde-cutselection").is_some_and(|d| d.trim_ascii() == b"1")
+        || mark("x-special/gnome-copied-files")
             .is_some_and(|d| d.split(|&b| b == b'\n').next() == Some(b"cut"))
 }
 
 /// The files on the system clipboard as a file list (what file managers
 /// copy), if any.
-fn clipboard_files() -> Option<Vec<PathBuf>> {
-    let files = parse_uri_list(&clipboard_read("text/uri-list")?);
-    (!files.is_empty()).then_some(files)
+fn clipboard_files() -> Result<Option<Vec<PathBuf>>, NoAnswer> {
+    let Some(list) = clipboard_read("text/uri-list")? else {
+        return Ok(None);
+    };
+    let files = parse_uri_list(&list);
+    Ok((!files.is_empty()).then_some(files))
 }
 
 /// The local files in a list of links (one per line, "\r\n" or "\n";
@@ -737,38 +843,60 @@ fn percent_decode(b: &[u8]) -> Vec<u8> {
 }
 
 impl DiskScanApp {
+    /// Every frame, whatever has the keyboard: notes whether this frame's V
+    /// key events amount to Ctrl+V. A Ctrl+V's press never reaches the app,
+    /// and on X11 its release can come without Ctrl, so a release with no
+    /// press counts too, unless a text field has the keyboard or the window
+    /// has only just got it (V held down while switching windows).
+    pub(crate) fn note_paste_key(&mut self, ctx: &egui::Context) {
+        let typing = ctx.text_edit_focused();
+        let t = &mut self.transfer;
+        let focused = ctx.input(|i| i.focused);
+        if focused && !t.focused {
+            t.focused_at = Some(Instant::now());
+        }
+        t.focused = focused;
+        let settled = t
+            .focused_at
+            .is_some_and(|at| at.elapsed() >= std::time::Duration::from_millis(300));
+        t.paste_key = false;
+        ctx.input(|i| {
+            for e in &i.events {
+                if let egui::Event::Key {
+                    key: egui::Key::V,
+                    pressed,
+                    modifiers,
+                    ..
+                } = e
+                {
+                    if *pressed {
+                        t.v_down = true;
+                    } else {
+                        let press_hidden = !std::mem::take(&mut t.v_down);
+                        t.paste_key |= modifiers.command || (press_hidden && settled && !typing);
+                    }
+                }
+            }
+        });
+    }
+
     /// This frame's Ctrl+C, Ctrl+X, and Ctrl+V (with the pasted text, empty
     /// if the clipboard holds no text). A Ctrl+V only arrives as a paste
     /// when the clipboard has text, so a Ctrl+V whose key comes up without
     /// one also counts.
     pub(crate) fn clipboard_events(&mut self, ctx: &egui::Context) -> (bool, bool, Option<String>) {
-        let (mut copy, mut cut, mut text, mut v_released) = (false, false, None, false);
+        let (mut copy, mut cut, mut text) = (false, false, None);
         ctx.input(|i| {
             for e in &i.events {
                 match e {
                     egui::Event::Copy => copy = true,
                     egui::Event::Cut => cut = true,
                     egui::Event::Paste(t) => text = Some(t.clone()),
-                    egui::Event::Key {
-                        key: egui::Key::V,
-                        pressed: true,
-                        ..
-                    } => self.transfer.v_down = true,
-                    egui::Event::Key {
-                        key: egui::Key::V,
-                        pressed: false,
-                        modifiers,
-                        ..
-                    } => {
-                        // The press of Ctrl+V never reaches the app, and on X11
-                        // the release can come without Ctrl.
-                        let press_hidden = !std::mem::take(&mut self.transfer.v_down);
-                        v_released |= modifiers.command || press_hidden;
-                    }
                     _ => {}
                 }
             }
         });
+        let v_released = std::mem::take(&mut self.transfer.paste_key);
         if text.is_some() {
             self.transfer.text_pasted_at = Some(Instant::now());
         } else if v_released {
@@ -824,7 +952,12 @@ impl DiskScanApp {
         // Files copied in another program after spacemap's own Ctrl+C or
         // Ctrl+X replaced its paths on the clipboard, so they win. (With the
         // paths kept off the clipboard, spacemap's own pick always wins.)
-        let copied = clipboard_files().or_else(|| paths_in_text(text));
+        let Ok(copied) = clipboard_files() else {
+            // Not knowing what's there, pasting an older pick could be wrong.
+            self.status = tr("ERR_CLIPBOARD_NO_ANSWER");
+            return;
+        };
+        let copied = copied.or_else(|| paths_in_text(text));
         let (paths, mode) = match (&self.transfer.clip, copied) {
             (Some(clip), Some(copied))
                 if self.settings.paths_to_clipboard && copied != clip.paths =>
@@ -1381,7 +1514,7 @@ mod tests {
         std::fs::write(src.join("f"), vec![1u8; 3 << 20]).unwrap();
         std::fs::hard_link(src.join("f"), src.join("g")).unwrap();
         let mut seen = HashSet::new();
-        let used = disk_usage(&src, &HashSet::new(), &mut seen);
+        let used = disk_usage(&src, &HashSet::new(), &mut seen, &AtomicBool::new(false));
         assert!((3 << 20..(3 << 20) + 65_536).contains(&used), "{used}");
         let (w, _) = worker(ClashChoice::Skip);
         let target = d.join("to");
@@ -1417,6 +1550,8 @@ mod tests {
             file:///tmp/bad%FF%FEname\r\n\
             file:///tmp/line%0Abreak\n\
             file:///tmp/100%\n\
+            file:///tmp/nul%00byte\n\
+            file:///tmp/bad%G1hex\n\
             file://otherhost/tmp/remote\n\
             https://example.com/x\n\
             \r\n\
@@ -1433,6 +1568,8 @@ mod tests {
             b"/tmp/bad\xff\xfename",
             b"/tmp/line\nbreak",
             b"/tmp/100%",
+            b"/tmp/nul\0byte",
+            b"/tmp/bad%G1hex",
             b"/tmp/last",
         ];
         assert_eq!(got, want);
@@ -1456,6 +1593,14 @@ mod tests {
     #[ignore]
     fn x11_clipboard_round_trip() {
         use std::os::unix::ffi::OsStrExt;
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::ConnectionExt;
+        let read = crate::x11clip::read;
+        let list = |r: Result<Option<Vec<u8>>, NoAnswer>| parse_uri_list(&r.unwrap().unwrap());
+        // Nobody owns the clipboard: an answer at once, not a wait.
+        let t = Instant::now();
+        assert_eq!(read("text/uri-list"), Ok(None));
+        assert!(t.elapsed() < std::time::Duration::from_millis(500));
         let paths = vec![
             PathBuf::from("/tmp/x y"),
             PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/\xff")),
@@ -1463,13 +1608,10 @@ mod tests {
         let formats = clipboard_formats(&paths, ClipMode::Move);
         assert!(crate::x11clip::offer(formats.clone()));
         for (name, data) in &formats {
-            assert_eq!(crate::x11clip::read(name).as_ref(), Some(data), "{name}");
+            assert_eq!(read(name), Ok(Some(data.clone())), "{name}");
         }
-        assert_eq!(
-            parse_uri_list(&crate::x11clip::read("text/uri-list").unwrap()),
-            paths
-        );
-        assert_eq!(crate::x11clip::read("image/png"), None);
+        assert_eq!(list(read("text/uri-list")), paths);
+        assert_eq!(read("image/png"), Ok(None));
         // A big list (a few MB) comes through whole.
         let many: Vec<PathBuf> = (0..60_000)
             .map(|i| PathBuf::from(format!("/tmp/some/longer/folder/name/file-{i:06}.dat")))
@@ -1478,10 +1620,192 @@ mod tests {
             &many,
             ClipMode::Copy
         )));
+        assert_eq!(list(read("text/uri-list")), many);
+        // An owner that never answers: no answer, within the wait.
+        let (conn, screen) = x11rb::connect(None).unwrap();
+        let win = conn.generate_id().unwrap();
+        let root = conn.setup().roots[screen].root;
+        conn.create_window(
+            0,
+            win,
+            root,
+            0,
+            0,
+            1,
+            1,
+            0,
+            x11rb::protocol::xproto::WindowClass::INPUT_ONLY,
+            0,
+            &Default::default(),
+        )
+        .unwrap();
+        let clipboard = conn
+            .intern_atom(false, b"CLIPBOARD")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        conn.set_selection_owner(win, clipboard, x11rb::CURRENT_TIME)
+            .unwrap();
+        conn.flush().unwrap();
+        let t = Instant::now();
+        assert_eq!(read("text/uri-list"), Err(NoAnswer));
+        assert!(t.elapsed() < crate::x11clip::WAIT * 3);
+    }
+
+    /// "Replace" onto the same file under another name (a link to it, a
+    /// hard link to it, itself) is never offered, so nothing destroys the
+    /// source, for a copy or a move; Replace onto a file hard-linked with a
+    /// third one leaves that third one alone; Replace onto a named pipe
+    /// doesn't hang; a failed copy leaves the file it would have replaced.
+    #[test]
+    fn replace_never_writes_through_the_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("replace");
+        let src = d.join("src.txt");
+        let to = d.join("to");
+        std::fs::create_dir_all(&to).unwrap();
+        for mode in [ClipMode::Copy, ClipMode::Move] {
+            std::fs::write(&src, b"precious").unwrap();
+            let _ = std::fs::remove_file(to.join("src.txt"));
+            std::os::unix::fs::symlink(&src, to.join("src.txt")).unwrap();
+            let (mut w, reports) = worker(ClashChoice::Replace);
+            w.always = Some(ClashChoice::Replace);
+            let _ = w.put(&src, &to.join("src.txt"), mode);
+            assert_eq!(
+                std::fs::read(&src).unwrap(),
+                b"precious",
+                "{mode:?} via link"
+            );
+            assert!(
+                reports
+                    .try_iter()
+                    .any(|r| matches!(r, Report::Clash(c) if !c.can_replace))
+            );
+            std::fs::remove_file(to.join("src.txt")).unwrap();
+            std::fs::hard_link(&src, to.join("src.txt")).unwrap();
+            let (mut w, reports) = worker(ClashChoice::Skip);
+            assert_eq!(
+                w.put(&src, &to.join("src.txt"), mode).ok(),
+                Some(Outcome::Skipped)
+            );
+            assert!(
+                reports
+                    .try_iter()
+                    .any(|r| matches!(r, Report::Clash(c) if !c.can_replace))
+            );
+            assert_eq!(
+                std::fs::read(&src).unwrap(),
+                b"precious",
+                "{mode:?} via hard link"
+            );
+            assert!(w.removed.is_empty(), "nothing counts as moved");
+            std::fs::remove_file(to.join("src.txt")).unwrap();
+        }
+        // A target hard-linked with a third file: only the name is replaced.
+        std::fs::write(d.join("third"), b"third").unwrap();
+        std::fs::hard_link(d.join("third"), to.join("src.txt")).unwrap();
+        let (mut w, _) = worker(ClashChoice::Replace);
         assert_eq!(
-            parse_uri_list(&crate::x11clip::read("text/uri-list").unwrap()),
-            many
+            w.put(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
+            Some(Outcome::Done)
         );
+        assert_eq!(std::fs::read(to.join("src.txt")).unwrap(), b"precious");
+        assert_eq!(std::fs::read(d.join("third")).unwrap(), b"third");
+        // A named pipe there: replaced at once, no waiting for a reader.
+        std::fs::remove_file(to.join("src.txt")).unwrap();
+        make_fifo(&to.join("src.txt"), 0o600).unwrap();
+        let (mut w, _) = worker(ClashChoice::Replace);
+        let t = Instant::now();
+        assert_eq!(
+            w.put(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
+            Some(Outcome::Done)
+        );
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(std::fs::read(to.join("src.txt")).unwrap(), b"precious");
+        // A copy that fails (unreadable source) keeps what was there.
+        std::fs::write(to.join("src.txt"), b"keep me").unwrap();
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&src).is_err() {
+            let (mut w, _) = worker(ClashChoice::Replace);
+            assert_eq!(
+                w.put(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
+                Some(Outcome::Incomplete)
+            );
+            assert_eq!(std::fs::read(to.join("src.txt")).unwrap(), b"keep me");
+        }
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let leftovers: Vec<_> = std::fs::read_dir(&to)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("spacemap-part"))
+            .collect();
+        assert!(leftovers.is_empty(), "no half-written copies are left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A merge doesn't go into a folder where another filesystem is mounted.
+    #[test]
+    fn merges_skip_mount_points() {
+        let d = scratch("mergemount");
+        let src = d.join("src");
+        std::fs::create_dir_all(src.join("mnt")).unwrap();
+        std::fs::write(src.join("mnt/inside"), b"x").unwrap();
+        std::fs::create_dir_all(d.join("to/src/mnt")).unwrap();
+        let (mut w, _) = worker(ClashChoice::Replace);
+        w.mounts.insert(src.join("mnt"));
+        assert_eq!(
+            w.put(&src, &d.join("to/src"), ClipMode::Copy).ok(),
+            Some(Outcome::Incomplete)
+        );
+        assert!(!d.join("to/src/mnt/inside").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Ctrl+V's key: a V release whose press never came counts once the
+    /// window has had the keyboard a moment, and not while typing; a plain
+    /// V (press and release) never counts; a release with Ctrl always does.
+    #[test]
+    fn paste_key_needs_a_hidden_press() {
+        let ctx = egui::Context::default();
+        let mut app = DiskScanApp::default();
+        let key = |pressed: bool, command: bool| egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: if command {
+                egui::Modifiers::COMMAND
+            } else {
+                egui::Modifiers::NONE
+            },
+        };
+        let frame = |app: &mut DiskScanApp, events: Vec<egui::Event>, focused: bool| {
+            let raw = egui::RawInput {
+                events,
+                focused,
+                ..Default::default()
+            };
+            let mut got = false;
+            let _ = ctx.run_ui(raw, |ui| {
+                app.note_paste_key(ui.ctx());
+                got = app.transfer.paste_key;
+            });
+            got
+        };
+        // Just got the keyboard: a release alone doesn't count yet.
+        assert!(!frame(&mut app, vec![], false));
+        assert!(!frame(&mut app, vec![key(false, false)], true));
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        assert!(frame(&mut app, vec![key(false, false)], true));
+        assert!(!frame(
+            &mut app,
+            vec![key(true, false), key(false, false)],
+            true
+        ));
+        assert!(!frame(&mut app, vec![key(true, false)], true));
+        assert!(!frame(&mut app, vec![key(false, false)], true));
+        assert!(frame(&mut app, vec![key(false, true)], true));
     }
 
     #[test]

@@ -309,6 +309,11 @@ struct DiskScanApp {
     /// Folder rescan in progress ("r" in the table), to splice into the
     /// full tree when it finishes.
     graft: Option<Graft>,
+    /// Where each file with several hard links in the scanned tree is
+    /// counted (by device and inode).
+    link_owners: FxHashMap<(u64, u64), PathBuf>,
+    /// The next scan only renews a folder of the scanned tree.
+    rescanning_part: bool,
     status: String,
     /// (capacity, free bytes) of the drive when the scanned folder is a mount
     /// point, for the chart's free-space slice.
@@ -380,6 +385,8 @@ impl Default for DiskScanApp {
             typing: false,
             table: TableState::default(),
             graft: None,
+            link_owners: Default::default(),
+            rescanning_part: false,
             status: String::new(),
             free_space: None,
             log: Vec::new(),
@@ -516,6 +523,17 @@ impl DiskScanApp {
         self.cancel_flag = Some(cancel.clone());
 
         let apparent_size = self.settings.apparent_size;
+        // A folder scanned again inside the tree: files counted under a name
+        // outside it count nothing in it, as in the full scan.
+        let elsewhere: FxHashSet<(u64, u64)> = if std::mem::take(&mut self.rescanning_part) {
+            self.link_owners
+                .iter()
+                .filter(|(_, at)| !at.starts_with(&path))
+                .map(|(key, _)| *key)
+                .collect()
+        } else {
+            Default::default()
+        };
         let saw_hangul = self.saw_hangul.clone();
 
         let (tx, rx) = channel();
@@ -546,14 +564,16 @@ impl DiskScanApp {
                 progress: &tx,
                 cancel: &cancel,
                 apparent_size,
-                hard_links: Default::default(),
+                hard_links: HardLinks::counted_elsewhere(elsewhere),
                 saw_hangul: &saw_hangul,
                 in_file_order: is_rotational(&path),
                 live: Some(&live),
             };
             let root = scan_dir(&path, &ctx);
             if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                let _ = tx.send(ScanMsg::Done(root, start.elapsed().as_secs_f64()));
+                let counted_at = std::mem::take(&mut *ctx.hard_links.counted_at.lock().unwrap());
+                let secs = start.elapsed().as_secs_f64();
+                let _ = tx.send(ScanMsg::Done(root, secs, counted_at));
             }
         });
     }
@@ -859,9 +879,17 @@ impl DiskScanApp {
                             add_ext(&mut self.live_exts, ext, size, files);
                         }
                     }
-                    Ok(ScanMsg::Done(node, secs)) => {
+                    Ok(ScanMsg::Done(node, secs, counted_at)) => {
                         self.live_tree = None;
                         self.colored_at = Some(Instant::now());
+                        match &self.graft {
+                            Some(g) => {
+                                let target = g.target.clone();
+                                self.link_owners.retain(|_, at| !at.starts_with(&target));
+                            }
+                            None => self.link_owners.clear(),
+                        }
+                        self.link_owners.extend(counted_at);
                         if self.graft.is_some() {
                             self.finish_graft(node);
                         } else {
@@ -903,6 +931,7 @@ impl eframe::App for DiskScanApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
+        self.note_paste_key(&ctx);
         let scan_backlog = self.poll_scan();
         // The live chart and table: the live tree, read every 100 ms as deep
         // as the chart currently shows.
