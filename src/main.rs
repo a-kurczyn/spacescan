@@ -574,6 +574,15 @@ impl DiskScanApp {
                     use std::sync::atomic::Ordering;
                     let stop =
                         || cancel.load(Ordering::Relaxed) || scan_finished.load(Ordering::Relaxed);
+                    // Only for scans that take a while: a quick one finishes
+                    // before the count would help, and shouldn't pay for it.
+                    let start = Instant::now();
+                    while start.elapsed() < std::time::Duration::from_millis(300) {
+                        if stop() {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
                     count_entries(&path, &mounts, &count.found, &stop);
                     if !stop() {
                         count.done.store(true, Ordering::Relaxed);
