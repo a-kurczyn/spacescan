@@ -1509,3 +1509,96 @@ mod mount_tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+#[cfg(test)]
+mod scan_dump {
+    use super::*;
+    use std::fmt::Write as _;
+    use std::os::unix::ffi::OsStrExt;
+
+    /// Writes everything a scan of $SPACEMAP_BENCH produces to
+    /// $SPACEMAP_DUMP, in a fixed order: every node's values, every finished
+    /// folder's report, every error and unreadable folder. Two versions of
+    /// the scanner must give identical files (run with RAYON_NUM_THREADS=1
+    /// where hard links are shared between folders: which name counts them
+    /// depends on thread timing). $SPACEMAP_APPARENT=1 counts apparent sizes.
+    /// Run with `cargo test --release scan_dump -- --ignored`.
+    #[test]
+    #[ignore]
+    fn scan_dump() {
+        let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").unwrap());
+        let out = std::env::var("SPACEMAP_DUMP").unwrap();
+        let apparent = std::env::var_os("SPACEMAP_APPARENT").is_some();
+        let (tx, rx) = channel();
+        let collect = std::thread::spawn(move || {
+            let mut lines = Vec::new();
+            for msg in rx {
+                match msg {
+                    ScanMsg::SliceDone {
+                        path,
+                        size,
+                        file_count,
+                        mode,
+                        mtime,
+                        ctime,
+                        uid,
+                        gid,
+                        exts,
+                        ..
+                    } => {
+                        let mut exts = exts;
+                        exts.sort();
+                        lines.push(format!("DONE {} {size} {file_count} {mode} {mtime} {ctime} {uid} {gid} {exts:?}", path.as_os_str().as_bytes().escape_ascii()));
+                    }
+                    ScanMsg::LogError(e) => lines.push(format!("ERR {e}")),
+                    ScanMsg::Unreadable(p) => lines.push(format!(
+                        "UNREADABLE {}",
+                        p.as_os_str().as_bytes().escape_ascii()
+                    )),
+                    _ => {}
+                }
+            }
+            lines
+        });
+        let ctx = ScanCtx {
+            mounts: &mount_points(),
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &Default::default(),
+            progress_interval: 512,
+            apparent_size: apparent,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: None,
+        };
+        let tree = scan_dir(&dir, &ctx);
+        drop(tx);
+        let mut lines = collect.join().unwrap();
+        fn walk(n: &Node, lines: &mut Vec<String>) {
+            let mut s = String::new();
+            let _ = write!(
+                s,
+                "NODE {} | {} | {} {} {} {} {} {} {} {} {}",
+                n.path.as_os_str().as_bytes().escape_ascii(),
+                n.name,
+                n.size,
+                n.file_count,
+                n.is_dir,
+                n.mode,
+                n.mtime,
+                n.ctime,
+                n.uid,
+                n.gid,
+                n.btime
+            );
+            lines.push(s);
+            for c in &n.children {
+                walk(c, lines);
+            }
+        }
+        walk(&tree, &mut lines);
+        lines.sort();
+        std::fs::write(out, lines.join("\n")).unwrap();
+    }
+}
