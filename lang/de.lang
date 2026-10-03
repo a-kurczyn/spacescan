@@ -65,7 +65,10 @@ SETTINGS_UNLIMITED_SLICES_HOVER=Zeigt jedes Element als eigenes Segment, egal wi
 SETTINGS_HUB_SIZE=Größe der Mitte
 SETTINGS_COLORS=Farben
 SETTINGS_AGE_DAYS=Alter für die dunkelsten Segmente (Tage)
-SETTINGS_AGE_DAYS_HOVER=Segmente erhalten die Farbe der Kategorie mit dem meisten Platz und werden mit dem Durchschnittsalter ihres Inhalts dunkler (nach Statusänderung: wann die Daten auf diesen Datenträger kamen), in drei Stufen von neu bis zu dieser Anzahl Tage oder älter.
+SETTINGS_AGE_DAYS_HOVER=Segmente erhalten die Farbe der Kategorie mit dem meisten Platz und verlaufen entlang ihres Bogens von der Stufe ihrer neuesten zur Stufe ihrer ältesten Datei (nach Statusänderung: wann die Daten auf diesen Datenträger kamen). Dateien, die so viele Tage oder älter sind, bekommen die dunkelste Stufe.
+SETTINGS_AGE_STEPS=Altersstufen
+SETTINGS_AGE_DARKEST=Helligkeit der dunkelsten Stufe
+SETTINGS_AGE_DARKEST_HOVER=Helligkeit der ältesten Segmente im Vergleich zur Kategoriefarbe (100 % = nicht abgedunkelt).
 AGE_LEGEND_NEW=Neu
 AGE_LEGEND_OLD=%s Tage oder älter
 SETTINGS_FREE_GAMMA=Gamma des freien Speichers (<1 hellt auf)

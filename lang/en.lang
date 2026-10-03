@@ -79,7 +79,10 @@ SETTINGS_UNLIMITED_SLICES_HOVER=Shows every item as its own slice, however many 
 SETTINGS_HUB_SIZE=Center hub size
 SETTINGS_COLORS=Colors
 SETTINGS_AGE_DAYS=Age for darkest slices (days)
-SETTINGS_AGE_DAYS_HOVER=Slices are coloured by the category taking most of their space, and get darker with the average age of their contents (by Changed time: when the data arrived on this disk), in three steps from new to this many days or older.
+SETTINGS_AGE_DAYS_HOVER=Slices take the color of the category using most of their space, and blend along their arc from the shade of their newest file to the shade of their oldest (by Changed time: when the data arrived on this disk). Files this many days old or older get the darkest shade.
+SETTINGS_AGE_STEPS=Age shades
+SETTINGS_AGE_DARKEST=Darkest shade brightness
+SETTINGS_AGE_DARKEST_HOVER=Brightness of the oldest slices, compared with the category color (100% = no darkening).
 AGE_LEGEND_NEW=New
 AGE_LEGEND_OLD=%s days or older
 SETTINGS_FREE_GAMMA=Free-space gamma (<1 lightens)

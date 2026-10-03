@@ -65,7 +65,10 @@ SETTINGS_UNLIMITED_SLICES_HOVER=Mostra ogni elemento come spicchio a sé, quanti
 SETTINGS_HUB_SIZE=Dimensione del centro
 SETTINGS_COLORS=Colori
 SETTINGS_AGE_DAYS=Età degli spicchi più scuri (giorni)
-SETTINGS_AGE_DAYS_HOVER=Gli spicchi prendono il colore della categoria che occupa più spazio e si scuriscono con l'età media del contenuto (data di cambiamento: quando i dati sono arrivati su questo disco), in tre passi dal nuovo a questo numero di giorni o più.
+SETTINGS_AGE_DAYS_HOVER=Gli spicchi prendono il colore della categoria che occupa più spazio e sfumano lungo l'arco dalla tonalità del file più recente a quella del più vecchio (data di cambiamento: quando i dati sono arrivati su questo disco). I file vecchi di questi giorni o più hanno la tonalità più scura.
+SETTINGS_AGE_STEPS=Tonalità di età
+SETTINGS_AGE_DARKEST=Luminosità della tonalità più scura
+SETTINGS_AGE_DARKEST_HOVER=Luminosità degli spicchi più vecchi rispetto al colore della categoria (100% = nessun scurimento).
 AGE_LEGEND_NEW=Nuovo
 AGE_LEGEND_OLD=%s giorni o più
 SETTINGS_FREE_GAMMA=Gamma dello spazio libero (<1 schiarisce)

@@ -644,6 +644,16 @@ impl DiskScanApp {
                         )
                         .on_hover_text(tr("SETTINGS_AGE_DAYS_HOVER"));
                         ui.add(
+                            egui::Slider::new(&mut s.age_steps, Settings::AGE_STEPS)
+                                .text(tr("SETTINGS_AGE_STEPS")),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut s.age_darkest_pct, Settings::AGE_DARKEST)
+                                .suffix("%")
+                                .text(tr("SETTINGS_AGE_DARKEST")),
+                        )
+                        .on_hover_text(tr("SETTINGS_AGE_DARKEST_HOVER"));
+                        ui.add(
                             egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
                                 .text(tr("SETTINGS_FREE_GAMMA")),
                         );
@@ -860,7 +870,7 @@ impl DiskScanApp {
             };
             ui.scope(|ui| {
                 ui.set_opacity(fade);
-                age_legend_ui(ui, self.settings.age_days);
+                age_legend_ui(ui, &self.settings.age_shades());
             });
         });
         central.response.rect
@@ -1595,8 +1605,10 @@ impl DiskScanApp {
                     } else {
                         looks.of(get_node(view, &seg.idx_path), &self.cats)
                     };
-                    let (newest, oldest) =
-                        look_colors(&look, now, self.settings.age_days, &self.cats, dark);
+                    let (newest, oldest) = self
+                        .settings
+                        .age_shades()
+                        .look_colors(&look, now, &self.cats, dark);
                     let fade = self.color_fade();
                     let finish = |c: Color32| {
                         // "Other" is paler, to read as a group.
@@ -2062,12 +2074,12 @@ struct SliceColoring<'a> {
 }
 
 /// The legend for slice brightness: one swatch per step, from new (bright)
-/// to `age_days` or older (dark), centered under the chart.
-fn age_legend_ui(ui: &mut egui::Ui, age_days: u32) {
+/// to `shades.days` or older (dark), centered under the chart.
+fn age_legend_ui(ui: &mut egui::Ui, shades: &AgeShades) {
     let base = ui.visuals().strong_text_color();
     let swatch = Vec2::new(14.0, 10.0);
     let new_text = tr("AGE_LEGEND_NEW");
-    let old_text = trf("AGE_LEGEND_OLD", &[&age_days.to_string()]);
+    let old_text = trf("AGE_LEGEND_OLD", &[&shades.days.to_string()]);
     let font = egui::TextStyle::Small.resolve(ui.style());
     let text_w = |t: &str| {
         ui.painter()
@@ -2076,14 +2088,17 @@ fn age_legend_ui(ui: &mut egui::Ui, age_days: u32) {
             .x
     };
     let spacing = ui.spacing().item_spacing.x;
-    let width =
-        text_w(&new_text) + text_w(&old_text) + AGE_STEPS as f32 * (swatch.x + 2.0) + 2.0 * spacing;
+    let width = text_w(&new_text)
+        + text_w(&old_text)
+        + f32::from(shades.steps) * (swatch.x + 2.0)
+        + 2.0 * spacing;
     ui.horizontal(|ui| {
         ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
         ui.label(egui::RichText::new(&new_text).small());
-        for step in 0..AGE_STEPS {
+        for step in 0..shades.steps {
             let (rect, _) = ui.allocate_exact_size(swatch, egui::Sense::hover());
-            ui.painter().rect_filled(rect, 1.0, shade(base, step));
+            ui.painter()
+                .rect_filled(rect, 1.0, shades.shade(base, step));
             ui.add_space(2.0 - spacing);
         }
         ui.add_space(spacing);

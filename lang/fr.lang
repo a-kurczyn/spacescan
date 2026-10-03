@@ -65,7 +65,10 @@ SETTINGS_UNLIMITED_SLICES_HOVER=Affiche chaque élément dans sa propre part, qu
 SETTINGS_HUB_SIZE=Taille du centre
 SETTINGS_COLORS=Couleurs
 SETTINGS_AGE_DAYS=Âge des parts les plus sombres (jours)
-SETTINGS_AGE_DAYS_HOVER=Les parts prennent la couleur de la catégorie qui occupe le plus de place et s'assombrissent selon l'âge moyen de leur contenu (date de changement : arrivée des données sur ce disque), en trois paliers du plus récent jusqu'à ce nombre de jours ou plus.
+SETTINGS_AGE_DAYS_HOVER=Les parts prennent la couleur de la catégorie qui occupe le plus de place et passent, le long de leur arc, de la nuance de leur fichier le plus récent à celle du plus ancien (date de changement : arrivée des données sur ce disque). Les fichiers de cet âge en jours ou plus ont la nuance la plus sombre.
+SETTINGS_AGE_STEPS=Nuances d'âge
+SETTINGS_AGE_DARKEST=Luminosité de la nuance la plus sombre
+SETTINGS_AGE_DARKEST_HOVER=Luminosité des parts les plus anciennes, par rapport à la couleur de la catégorie (100 % = pas d'assombrissement).
 AGE_LEGEND_NEW=Récent
 AGE_LEGEND_OLD=%s jours ou plus
 SETTINGS_FREE_GAMMA=Gamma de l'espace libre (<1 éclaircit)

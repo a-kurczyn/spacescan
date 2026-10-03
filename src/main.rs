@@ -93,6 +93,10 @@ struct Settings {
     hub_radius_frac: f32,
     /// Days of age at which slices reach their darkest shade.
     age_days: u32,
+    /// How many shades of age there are.
+    age_steps: u8,
+    /// Brightness of the darkest shade, in percent.
+    age_darkest_pct: u8,
     free_space_gamma: f32,
     stroke_width: f32,
     stroke_alpha: u8,
@@ -118,6 +122,8 @@ impl Settings {
     const MAX_CHILDREN: RangeInclusive<usize> = 4..=360;
     const HUB: RangeInclusive<f32> = 0.05..=0.5;
     const AGE_DAYS: RangeInclusive<u32> = 7..=3650;
+    const AGE_STEPS: RangeInclusive<u8> = 2..=10;
+    const AGE_DARKEST: RangeInclusive<u8> = 10..=90;
     const FREE_GAMMA: RangeInclusive<f32> = 0.2..=1.5;
     const STROKE_WIDTH: RangeInclusive<f32> = 0.0..=3.0;
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
@@ -141,6 +147,12 @@ impl Settings {
         self.age_days = self
             .age_days
             .clamp(*Self::AGE_DAYS.start(), *Self::AGE_DAYS.end());
+        self.age_steps = self
+            .age_steps
+            .clamp(*Self::AGE_STEPS.start(), *Self::AGE_STEPS.end());
+        self.age_darkest_pct = self
+            .age_darkest_pct
+            .clamp(*Self::AGE_DARKEST.start(), *Self::AGE_DARKEST.end());
         self.free_space_gamma = self
             .free_space_gamma
             .clamp(*Self::FREE_GAMMA.start(), *Self::FREE_GAMMA.end());
@@ -163,6 +175,17 @@ impl Settings {
     }
 }
 
+impl Settings {
+    /// How age turns into slice brightness.
+    fn age_shades(&self) -> AgeShades {
+        AgeShades {
+            days: self.age_days,
+            steps: self.age_steps,
+            darkest: f32::from(self.age_darkest_pct) / 100.0,
+        }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -172,6 +195,8 @@ impl Default for Settings {
             unlimited_slices: false,
             hub_radius_frac: 0.22,
             age_days: 365,
+            age_steps: 3,
+            age_darkest_pct: 40,
             free_space_gamma: 0.7,
             stroke_width: 1.0,
             stroke_alpha: 90,

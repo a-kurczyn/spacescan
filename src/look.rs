@@ -142,46 +142,59 @@ impl Looks {
     }
 }
 
-/// Number of brightness steps.
-pub(crate) const AGE_STEPS: u8 = 3;
+/// How age turns into brightness: `steps` shades from the color as is
+/// (new) down to `darkest` brightness (`days` old or more).
+#[derive(Clone, Copy)]
+pub(crate) struct AgeShades {
+    pub(crate) days: u32,
+    pub(crate) steps: u8,
+    /// Brightness of the last step, 0 to 1.
+    pub(crate) darkest: f32,
+}
 
-/// Brightness step of an average Changed time: the time from now back to
-/// `age_days` is split evenly between the steps, and `age_days` or older
-/// (or unknown) is the last.
-pub(crate) fn age_step(avg_ctime: i64, now: i64, age_days: u32) -> u8 {
-    const DAY: f64 = 24.0 * 3600.0;
-    const LAST: u8 = AGE_STEPS - 1;
-    if avg_ctime == NO_TIME {
-        return LAST;
+impl AgeShades {
+    fn last(&self) -> u8 {
+        self.steps.max(2) - 1
     }
-    let days = (now - avg_ctime).max(0) as f64 / DAY;
-    let share = days / age_days.max(1) as f64;
-    ((share * LAST as f64) as u8).min(LAST)
-}
 
-/// `color` at brightness step `step`: 0 is the color as is, each step
-/// darker, down to 40% brightness at the last.
-pub(crate) fn shade(color: Color32, step: u8) -> Color32 {
-    let last = (AGE_STEPS - 1) as f32;
-    let factor = 1.0 - 0.6 * (step as f32).min(last) / last;
-    let scale = |v: u8| (v as f32 * factor).round() as u8;
-    Color32::from_rgb(scale(color.r()), scale(color.g()), scale(color.b()))
-}
+    /// Brightness step of a Changed time: the time from now back to
+    /// `days` is split evenly between the steps, and `days` or older (or
+    /// unknown) is the last.
+    pub(crate) fn step(&self, ctime: i64, now: i64) -> u8 {
+        const DAY: f64 = 24.0 * 3600.0;
+        let last = self.last();
+        if ctime == NO_TIME {
+            return last;
+        }
+        let days = (now - ctime).max(0) as f64 / DAY;
+        let share = days / self.days.max(1) as f64;
+        ((share * f64::from(last)) as u8).min(last)
+    }
 
-/// The colors a slice with look `look` blends between: the shade of its
-/// newest file, then of its oldest.
-pub(crate) fn look_colors(
-    look: &Look,
-    now: i64,
-    age_days: u32,
-    cats: &CategoryModel,
-    dark: bool,
-) -> (Color32, Color32) {
-    let base = cats.color(look.cat, dark);
-    (
-        shade(base, age_step(look.newest, now, age_days)),
-        shade(base, age_step(look.oldest, now, age_days)),
-    )
+    /// `color` at brightness step `step`: 0 is the color as is, each step
+    /// evenly darker, down to `darkest` at the last.
+    pub(crate) fn shade(&self, color: Color32, step: u8) -> Color32 {
+        let last = f32::from(self.last());
+        let factor = 1.0 - (1.0 - self.darkest) * f32::from(step).min(last) / last;
+        let scale = |v: u8| (v as f32 * factor).round() as u8;
+        Color32::from_rgb(scale(color.r()), scale(color.g()), scale(color.b()))
+    }
+
+    /// The colors a slice with look `look` blends between: the shade of its
+    /// newest file, then of its oldest.
+    pub(crate) fn look_colors(
+        &self,
+        look: &Look,
+        now: i64,
+        cats: &CategoryModel,
+        dark: bool,
+    ) -> (Color32, Color32) {
+        let base = cats.color(look.cat, dark);
+        (
+            self.shade(base, self.step(look.newest, now)),
+            self.shade(base, self.step(look.oldest, now)),
+        )
+    }
 }
 
 /// The current time in Unix seconds.
@@ -200,17 +213,19 @@ mod tests {
     #[test]
     fn age_steps_split_the_days_evenly() {
         let now = 1_000_000_000;
-        assert_eq!(age_step(now - DAY, now, 365), 0);
-        assert_eq!(age_step(now - 182 * DAY, now, 365), 0);
-        assert_eq!(age_step(now - 183 * DAY, now, 365), 1);
-        assert_eq!(age_step(now - 364 * DAY, now, 365), 1);
-        assert_eq!(age_step(now - 365 * DAY, now, 365), 2);
-        assert_eq!(age_step(now - 5000 * DAY, now, 365), 2);
-        assert_eq!(age_step(NO_TIME, now, 365), 2);
+        let shades = AgeShades {
+            days: 365,
+            steps: 3,
+            darkest: 0.4,
+        };
+        let step = |d: i64| shades.step(now - d * DAY, now);
+        assert_eq!([step(1), step(182), step(183), step(364)], [0, 0, 1, 1]);
+        assert_eq!([step(365), step(5000)], [2, 2]);
+        assert_eq!(shades.step(NO_TIME, now), 2);
+        let five = AgeShades { steps: 5, ..shades };
+        assert_eq!(five.step(now - 100 * DAY, now), 1);
         // Steps never go down as files get older.
-        let steps: Vec<u8> = (0..400)
-            .map(|d| age_step(now - d * DAY, now, 365))
-            .collect();
+        let steps: Vec<u8> = (0..400).map(step).collect();
         assert!(steps.windows(2).all(|p| p[0] <= p[1]));
     }
 
@@ -243,9 +258,15 @@ mod tests {
     #[test]
     fn shades_get_darker_with_age() {
         let c = Color32::from_rgb(200, 100, 50);
-        assert_eq!(shade(c, 0), c);
-        assert!(shade(c, 2).r() < shade(c, 1).r() && shade(c, 1).r() < c.r());
-        assert_eq!(shade(c, 2), Color32::from_rgb(80, 40, 20));
+        let shades = AgeShades {
+            days: 365,
+            steps: 3,
+            darkest: 0.4,
+        };
+        let shade = |s| shades.shade(c, s);
+        assert_eq!(shade(0), c);
+        assert!(shade(2).r() < shade(1).r() && shade(1).r() < c.r());
+        assert_eq!(shade(2), Color32::from_rgb(80, 40, 20));
     }
 }
 

@@ -66,7 +66,10 @@ SETTINGS_UNLIMITED_SLICES_HOVER=Muestra cada elemento como su propio segmento, s
 SETTINGS_HUB_SIZE=Tamaño del centro
 SETTINGS_COLORS=Colores
 SETTINGS_AGE_DAYS=Antigüedad de las porciones más oscuras (días)
-SETTINGS_AGE_DAYS_HOVER=Las porciones toman el color de la categoría que ocupa más espacio y se oscurecen según la antigüedad media de su contenido (por fecha de cambio: cuando los datos llegaron a este disco), en tres pasos desde lo nuevo hasta este número de días o más.
+SETTINGS_AGE_DAYS_HOVER=Las porciones toman el color de la categoría que ocupa más espacio y se degradan a lo largo de su arco desde el tono de su archivo más nuevo hasta el de su archivo más antiguo (por fecha de cambio: cuando los datos llegaron a este disco). Los archivos con esta antigüedad en días o más reciben el tono más oscuro.
+SETTINGS_AGE_STEPS=Tonos de antigüedad
+SETTINGS_AGE_DARKEST=Brillo del tono más oscuro
+SETTINGS_AGE_DARKEST_HOVER=Brillo de las porciones más antiguas, comparado con el color de la categoría (100% = sin oscurecer).
 AGE_LEGEND_NEW=Nuevo
 AGE_LEGEND_OLD=%s días o más
 SETTINGS_FREE_GAMMA=Gamma de espacio libre (<1 aclara)

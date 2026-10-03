@@ -65,7 +65,10 @@ SETTINGS_UNLIMITED_SLICES_HOVER=Mostra cada item como uma fatia própria, não i
 SETTINGS_HUB_SIZE=Tamanho do centro
 SETTINGS_COLORS=Cores
 SETTINGS_AGE_DAYS=Idade das fatias mais escuras (dias)
-SETTINGS_AGE_DAYS_HOVER=As fatias recebem a cor da categoria que ocupa mais espaço e escurecem conforme a idade média do conteúdo (pela data de alteração: quando os dados chegaram a este disco), em três passos do novo até este número de dias ou mais.
+SETTINGS_AGE_DAYS_HOVER=As fatias recebem a cor da categoria que ocupa mais espaço e passam, ao longo do arco, do tom do arquivo mais novo ao do mais antigo (pela data de alteração: quando os dados chegaram a este disco). Arquivos com esta idade em dias ou mais recebem o tom mais escuro.
+SETTINGS_AGE_STEPS=Tons de idade
+SETTINGS_AGE_DARKEST=Brilho do tom mais escuro
+SETTINGS_AGE_DARKEST_HOVER=Brilho das fatias mais antigas, comparado com a cor da categoria (100% = sem escurecer).
 AGE_LEGEND_NEW=Novo
 AGE_LEGEND_OLD=%s dias ou mais
 SETTINGS_FREE_GAMMA=Gama do espaço livre (<1 clareia)
