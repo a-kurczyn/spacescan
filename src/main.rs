@@ -1019,30 +1019,65 @@ impl eframe::App for DiskScanApp {
                 });
         }
 
-        // Chart view, once the scan is done: the categories of the folder on
-        // screen in the category bar's order, fading in with the slice colors.
-        if !self.summary_view
-            && !self.scanning
-            && let Some(root) = self.root.clone()
-        {
-            self.refresh_cat_breakdown(self.current_view_node(&root));
+        // Chart view: the categories in the category bar's order, bottom
+        // left. While scanning, those found so far, re-sorted as totals
+        // grow; each row glides to its new place.
+        if !self.summary_view && (self.scanning || self.root.is_some()) {
+            let rows: Vec<Category> = if self.scanning {
+                category_rows(&self.live_exts, &self.cats)
+                    .iter()
+                    .map(|r| r.cat)
+                    .collect()
+            } else {
+                let root = self.root.clone().expect("checked above");
+                self.refresh_cat_breakdown(self.current_view_node(&root));
+                self.cat_breakdown.iter().map(|r| r.cat).collect()
+            };
             let dark = ctx.global_style().visuals.dark_mode;
-            let fade = self.color_fade();
             egui::Area::new("category_legend".into())
                 .order(egui::Order::Foreground)
                 .interactable(false)
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
                 .show(&ctx, |ui| {
-                    ui.set_opacity(fade);
-                    for row in &self.cat_breakdown {
-                        ui.horizontal(|ui| {
-                            let (swatch, _) =
-                                ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
-                            ui.painter()
-                                .rect_filled(swatch, 2.0, self.cats.color(row.cat, dark));
-                            ui.label(egui::RichText::new(self.cats.label(row.cat)).small());
-                        });
+                    let font = egui::TextStyle::Small.resolve(ui.style());
+                    let text_color = ui.visuals().text_color();
+                    let labels: Vec<_> = rows
+                        .iter()
+                        .map(|&c| {
+                            ui.painter().layout_no_wrap(
+                                self.cats.label(c),
+                                font.clone(),
+                                text_color,
+                            )
+                        })
+                        .collect();
+                    const SWATCH: f32 = 10.0;
+                    let gap = ui.spacing().item_spacing.x;
+                    let row_h = font.size.max(SWATCH) + ui.spacing().item_spacing.y + 4.0;
+                    let width =
+                        labels.iter().map(|g| g.size().x).fold(0.0, f32::max) + SWATCH + gap;
+                    let (rect, _) = ui.allocate_exact_size(
+                        Vec2::new(width, row_h * rows.len() as f32),
+                        egui::Sense::hover(),
+                    );
+                    for (i, (&cat, label)) in rows.iter().zip(labels).enumerate() {
+                        // Glides to row `i` when the order changes.
+                        let y = ui.ctx().animate_value_with_time(
+                            egui::Id::new(("legend_row", cat.0)),
+                            i as f32 * row_h,
+                            0.25,
+                        );
+                        let top = rect.top() + y;
+                        let mid = top + row_h / 2.0;
+                        let swatch = egui::Rect::from_center_size(
+                            Pos2::new(rect.left() + SWATCH / 2.0, mid),
+                            Vec2::splat(SWATCH),
+                        );
+                        ui.painter()
+                            .rect_filled(swatch, 2.0, self.cats.color(cat, dark));
+                        let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
+                        ui.painter().galley(at, label, text_color);
                     }
                 });
         }
