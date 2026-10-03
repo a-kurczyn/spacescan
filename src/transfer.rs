@@ -117,6 +117,8 @@ pub(crate) struct Transfer {
     job: Option<Job>,
     /// When the last paste with text arrived (see `clipboard_events`).
     text_pasted_at: Option<Instant>,
+    /// A V key press reached the app and its release hasn't yet.
+    v_down: bool,
 }
 
 /// The worker gave up: the user cancelled.
@@ -718,10 +720,20 @@ impl DiskScanApp {
                     egui::Event::Paste(t) => text = Some(t.clone()),
                     egui::Event::Key {
                         key: egui::Key::V,
+                        pressed: true,
+                        ..
+                    } => self.transfer.v_down = true,
+                    egui::Event::Key {
+                        key: egui::Key::V,
                         pressed: false,
                         modifiers,
                         ..
-                    } if modifiers.command => v_released = true,
+                    } => {
+                        // The press of Ctrl+V never reaches the app, and on X11
+                        // the release can come without Ctrl.
+                        let press_hidden = !std::mem::take(&mut self.transfer.v_down);
+                        v_released |= modifiers.command || press_hidden;
+                    }
                     _ => {}
                 }
             }
