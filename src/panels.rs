@@ -62,9 +62,7 @@ impl DiskScanApp {
         let current_path: Option<PathBuf> = if self.scanning {
             Some(self.partial_root.path())
         } else {
-            root_arc
-                .as_ref()
-                .map(|r| get_node(r, &cur_view_idx).path())
+            root_arc.as_ref().map(|r| get_node(r, &cur_view_idx).path())
         };
         let home = home_dir();
         let mut filters_toggled = false;
@@ -345,9 +343,7 @@ impl DiskScanApp {
         }
         if open_picker {
             // Open the dialog at the folder currently shown, if any.
-            let start_dir = root_arc
-                .as_ref()
-                .map(|r| get_node(r, &cur_view_idx).path());
+            let start_dir = root_arc.as_ref().map(|r| get_node(r, &cur_view_idx).path());
             self.folder_pick_rx = Some(pick_folder_async(start_dir));
         }
         if let Some(result) = self.folder_pick_rx.as_ref().map(|rx| rx.try_recv()) {
@@ -1282,7 +1278,11 @@ impl DiskScanApp {
                 Pick::Category(_) => "CAT_NONE_HERE",
                 Pick::Extensions(_) => "EXT_NONE_HERE",
             };
-            let text = trn(key, hidden, &[&self.cats.pick_label(pick), &format_count(hidden)]);
+            let text = trn(
+                key,
+                hidden,
+                &[&self.cats.pick_label(pick), &format_count(hidden)],
+            );
             let label = ui.add(
                 egui::Label::new(egui::RichText::new(text).color(ui.visuals().warn_fg_color))
                     .wrap(),

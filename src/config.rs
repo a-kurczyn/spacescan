@@ -172,9 +172,7 @@ fn nearest_numbers(x: f64) -> Vec<Value> {
         if r < u64::MAX as f64 {
             out.push(Value::from(r as u64));
         }
-        out.extend(
-            [u64::MAX, u32::MAX.into(), u16::MAX.into(), u8::MAX.into()].map(Value::from),
-        );
+        out.extend([u64::MAX, u32::MAX.into(), u16::MAX.into(), u8::MAX.into()].map(Value::from));
         out
     }
 }
@@ -401,7 +399,9 @@ mod tests {
             assert_eq!(c.min_segment_angle_deg, *Settings::MIN_ANGLE.start());
             assert!(needs_save);
             assert_eq!(
-                problem.as_deref().map(|p| p.contains("chart.max_render_depth")),
+                problem
+                    .as_deref()
+                    .map(|p| p.contains("chart.max_render_depth")),
                 Some(true)
             );
         });

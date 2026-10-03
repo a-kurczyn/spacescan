@@ -202,11 +202,7 @@ fn widest_name(ui: &egui::Ui, rows: &Rows, view: &Node, flat: bool) -> f32 {
     const MEASURED: usize = 64;
     // Length in bytes: quick to get, and close enough to pick them.
     let len = |n: &Node| {
-        if flat {
-            n.path_len()
-        } else {
-            n.name.len()
-        }
+        if flat { n.path_len() } else { n.name.len() }
     };
     let mut by_len: Vec<(usize, usize)> = (0..rows.len())
         .map(|i| (len(rows.node(view, i)), i))
@@ -578,7 +574,12 @@ impl DiskScanApp {
     /// Draws the contents table of `view_node`, no taller than `max_height`.
     pub(crate) fn table_ui(&mut self, ui: &mut egui::Ui, view_node: &Node, max_height: f32) {
         // Marks belong to the folder they were made in.
-        if !self.table.marks_for.as_deref().is_some_and(|p| view_node.path_is(p)) {
+        if !self
+            .table
+            .marks_for
+            .as_deref()
+            .is_some_and(|p| view_node.path_is(p))
+        {
             self.table.marked.clear();
             self.table.marks_for = Some(view_node.path());
         }
@@ -682,7 +683,11 @@ impl DiskScanApp {
                     trf(
                         "TABLE_TAG_FOLDER_COUNTS",
                         &[
-                            &trn("COUNT_FOLDERS", order.folders, &[&format_count(order.folders)]),
+                            &trn(
+                                "COUNT_FOLDERS",
+                                order.folders,
+                                &[&format_count(order.folders)]
+                            ),
                             &trn("COUNT_FILES", files, &[&format_count(files)]),
                         ]
                     )
@@ -1165,8 +1170,7 @@ impl DiskScanApp {
         let mut idx: Vec<usize> = (0..children.len())
             .filter(|&i| {
                 let c = &children[i];
-                (key.show_dotfiles || !c.name.starts_with('.'))
-                    && !c.is_in(hidden)
+                (key.show_dotfiles || !c.name.starts_with('.')) && !c.is_in(hidden)
             })
             .collect();
         let cs = key.sort;

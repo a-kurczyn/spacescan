@@ -656,7 +656,11 @@ impl Grouped {
             },
         );
         let mut node = empty_node();
-        node.name = trn("SEG_OTHER_ITEMS", self.count as u64, &[&self.count.to_string()]);
+        node.name = trn(
+            "SEG_OTHER_ITEMS",
+            self.count as u64,
+            &[&self.count.to_string()],
+        );
         node.size = self.size;
         node.file_count = self.file_count;
         node.set_path(&path);
