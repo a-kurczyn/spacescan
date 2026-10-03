@@ -351,3 +351,5 @@ STATUS_NOT_ALL_COPIED=%s Elemente nicht vollständig kopiert (siehe Probleme)
 STATUS_NOT_ALL_COPIED_ONE=%s Element nicht vollständig kopiert (siehe Probleme)
 STATUS_NOT_ALL_MOVED=%s Elemente nicht vollständig verschoben: Was nicht verschoben werden konnte, ist noch am alten Ort (siehe Probleme)
 STATUS_NOT_ALL_MOVED_ONE=%s Element nicht vollständig verschoben: Was nicht verschoben werden konnte, ist noch am alten Ort (siehe Probleme)
+FILTER_CASE_NAME=Groß-/Kleinschreibung beachten
+A11Y_PATH_BAR=Ordnerpfad

@@ -10,15 +10,29 @@ const SETTINGS_PANEL_WIDTH: f32 = 480.0;
 
 /// A window of its own (it can be moved anywhere, even off the app's
 /// window), titled `title`, first `size` big; `open` turns false when it's
-/// closed. Where separate windows aren't possible, it floats over the app.
+/// closed. Where separate windows aren't possible, and while a screen
+/// reader is in use (it only sees the app's main window), it floats over
+/// the app instead. `ui` is the one opening it.
 fn tool_window(
-    ctx: &egui::Context,
+    ui: &egui::Ui,
     id: &str,
     title: &str,
     size: [f32; 2],
     open: &mut bool,
     mut add_contents: impl FnMut(&mut egui::Ui),
 ) {
+    let ctx = ui.ctx();
+    // The accessibility tree is only built while a screen reader asks for it.
+    let screen_reader = ctx.accesskit_node_builder(ui.id(), |_| ()).is_some();
+    if screen_reader {
+        egui::Window::new(title)
+            .id(egui::Id::new(id))
+            .default_size(size)
+            .collapsible(false)
+            .open(open)
+            .show(ctx, |ui| add_contents(ui));
+        return;
+    }
     let viewport = egui::ViewportBuilder::default()
         .with_title(title)
         .with_inner_size(size)
@@ -170,6 +184,10 @@ impl DiskScanApp {
                                 .desired_width(ui.available_width())
                                 .hint_text(tr("TOOLBAR_PATH_HINT")),
                         );
+                        // Its name for screen readers (it has no label on screen).
+                        ui.ctx().accesskit_node_builder(resp.id, |node| {
+                            node.set_label(tr("A11Y_PATH_BAR"));
+                        });
                         if focus_path_edit {
                             resp.request_focus();
                         }
@@ -402,7 +420,7 @@ impl DiskScanApp {
             // Wide enough for a label and two date fields.
             let size = [FILTER_PANEL_WIDTH, 420.0];
             tool_window(
-                ui.ctx(),
+                ui,
                 "filters_window",
                 &tr("FILTER_TITLE"),
                 size,
@@ -413,14 +431,18 @@ impl DiskScanApp {
                     // outline with the reason on hover. True when Enter was pressed.
                     let mut invalid_fields = 0;
                     let error_color = ui.visuals().error_fg_color;
+                    // Screen readers name each field by its row and column labels.
                     let mut field = |ui: &mut egui::Ui,
                                      value: &mut String,
                                      hint: &str,
-                                     check: &dyn Fn(&str) -> Result<(), String>|
+                                     check: &dyn Fn(&str) -> Result<(), String>,
+                                     labels: [egui::Id; 2]|
                      -> bool {
                         let size = Vec2::new(130.0, ui.spacing().interact_size.y);
-                        let mut r =
-                            ui.add_sized(size, egui::TextEdit::singleline(value).hint_text(hint));
+                        let mut r = ui
+                            .add_sized(size, egui::TextEdit::singleline(value).hint_text(hint))
+                            .labelled_by(labels[0])
+                            .labelled_by(labels[1]);
                         if value.trim().is_empty() {
                             // empty: no limit
                         } else if let Err(e) = check(value) {
@@ -439,7 +461,7 @@ impl DiskScanApp {
                     let date_ok = |s: &str| parse_date(s, false).map(|_| ());
                     let f = &mut self.filter_form;
 
-                    ui.label(tr("FILTER_NAME_LABEL"));
+                    let name_label = ui.label(tr("FILTER_NAME_LABEL")).id;
                     // The Aa toggle first; the name field fills the room left.
                     let r = ui
                         .horizontal(|ui| {
@@ -448,11 +470,17 @@ impl DiskScanApp {
                             } else {
                                 tr("FILTER_CASE_INSENSITIVE")
                             };
-                            if ui
-                                .add(egui::Button::new("Aa").selected(f.case_sensitive))
-                                .on_hover_text(case_tip)
-                                .clicked()
-                            {
+                            let case = ui.add(egui::Button::new("Aa").selected(f.case_sensitive));
+                            let on = f.case_sensitive;
+                            case.widget_info(|| {
+                                egui::WidgetInfo::selected(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    on,
+                                    tr("FILTER_CASE_NAME"),
+                                )
+                            });
+                            if case.on_hover_text(case_tip).clicked() {
                                 f.case_sensitive = !f.case_sensitive;
                             }
                             ui.add(
@@ -460,6 +488,7 @@ impl DiskScanApp {
                                     .hint_text(tr("FILTER_NAME_HINT"))
                                     .desired_width(f32::INFINITY),
                             )
+                            .labelled_by(name_label)
                             .on_hover_text(tr("FILTER_NAME_HOVER"))
                         })
                         .inner;
@@ -474,26 +503,23 @@ impl DiskScanApp {
                         .show(ui, |ui| {
                             let mut enter = false;
                             ui.label("");
-                            ui.weak(tr("FILTER_COL_FROM_MIN"));
-                            ui.weak(tr("FILTER_COL_TO_MAX"));
+                            let from = ui.weak(tr("FILTER_COL_FROM_MIN")).id;
+                            let to = ui.weak(tr("FILTER_COL_TO_MAX")).id;
                             ui.end_row();
-                            ui.label(tr("FILTER_ROW_SIZE"));
-                            enter |=
-                                field(ui, &mut f.min_size, &tr("FILTER_HINT_SIZE_MIN"), &size_ok);
-                            enter |=
-                                field(ui, &mut f.max_size, &tr("FILTER_HINT_SIZE_MAX"), &size_ok);
+                            let row = ui.label(tr("FILTER_ROW_SIZE")).id;
+                            let hint_min = tr("FILTER_HINT_SIZE_MIN");
+                            let hint_max = tr("FILTER_HINT_SIZE_MAX");
+                            enter |= field(ui, &mut f.min_size, &hint_min, &size_ok, [row, from]);
+                            enter |= field(ui, &mut f.max_size, &hint_max, &size_ok, [row, to]);
                             ui.end_row();
-                            ui.label(tr("FILTER_ROW_CREATED"));
-                            enter |=
-                                field(ui, &mut f.min_created, &tr("FILTER_HINT_DATE"), &date_ok);
-                            enter |=
-                                field(ui, &mut f.max_created, &tr("FILTER_HINT_DATE"), &date_ok);
+                            let row = ui.label(tr("FILTER_ROW_CREATED")).id;
+                            let hint = tr("FILTER_HINT_DATE");
+                            enter |= field(ui, &mut f.min_created, &hint, &date_ok, [row, from]);
+                            enter |= field(ui, &mut f.max_created, &hint, &date_ok, [row, to]);
                             ui.end_row();
-                            ui.label(tr("FILTER_ROW_MODIFIED"));
-                            enter |=
-                                field(ui, &mut f.min_modified, &tr("FILTER_HINT_DATE"), &date_ok);
-                            enter |=
-                                field(ui, &mut f.max_modified, &tr("FILTER_HINT_DATE"), &date_ok);
+                            let row = ui.label(tr("FILTER_ROW_MODIFIED")).id;
+                            enter |= field(ui, &mut f.min_modified, &hint, &date_ok, [row, from]);
+                            enter |= field(ui, &mut f.max_modified, &hint, &date_ok, [row, to]);
                             ui.end_row();
                             enter
                         });
@@ -596,7 +622,7 @@ impl DiskScanApp {
             let mut open = true;
             let size = [SETTINGS_PANEL_WIDTH, 620.0];
             tool_window(
-                ui.ctx(),
+                ui,
                 "settings_window",
                 &tr("SETTINGS_TITLE"),
                 size,
@@ -697,7 +723,7 @@ impl DiskScanApp {
                         }
 
                         ui.separator();
-                        ui.label(tr("SETTINGS_LANGUAGE"));
+                        let lang_label = ui.label(tr("SETTINGS_LANGUAGE")).id;
                         let langs = available_languages();
                         let current = current_lang_code();
                         let current_name = langs
@@ -714,7 +740,9 @@ impl DiskScanApp {
                                         lang_problem = lang_file_problem(code);
                                     }
                                 }
-                            });
+                            })
+                            .response
+                            .labelled_by(lang_label);
                     });
                 },
             );

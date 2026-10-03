@@ -352,3 +352,5 @@ STATUS_NOT_ALL_COPIED=%s itens não copiados por completo (veja Problemas)
 STATUS_NOT_ALL_COPIED_ONE=%s item não copiado por completo (veja Problemas)
 STATUS_NOT_ALL_MOVED=%s itens não movidos por completo: o que não pôde ser movido continua onde estava (veja Problemas)
 STATUS_NOT_ALL_MOVED_ONE=%s item não movido por completo: o que não pôde ser movido continua onde estava (veja Problemas)
+FILTER_CASE_NAME=Diferenciar maiúsculas
+A11Y_PATH_BAR=Caminho da pasta

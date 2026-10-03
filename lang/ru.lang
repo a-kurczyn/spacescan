@@ -342,3 +342,5 @@ COUNT_FOLDERS_FEW=%s папки
 STATUS_WITH_PROBLEMS=%s · %s
 STATUS_NOT_ALL_COPIED=Скопировано не полностью: %s (см. «Проблемы»)
 STATUS_NOT_ALL_MOVED=Перемещено не полностью: %s — то, что не удалось переместить, осталось на месте (см. «Проблемы»)
+FILTER_CASE_NAME=Учитывать регистр
+A11Y_PATH_BAR=Путь к папке

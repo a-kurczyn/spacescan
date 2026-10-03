@@ -338,3 +338,5 @@ COUNT_FOLDERS=フォルダー %s 個
 STATUS_WITH_PROBLEMS=%s · %s
 STATUS_NOT_ALL_COPIED=%s 件は完全にはコピーできませんでした (「問題」を参照)
 STATUS_NOT_ALL_MOVED=%s 件は完全には移動できませんでした。移動できなかったものは元の場所に残っています (「問題」を参照)
+FILTER_CASE_NAME=大文字と小文字を区別
+A11Y_PATH_BAR=フォルダーのパス

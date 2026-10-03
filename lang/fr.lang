@@ -351,3 +351,5 @@ STATUS_NOT_ALL_COPIED=%s éléments pas entièrement copiés (voir Problèmes)
 STATUS_NOT_ALL_COPIED_ONE=%s élément pas entièrement copié (voir Problèmes)
 STATUS_NOT_ALL_MOVED=%s éléments pas entièrement déplacés : ce qui n'a pas pu être déplacé est resté en place (voir Problèmes)
 STATUS_NOT_ALL_MOVED_ONE=%s élément pas entièrement déplacé : ce qui n'a pas pu être déplacé est resté en place (voir Problèmes)
+FILTER_CASE_NAME=Respecter la casse
+A11Y_PATH_BAR=Chemin du dossier

@@ -338,3 +338,5 @@ COUNT_FOLDERS=폴더 %s개
 STATUS_WITH_PROBLEMS=%s · %s
 STATUS_NOT_ALL_COPIED=%s개 항목을 완전히 복사하지 못함 (문제 참조)
 STATUS_NOT_ALL_MOVED=%s개 항목을 완전히 이동하지 못함: 이동하지 못한 것은 원래 위치에 남아 있음 (문제 참조)
+FILTER_CASE_NAME=대소문자 구분
+A11Y_PATH_BAR=폴더 경로

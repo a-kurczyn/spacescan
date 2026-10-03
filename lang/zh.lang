@@ -338,3 +338,5 @@ COUNT_FOLDERS=%s 个文件夹
 STATUS_WITH_PROBLEMS=%s · %s
 STATUS_NOT_ALL_COPIED=%s 项未完全复制（见“问题”）
 STATUS_NOT_ALL_MOVED=%s 项未完全移动：无法移动的部分仍在原处（见“问题”）
+FILTER_CASE_NAME=区分大小写
+A11Y_PATH_BAR=文件夹路径

@@ -369,3 +369,5 @@ STATUS_NOT_ALL_COPIED=%s items not fully copied (see Issues)
 STATUS_NOT_ALL_COPIED_ONE=%s item not fully copied (see Issues)
 STATUS_NOT_ALL_MOVED=%s items not fully moved: what couldn't be moved is still where it was (see Issues)
 STATUS_NOT_ALL_MOVED_ONE=%s item not fully moved: what couldn't be moved is still where it was (see Issues)
+FILTER_CASE_NAME=Match case
+A11Y_PATH_BAR=Folder path
