@@ -1896,7 +1896,9 @@ impl DiskScanApp {
 
             // Keyed by path: egui remembers an area's size per id, and one id for
             // every item would keep the box as wide as the widest seen.
+            // Above the chart's other overlays (the category legend, …).
             egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path))
+                .order(egui::Order::Tooltip)
                 .pivot(align)
                 .fixed_pos(p + offset)
                 .show(&ctx, |ui| {
