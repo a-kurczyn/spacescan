@@ -116,6 +116,22 @@ struct RowGeometry {
 }
 
 impl RowGeometry {
+    /// The geometry, if every value is a real position. (A row not laid out
+    /// yet reports an endless rectangle, which must never become a scroll
+    /// position: nothing could be drawn there again.)
+    fn checked(self) -> Option<RowGeometry> {
+        let RowGeometry {
+            pitch,
+            first_top,
+            offset,
+            visible,
+        } = self;
+        ([first_top, offset, visible].iter().all(|v| v.is_finite())
+            && pitch.is_finite()
+            && pitch > 0.0)
+            .then_some(self)
+    }
+
     /// The scroll position that brings row `i` into view, moving as little
     /// as possible; None if it's in view already.
     fn offset_showing(&self, i: usize) -> Option<f32> {
@@ -852,8 +868,8 @@ impl DiskScanApp {
                 .max_height(max_height)
                 .auto_shrink([false, true])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
-            if let Some(y) = scroll_to {
-                scroll_area = scroll_area.vertical_scroll_offset(y);
+            if let Some(y) = scroll_to.filter(|y| y.is_finite()) {
+                scroll_area = scroll_area.vertical_scroll_offset(y.max(0.0));
             }
             let scrolled = scroll_area.show(ui, |ui| {
                 let table_salt = ("contents_table", layout_key.join(","));
@@ -1075,7 +1091,7 @@ impl DiskScanApp {
                             });
                         }
                         let r = tr_row.response();
-                        if first_drawn.is_none() {
+                        if first_drawn.is_none() && r.rect.top().is_finite() {
                             first_drawn = Some((i, r.rect.top()));
                         }
                         // Ctrl+click marks like Space (a second click unmarks, never opens).
@@ -1093,12 +1109,15 @@ impl DiskScanApp {
                 let pitch = row_h + ui.spacing().item_spacing.y;
                 let offset = scrolled.state.offset.y;
                 let content_top = scrolled.inner_rect.top() - offset;
-                drawn_geometry.set(Some(RowGeometry {
-                    pitch,
-                    first_top: top - content_top - i as f32 * pitch,
-                    offset,
-                    visible: scrolled.inner_rect.height(),
-                }));
+                drawn_geometry.set(
+                    RowGeometry {
+                        pitch,
+                        first_top: top - content_top - i as f32 * pitch,
+                        offset,
+                        visible: scrolled.inner_rect.height(),
+                    }
+                    .checked(),
+                );
             }
         });
         self.table.row_geometry = drawn_geometry.get().or(self.table.row_geometry);
@@ -2157,6 +2176,36 @@ mod flat_tests {
 #[cfg(test)]
 mod cursor_tests {
     use super::*;
+
+    /// Rows not laid out yet report endless or undefined positions; none of
+    /// them may become scroll geometry, while real ones do, even far down a
+    /// huge list.
+    #[test]
+    fn row_geometry_takes_only_real_positions() {
+        let g = |pitch, first_top, offset, visible| RowGeometry {
+            pitch,
+            first_top,
+            offset,
+            visible,
+        };
+        let bad = [f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
+        for b in bad {
+            assert!(g(29.0, b, 0.0, 1000.0).checked().is_none());
+            assert!(g(29.0, 33.0, b, 1000.0).checked().is_none());
+            assert!(g(29.0, 33.0, 0.0, b).checked().is_none());
+            assert!(g(b, 33.0, 0.0, 1000.0).checked().is_none());
+        }
+        assert!(g(0.0, 33.0, 0.0, 1000.0).checked().is_none());
+        assert!(g(-1.0, 33.0, 0.0, 1000.0).checked().is_none());
+        let real = g(29.0, 33.0, 0.0, 1000.0).checked().unwrap();
+        for i in [0, 1, 34, 35, 299, 99_999] {
+            if let Some(y) = real.offset_showing(i) {
+                assert!(y.is_finite() && y >= 0.0, "row {i}: {y}");
+            }
+        }
+        assert_eq!(real.offset_showing(0), None);
+        assert!(real.offset_showing(99_999).unwrap() > 2_000_000.0);
+    }
 
     /// A table showing a folder of `names` (sizes descending), sorted by
     /// size, largest first.
