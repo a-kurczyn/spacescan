@@ -57,6 +57,20 @@ impl CategoryModel {
     /// The category of a file called `name`, by its extension (any case);
     /// Other if it has none or it isn't listed.
     pub(crate) fn of_name(&self, name: &str) -> Category {
+        // Short ASCII extensions (nearly all) are lowercased on the stack,
+        // without allocating: this runs for every file during a scan.
+        let ext = match name.rfind('.') {
+            Some(i) if i > 0 => &name[i + 1..],
+            _ => return self.of_ext(&ext_key(name)),
+        };
+        let mut buf = [0u8; 16];
+        if ext.len() <= buf.len() && ext.is_ascii() {
+            let lower = &mut buf[..ext.len()];
+            lower.copy_from_slice(ext.as_bytes());
+            lower.make_ascii_lowercase();
+            // ASCII stays valid UTF-8.
+            return self.of_ext(std::str::from_utf8(lower).unwrap_or_default());
+        }
         self.of_ext(&ext_key(name))
     }
 
@@ -361,6 +375,26 @@ pub(crate) fn find_by_path<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The quick path of `of_name` agrees with `ext_key`.
+    #[test]
+    fn of_name_matches_ext_key() {
+        let m = CategoryModel::defaults();
+        for name in [
+            "a.MKV",
+            "b.pdf",
+            ".bashrc",
+            "noext",
+            "x.",
+            "tar.gz",
+            "Ü.JPG",
+            "f.ÉML",
+            "long.abcdefghijklmnopqrstuvwxyz",
+            "a.b.Mp4",
+        ] {
+            assert_eq!(m.of_name(name), m.of_ext(&ext_key(name)), "{name}");
+        }
+    }
 
     fn named(m: &CategoryModel, file: &str) -> String {
         m.label(m.of_name(file))

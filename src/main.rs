@@ -234,6 +234,8 @@ struct DiskScanApp {
     /// finished, and when: the live chart's colors, and the fade-in times
     /// kept for the finished chart.
     live_looks: LiveLooks,
+    /// The running scan's counters, read every 100 ms into `live_looks`.
+    live_counters: Option<Arc<LiveCounters>>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -402,6 +404,7 @@ impl Default for DiskScanApp {
             looks: None,
             colored_at: None,
             live_looks: Default::default(),
+            live_counters: None,
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::new(),
@@ -527,6 +530,8 @@ impl DiskScanApp {
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
+        let live = Arc::new(LiveCounters::new(self.cats.clone(), path.clone()));
+        self.live_counters = Some(live.clone());
         // A whole drive's progress is measured against its used space; other
         // folders need a counted total.
         let entry_count = self
@@ -580,6 +585,7 @@ impl DiskScanApp {
                 hard_links: Default::default(),
                 saw_hangul: &saw_hangul,
                 in_file_order: is_rotational(&path),
+                live: Some(&live),
             };
             let root = scan_dir(&path, &ctx);
             scan_finished.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -703,6 +709,7 @@ impl DiskScanApp {
     /// returns the memory.
     fn scan_ended(&mut self) {
         self.partial_root = empty_node();
+        self.live_counters = None;
         after_tree_dropped();
     }
 
@@ -887,19 +894,6 @@ impl DiskScanApp {
                             self.log_truncated += 1;
                         }
                     }
-                    Ok(ScanMsg::FilesFound {
-                        folder,
-                        exts,
-                        times,
-                    }) => {
-                        let root = self.partial_root.path.clone();
-                        self.live_looks
-                            .add_files(&folder, &root, &exts, times, &self.cats);
-                        for (ext, size, files) in exts {
-                            add_ext(&mut self.live_exts, ext, size, files);
-                        }
-                        self.partial_gen += 1;
-                    }
                     Ok(ScanMsg::SliceDone {
                         path,
                         size,
@@ -910,7 +904,7 @@ impl DiskScanApp {
                         uid,
                         gid,
                         exts,
-                        times,
+                        totals,
                     }) => {
                         graft_slice(
                             &mut self.partial_root,
@@ -923,10 +917,10 @@ impl DiskScanApp {
                             uid,
                             gid,
                         );
-                        if let Some(node) = crate::delete::find_node(&self.partial_root, &path) {
-                            let root = self.partial_root.path.clone();
-                            self.live_looks
-                                .folder_done(node, &root, &exts, times, &self.cats);
+                        if let (Some(node), Some(totals)) =
+                            (crate::delete::find_node(&self.partial_root, &path), &totals)
+                        {
+                            self.live_looks.folder_done(node, totals);
                         }
                         for (ext, size, files) in exts {
                             add_ext(&mut self.live_exts, ext, size, files);
@@ -934,6 +928,10 @@ impl DiskScanApp {
                         self.partial_gen += 1;
                     }
                     Ok(ScanMsg::Done(node, secs)) => {
+                        // A last read, so nothing waits for the next 100 ms.
+                        if let Some(counters) = self.live_counters.take() {
+                            self.live_looks.refresh_now(&counters);
+                        }
                         self.colored_at = Some(Instant::now());
                         if self.graft.is_some() {
                             self.finish_graft(node);
@@ -977,6 +975,12 @@ impl eframe::App for DiskScanApp {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
         let scan_backlog = self.poll_scan();
+        // The live chart's colors: the scan's counters, every 100 ms.
+        if self.scanning
+            && let Some(counters) = self.live_counters.clone()
+        {
+            self.live_looks.refresh(&counters);
+        }
         // The live looks' fade-in times are done with once the chart has
         // faded in.
         if !self.scanning && self.color_fade() >= 1.0 && !self.live_looks.is_empty() {
@@ -1039,10 +1043,7 @@ impl eframe::App for DiskScanApp {
         // grow; each row glides to its new place.
         if !self.summary_view && (self.scanning || self.root.is_some()) {
             let rows: Vec<Category> = if self.scanning {
-                category_rows(&self.live_exts, &self.cats)
-                    .iter()
-                    .map(|r| r.cat)
-                    .collect()
+                self.live_looks.order(&self.partial_root.path)
             } else {
                 let root = self.root.clone().expect("checked above");
                 self.refresh_cat_breakdown(self.current_view_node(&root));
