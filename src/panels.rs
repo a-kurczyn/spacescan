@@ -369,18 +369,13 @@ impl DiskScanApp {
         if let Some(p) = start_at {
             self.start_scan(p);
         }
-        if let Some(trimmed) = submit.as_deref().map(str::trim) {
-            if let Some(scheme_end) = trimmed.find("://") {
+        if let Some(typed) = submit.as_deref() {
+            if let Some(scheme_end) = typed.trim().find("://") {
                 // A network URL (smb://…) isn't a path until it's mounted: explain.
-                let scheme = &trimmed[..scheme_end];
+                let scheme = &typed.trim()[..scheme_end];
                 self.log_issue(trf("ERR_NETWORK_URL", &[scheme]));
             } else {
-                // "~" and "~/…" mean the home folder, as in a shell.
-                let p = match trimmed.strip_prefix('~') {
-                    Some("") => home_dir(),
-                    Some(rest) if rest.starts_with('/') => home_dir().join(&rest[1..]),
-                    _ => PathBuf::from(trimmed),
-                };
+                let p = typed_path(typed);
                 match std::fs::metadata(&p) {
                     Ok(m) if m.is_dir() => self.start_scan(p),
                     Ok(_) => self.log_issue(trf("ERR_NOT_A_DIRECTORY", &[&show_path(&p)])),
@@ -2434,5 +2429,53 @@ mod category_bar_tests {
             .map(|(_, n)| n.clone())
             .expect("a named .mkv row");
         assert!(row.toggled().is_some());
+    }
+}
+
+/// The path typed in the path bar: as typed if that exists (names may end
+/// in spaces), else without the spaces around it. "~" and "~/…" mean the
+/// home folder, as in a shell.
+pub(crate) fn typed_path(typed: &str) -> PathBuf {
+    let expand = |t: &str| match t.strip_prefix('~') {
+        Some("") => home_dir(),
+        Some(rest) if rest.starts_with('/') => home_dir().join(&rest[1..]),
+        _ => PathBuf::from(t),
+    };
+    let exact = expand(typed);
+    if typed != typed.trim() && std::fs::symlink_metadata(&exact).is_ok() {
+        exact
+    } else {
+        expand(typed.trim())
+    }
+}
+
+#[cfg(test)]
+mod typed_path_tests {
+    use super::*;
+
+    /// Names with spaces at either end open as typed; a pasted path with a
+    /// stray space or line break still opens when the exact name doesn't
+    /// exist; a name with the space wins over the same name without it.
+    #[test]
+    fn spaces_around_typed_paths() {
+        let dir = std::env::temp_dir().join(format!("spacemap-typed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for name in ["sp ", " lead", "both", "both ", "  "] {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+        }
+        let d = dir.display();
+        let at = |name: &str| dir.join(name);
+        assert_eq!(typed_path(&format!("{d}/sp ")), at("sp "));
+        assert_eq!(typed_path(&format!("{d}/ lead")), at(" lead"));
+        assert_eq!(typed_path(&format!("{d}/both ")), at("both "));
+        assert_eq!(typed_path(&format!("{d}/both")), at("both"));
+        assert_eq!(typed_path(&format!("  {d}/both\n")), at("both"));
+        assert_eq!(typed_path(&format!("{d}/both\n")), at("both"));
+        assert_eq!(typed_path(&format!("{d}/  ")), at("  "));
+        assert_eq!(typed_path(&format!("{d}/missing ")), at("missing"));
+        assert_eq!(typed_path("~"), home_dir());
+        assert_eq!(typed_path(" ~/x "), home_dir().join("x"));
+        assert_eq!(typed_path("~user"), PathBuf::from("~user"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
