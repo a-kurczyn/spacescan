@@ -9,8 +9,8 @@
 //! folders it copies. Links are copied as links, never followed.
 
 use super::*;
-use crate::delete::{find_node, mount_guard, remove_dir_one_fs};
-use std::os::unix::fs::MetadataExt;
+use crate::delete::{find_node, mount_guard};
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -48,19 +48,51 @@ pub(crate) struct Clash {
     can_replace: bool,
 }
 
+/// How putting one item in place went.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Outcome {
+    /// All of it got there.
+    Done,
+    /// Left out by a clash answer.
+    Skipped,
+    /// Some of it couldn't be copied or moved (see the issues).
+    Incomplete,
+}
+
+impl Outcome {
+    /// The outcome of a folder from its contents' outcomes.
+    fn and(self, other: Outcome) -> Outcome {
+        match (self, other) {
+            (Outcome::Incomplete, _) | (_, Outcome::Incomplete) => Outcome::Incomplete,
+            (Outcome::Done, _) | (_, Outcome::Done) => Outcome::Done,
+            _ => Outcome::Skipped,
+        }
+    }
+}
+
 /// What the worker reports.
 enum Report {
     /// Bytes done so far.
     Progress(u64),
     Clash(Clash),
     Issue(String),
-    /// Finished (or cancelled): the sources that were moved away, and how
-    /// many items were put in place.
-    Done {
-        moved: Vec<PathBuf>,
-        placed: usize,
-        cancelled: bool,
-    },
+    /// Nothing was done, for this reason.
+    Refused(String),
+    /// Finished (or cancelled).
+    Done(Results),
+}
+
+/// What a copy or move did.
+#[derive(Default, Debug)]
+struct Results {
+    /// The paths that no longer exist at the source.
+    removed: Vec<PathBuf>,
+    /// Items put in place completely, left out by a clash answer, or only
+    /// in part.
+    complete: usize,
+    skipped: usize,
+    incomplete: usize,
+    cancelled: bool,
 }
 
 /// A copy or move in progress.
@@ -75,6 +107,8 @@ struct Job {
     cancel: Arc<AtomicBool>,
     /// The clash waiting for an answer, and the "for every clash" tick box.
     clash: Option<(Clash, bool)>,
+    /// Problems so far, listed again after the target folder's rescan.
+    issues: Vec<String>,
 }
 
 #[derive(Default)]
@@ -99,6 +133,11 @@ struct Worker {
     always: Option<ClashChoice>,
     bytes: u64,
     last_report: Instant,
+    /// Files with several hard links copied so far, by (device, inode), and
+    /// where their copy is: their other names become links to it too.
+    links: HashMap<(u64, u64), PathBuf>,
+    /// Sources removed by a move (a folder in place of all it held).
+    removed: Vec<PathBuf>,
 }
 
 impl Worker {
@@ -145,15 +184,61 @@ impl Worker {
         }
     }
 
-    /// Puts `src` at `dst`. True if all of it got there (so a move can
-    /// remove the source).
-    fn put(&mut self, src: &Path, dst: &Path, mode: ClipMode) -> Result<bool, Stop> {
+    /// Err with the reason if the free space where `sources` go is less than
+    /// what copying them takes (a move within one filesystem takes none).
+    fn check_space(
+        &self,
+        sources: &[PathBuf],
+        known: &[Option<u64>],
+        target: &Path,
+        mode: ClipMode,
+    ) -> Result<(), String> {
+        let dev = |p: &Path| std::fs::symlink_metadata(p).map(|m| m.dev()).ok();
+        let mut seen = HashSet::new();
+        let mut needs = 0u64;
+        for (p, size) in sources.iter().zip(known) {
+            if mode == ClipMode::Move && dev(p) == dev(target) {
+                continue;
+            }
+            let size = size.unwrap_or_else(|| disk_usage(p, &self.mounts, &mut seen));
+            needs = needs.saturating_add(size);
+        }
+        match fs_space(target) {
+            Some((_, free)) if needs > free => Err(trf(
+                "ERR_NO_SPACE",
+                &[&show_path(target), &human_size(needs), &human_size(free)],
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Puts each of `sources` into the folder `target`.
+    fn put_all(&mut self, sources: &[PathBuf], target: &Path, mode: ClipMode) -> Results {
+        let mut r = Results::default();
+        for src in sources {
+            let dst = target.join(src.file_name().unwrap_or_default());
+            match self.put(src, &dst, mode) {
+                Ok(Outcome::Done) => r.complete += 1,
+                Ok(Outcome::Skipped) => r.skipped += 1,
+                Ok(Outcome::Incomplete) => r.incomplete += 1,
+                Err(Stop) => {
+                    r.cancelled = true;
+                    break;
+                }
+            }
+        }
+        r.removed = std::mem::take(&mut self.removed);
+        r
+    }
+
+    /// Puts `src` at `dst`, copying or moving it.
+    fn put(&mut self, src: &Path, dst: &Path, mode: ClipMode) -> Result<Outcome, Stop> {
         self.check_cancel()?;
         let meta = match std::fs::symlink_metadata(src) {
             Ok(m) => m,
             Err(e) => {
                 self.issue(trf("ERR_COPY_FAILED", &[&show_path(src), &io_reason(&e)]));
-                return Ok(false);
+                return Ok(Outcome::Incomplete);
             }
         };
         let mut dst = dst.to_path_buf();
@@ -166,7 +251,7 @@ impl Worker {
                 merge,
                 can_replace,
             })? {
-                ClashChoice::Skip => return Ok(false),
+                ClashChoice::Skip => return Ok(Outcome::Skipped),
                 ClashChoice::KeepBoth => dst = free_name(&dst),
                 ClashChoice::Replace if merge => return self.merge(src, &dst, mode),
                 ClashChoice::Replace => {}
@@ -176,77 +261,66 @@ impl Worker {
             match std::fs::rename(src, &dst) {
                 Ok(()) => {
                     self.add_bytes(meta.len());
-                    return Ok(true);
+                    self.removed.push(src.to_path_buf());
+                    return Ok(Outcome::Done);
                 }
-                // Another filesystem: copy, then remove the source.
+                // Another filesystem: copied, each part removed once there.
                 Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {}
                 Err(e) => {
                     self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
-                    return Ok(false);
+                    return Ok(Outcome::Incomplete);
                 }
             }
         }
-        let complete = self.copy(src, &dst, &meta)?;
-        if mode == ClipMode::Move && complete {
-            let removed = if meta.is_dir() {
-                remove_dir_one_fs(src, &self.mounts)
-            } else {
-                std::fs::remove_file(src)
-            };
-            if let Err(e) = removed {
-                self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
-                return Ok(false);
-            }
-        }
-        Ok(complete)
+        self.copy(src, &dst, &meta, mode == ClipMode::Move)
     }
 
     /// Puts the contents of folder `src` into the folder `dst` that's
-    /// already there; a move then removes `src` if it's empty.
-    fn merge(&mut self, src: &Path, dst: &Path, mode: ClipMode) -> Result<bool, Stop> {
+    /// already there; a move then removes `src` if nothing is left in it.
+    fn merge(&mut self, src: &Path, dst: &Path, mode: ClipMode) -> Result<Outcome, Stop> {
         let entries = match std::fs::read_dir(src) {
             Ok(rd) => rd.filter_map(|e| e.ok()).collect::<Vec<_>>(),
             Err(e) => {
                 self.issue(trf("ERR_COPY_FAILED", &[&show_path(src), &io_reason(&e)]));
-                return Ok(false);
+                return Ok(Outcome::Incomplete);
             }
         };
-        let mut complete = true;
-        for entry in entries {
+        let start = self.removed.len();
+        let mut outcome = Outcome::Done;
+        for (i, entry) in entries.iter().enumerate() {
             let name = entry.file_name();
-            complete &= deep(|| self.put(&src.join(&name), &dst.join(&name), mode))?;
+            let one = deep(|| self.put(&src.join(&name), &dst.join(&name), mode))?;
+            outcome = if i == 0 { one } else { outcome.and(one) };
         }
-        if mode == ClipMode::Move && complete {
-            let _ = std::fs::remove_dir(src);
+        if mode == ClipMode::Move && std::fs::remove_dir(src).is_ok() {
+            self.removed.truncate(start);
+            self.removed.push(src.to_path_buf());
         }
-        Ok(complete)
+        Ok(outcome)
     }
 
     /// Copies `src` (described by `meta`) to the new path `dst`, keeping
-    /// permissions and times. True if everything was copied.
-    fn copy(&mut self, src: &Path, dst: &Path, meta: &std::fs::Metadata) -> Result<bool, Stop> {
+    /// permissions, times and hard links between the files copied. With
+    /// `remove` (a move to another filesystem), each part of `src` is
+    /// removed as soon as it's in place, so whatever can't be moved is all
+    /// that stays.
+    fn copy(
+        &mut self,
+        src: &Path,
+        dst: &Path,
+        meta: &std::fs::Metadata,
+        remove: bool,
+    ) -> Result<Outcome, Stop> {
         self.check_cancel()?;
         let ft = meta.file_type();
         let failed = |w: &Self, e: std::io::Error| {
             w.issue(trf("ERR_COPY_FAILED", &[&show_path(src), &io_reason(&e)]));
-            Ok(false)
+            Ok(Outcome::Incomplete)
         };
-        if ft.is_symlink() {
-            let result = std::fs::read_link(src).and_then(|target| {
-                if std::fs::symlink_metadata(dst).is_ok() {
-                    std::fs::remove_file(dst)?;
-                }
-                std::os::unix::fs::symlink(target, dst)
-            });
-            return match result {
-                Ok(()) => Ok(true),
-                Err(e) => failed(self, e),
-            };
-        }
         if ft.is_dir() {
             if self.mounts.contains(src) {
                 self.issue(trf("ERR_OTHER_FS_SKIPPED", &[&show_path(src)]));
-                return Ok(false);
+                return Ok(Outcome::Incomplete);
             }
             if let Err(e) = std::fs::create_dir(dst) {
                 return failed(self, e);
@@ -255,43 +329,82 @@ impl Worker {
                 Ok(rd) => rd.filter_map(|e| e.ok()).collect::<Vec<_>>(),
                 Err(e) => return failed(self, e),
             };
-            let mut complete = true;
+            let start = self.removed.len();
+            let mut outcome = Outcome::Done;
             for entry in entries {
                 let child = entry.path();
-                match entry.metadata() {
-                    Ok(m) => {
-                        complete &= deep(|| self.copy(&child, &dst.join(entry.file_name()), &m))?
-                    }
-                    Err(e) => {
-                        complete = false;
-                        let _ = failed(self, e);
-                    }
-                }
+                let one = match entry.metadata() {
+                    Ok(m) => deep(|| self.copy(&child, &dst.join(entry.file_name()), &m, remove))?,
+                    Err(e) => failed(self, e)?,
+                };
+                outcome = outcome.and(one);
             }
             let _ = std::fs::set_permissions(dst, meta.permissions());
             keep_times(dst, meta);
-            return Ok(complete);
+            if remove && outcome == Outcome::Done {
+                match std::fs::remove_dir(src) {
+                    Ok(()) => {
+                        self.removed.truncate(start);
+                        self.removed.push(src.to_path_buf());
+                    }
+                    Err(e) => {
+                        self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
+                        return Ok(Outcome::Incomplete);
+                    }
+                }
+            }
+            return Ok(outcome);
         }
-        if !ft.is_file() {
+        // Another name of a file already copied: linked to that copy. (Its
+        // link count may have dropped since: a move removes names it copied.)
+        let key = (meta.dev(), meta.ino());
+        let linked = if ft.is_symlink() {
+            None
+        } else {
+            self.links.get(&key).cloned()
+        };
+        let made = if let Some(first) = linked {
+            replace_with(dst, |dst| std::fs::hard_link(&first, dst))
+        } else if ft.is_symlink() {
+            std::fs::read_link(src).and_then(|target| {
+                replace_with(dst, |dst| std::os::unix::fs::symlink(&target, dst))
+            })
+        } else if ft.is_fifo() {
+            replace_with(dst, |dst| make_fifo(dst, meta.mode()))
+        } else if ft.is_file() {
+            match self.copy_file(src, dst) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    // No half-written file is left behind.
+                    let _ = std::fs::remove_file(dst);
+                    match e {
+                        Some(e) => Err(e),
+                        None => return Err(Stop),
+                    }
+                }
+            }
+        } else {
             self.issue(trf("ERR_SPECIAL_FILE", &[&show_path(src)]));
-            return Ok(false);
+            return Ok(Outcome::Incomplete);
+        };
+        if let Err(e) = made {
+            return failed(self, e);
         }
-        match self.copy_file(src, dst) {
-            Ok(()) => {
-                let _ = std::fs::set_permissions(dst, meta.permissions());
-                keep_times(dst, meta);
-                Ok(true)
-            }
-            Err(Some(e)) => {
-                let _ = std::fs::remove_file(dst);
-                failed(self, e)
-            }
-            Err(None) => {
-                // Cancelled partway: no half-written file is left behind.
-                let _ = std::fs::remove_file(dst);
-                Err(Stop)
+        if !ft.is_symlink() {
+            let _ = std::fs::set_permissions(dst, meta.permissions());
+            keep_times(dst, meta);
+            if meta.nlink() > 1 {
+                self.links.entry(key).or_insert_with(|| dst.to_path_buf());
             }
         }
+        if remove {
+            if let Err(e) = std::fs::remove_file(src) {
+                self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
+                return Ok(Outcome::Incomplete);
+            }
+            self.removed.push(src.to_path_buf());
+        }
+        Ok(Outcome::Done)
     }
 
     /// Copies one file's contents, in pieces so progress shows and Cancel
@@ -347,16 +460,78 @@ impl Worker {
     }
 }
 
+/// Makes `dst` with `make`, first removing a file already there (a clash
+/// answered with Replace).
+fn replace_with(
+    dst: &Path,
+    make: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(dst).is_ok_and(|m| !m.is_dir()) {
+        std::fs::remove_file(dst)?;
+    }
+    make(dst)
+}
+
+/// Makes a named pipe at `path` with permissions `mode`.
+fn make_fifo(path: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+    // SAFETY: `c` is a valid C string that outlives the call.
+    if unsafe { libc::mkfifo(c.as_ptr(), (mode & 0o7777) as libc::mode_t) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Disk space the files under `path` use (each file with several hard
+/// links once), without entering other filesystems.
+fn disk_usage(path: &Path, mounts: &HashSet<PathBuf>, seen: &mut HashSet<(u64, u64)>) -> u64 {
+    let Ok(m) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if m.nlink() > 1 && !m.is_dir() && !seen.insert((m.dev(), m.ino())) {
+        return 0;
+    }
+    let own = m.blocks() * 512;
+    if !m.is_dir() || mounts.contains(path) {
+        return own;
+    }
+    let Ok(rd) = std::fs::read_dir(path) else {
+        return own;
+    };
+    rd.filter_map(|e| e.ok())
+        .map(|e| deep(|| disk_usage(&e.path(), mounts, seen)))
+        .fold(own, u64::saturating_add)
+}
+
 /// Gives `dst` the modified and accessed times in `meta`.
+/// (Set by path, without opening `dst`: opening a named pipe would wait
+/// for a writer.)
 fn keep_times(dst: &Path, meta: &std::fs::Metadata) {
-    let (Ok(modified), Ok(accessed)) = (meta.modified(), meta.accessed()) else {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(dst.as_os_str().as_bytes()) else {
         return;
     };
-    if let Ok(f) = std::fs::File::open(dst) {
-        let times = std::fs::FileTimes::new()
-            .set_modified(modified)
-            .set_accessed(accessed);
-        let _ = f.set_times(times);
+    let times = [
+        libc::timespec {
+            tv_sec: meta.atime(),
+            tv_nsec: meta.atime_nsec(),
+        },
+        libc::timespec {
+            tv_sec: meta.mtime(),
+            tv_nsec: meta.mtime_nsec(),
+        },
+    ];
+    // SAFETY: `c` is a valid C string and `times` two timespecs, both
+    // outliving the call.
+    unsafe {
+        libc::utimensat(
+            libc::AT_FDCWD,
+            c.as_ptr(),
+            times.as_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        );
     }
 }
 
@@ -588,7 +763,11 @@ impl DiskScanApp {
             ClipMode::Copy => "STATUS_CLIP_COPY",
             ClipMode::Move => "STATUS_CLIP_MOVE",
         };
-        self.status = trn(key, paths.len() as u64, &[&format_count(paths.len() as u64)]);
+        self.status = trn(
+            key,
+            paths.len() as u64,
+            &[&format_count(paths.len() as u64)],
+        );
         self.transfer.clip = Some(Clip { paths, mode });
     }
 
@@ -638,35 +817,13 @@ impl DiskScanApp {
         if sources.is_empty() {
             return;
         }
-        // Sizes from the scan where known; a guide for progress and space.
+        // Sizes from the scan where known; the rest are measured first.
         let full = self.full_root.clone();
-        let size_of = |p: &Path| {
-            full.as_ref()
-                .and_then(|r| find_node(r, p))
-                .map(|n| n.size)
-                .unwrap_or_else(|| std::fs::symlink_metadata(p).map_or(0, |m| m.len()))
-        };
-        let total: u64 = sources
+        let known: Vec<Option<u64>> = sources
             .iter()
-            .map(|p| size_of(p))
-            .fold(0, u64::saturating_add);
-        // A move within one filesystem needs no space.
-        let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
-        let needs: u64 = sources
-            .iter()
-            .filter(|p| mode == ClipMode::Copy || dev(p) != dev(&dest))
-            .map(|p| size_of(p))
-            .fold(0, u64::saturating_add);
-        if let Some((_, free)) = fs_space(&dest)
-            && needs > free
-        {
-            self.log_issue(trf(
-                "ERR_NO_SPACE",
-                &[&show_path(&dest), &human_size(needs), &human_size(free)],
-            ));
-            return;
-        }
-
+            .map(|p| full.as_ref().and_then(|r| find_node(r, p)).map(|n| n.size))
+            .collect();
+        let total: u64 = known.iter().flatten().fold(0, |a, b| a.saturating_add(*b));
         let (report_tx, reports) = channel();
         let (answers, answer_rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -681,31 +838,16 @@ impl DiskScanApp {
                 always: None,
                 bytes: 0,
                 last_report: Instant::now(),
+                links: HashMap::new(),
+                removed: Vec::new(),
             };
-            let mut moved = Vec::new();
-            let mut placed = 0;
-            let mut cancelled = false;
-            for src in &sources {
-                let dst = target.join(src.file_name().unwrap_or_default());
-                match w.put(src, &dst, mode) {
-                    Ok(complete) => {
-                        placed += 1;
-                        if mode == ClipMode::Move && complete {
-                            moved.push(src.clone());
-                        }
-                    }
-                    Err(Stop) => {
-                        cancelled = true;
-                        break;
-                    }
-                }
+            if let Err(why) = w.check_space(&sources, &known, &target, mode) {
+                let _ = w.reports.send(Report::Refused(why));
+                return;
             }
+            let results = w.put_all(&sources, &target, mode);
             let _ = w.reports.send(Report::Progress(w.bytes));
-            let _ = w.reports.send(Report::Done {
-                moved,
-                placed,
-                cancelled,
-            });
+            let _ = w.reports.send(Report::Done(results));
         });
         self.transfer.job = Some(Job {
             mode,
@@ -716,11 +858,8 @@ impl DiskScanApp {
             answers,
             cancel,
             clash: None,
+            issues: Vec::new(),
         });
-        // A move's files are now where they were pasted.
-        if mode == ClipMode::Move {
-            self.transfer.clip = None;
-        }
     }
 
     /// Every frame: follows a copy or move, shows its progress and asks
@@ -736,13 +875,14 @@ impl DiskScanApp {
                 Report::Progress(b) => job.done = b,
                 Report::Clash(c) => job.clash = Some((c, false)),
                 Report::Issue(text) => issues.push(text),
-                Report::Done {
-                    moved,
-                    placed,
-                    cancelled,
-                } => finished = Some((moved, placed, cancelled)),
+                Report::Refused(why) => {
+                    issues.push(why.clone());
+                    finished = Some(Err(why));
+                }
+                Report::Done(results) => finished = Some(Ok(results)),
             }
         }
+        job.issues.extend(issues.iter().cloned());
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
 
         // Progress, bottom right.
@@ -826,35 +966,59 @@ impl DiskScanApp {
         for text in issues {
             self.log_issue(text);
         }
-        if let Some((moved, placed, cancelled)) = finished {
-            self.finish_transfer(moved, placed, cancelled);
+        if let Some(finished) = finished {
+            self.finish_transfer(finished);
         }
     }
 
-    /// A copy or move ended: moved items leave the tree, and the target
-    /// folder is rescanned to show what arrived.
-    fn finish_transfer(&mut self, moved: Vec<PathBuf>, placed: usize, cancelled: bool) {
+    /// A copy or move ended (or was refused, with the reason): moved items
+    /// leave the tree, the target folder is rescanned to show what arrived,
+    /// and the status line says what happened.
+    fn finish_transfer(&mut self, finished: Result<Results, String>) {
         let Some(job) = self.transfer.job.take() else {
             return;
         };
-        let count = format_count(placed as u64);
-        self.status = if cancelled {
+        let r = match finished {
+            Ok(r) => r,
+            // Nothing happened: what was picked stays picked.
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        // A move's files are now where they were pasted.
+        if job.mode == ClipMode::Move {
+            self.transfer.clip = None;
+        }
+        self.status = if r.cancelled {
             tr("STATUS_TRANSFER_CANCELLED")
         } else {
-            match job.mode {
-                ClipMode::Copy => trn("STATUS_COPIED", placed as u64, &[&count]),
-                ClipMode::Move => trn("STATUS_MOVED", placed as u64, &[&count]),
+            let n = r.complete as u64;
+            let (done, short) = match job.mode {
+                ClipMode::Copy => ("STATUS_COPIED", "STATUS_NOT_ALL_COPIED"),
+                ClipMode::Move => ("STATUS_MOVED", "STATUS_NOT_ALL_MOVED"),
+            };
+            let done = trn(done, n, &[&format_count(n)]);
+            match r.incomplete as u64 {
+                0 => done,
+                bad => trf(
+                    "STATUS_WITH_PROBLEMS",
+                    &[&done, &trn(short, bad, &[&format_count(bad)])],
+                ),
             }
         };
         let status = self.status.clone();
-        self.drop_from_tree(&moved);
+        self.drop_from_tree(&r.removed);
         let in_tree = self
             .full_root
             .as_ref()
             .is_some_and(|r| find_node(r, &job.target).is_some());
         if in_tree && !self.scanning {
             self.rescan_folder(job.target);
-            // This message stays, not the rescan's.
+            // This message stays, not the rescan's, and so do the problems.
+            for issue in job.issues {
+                self.log_issue(issue);
+            }
             self.status = status.clone();
             self.status_after_rescan = Some(status);
         }
@@ -891,6 +1055,8 @@ mod tests {
                 always: None,
                 bytes: 0,
                 last_report: Instant::now(),
+                links: HashMap::new(),
+                removed: Vec::new(),
             },
             rx,
         )
@@ -914,7 +1080,7 @@ mod tests {
 
         let (mut w, _) = worker(ClashChoice::Skip);
         let dst = d.join("dst");
-        assert!(w.put(&src, &dst, ClipMode::Copy).ok().unwrap());
+        assert_eq!(w.put(&src, &dst, ClipMode::Copy).ok(), Some(Outcome::Done));
         assert_eq!(std::fs::read(dst.join("sub/a.txt")).unwrap(), b"hello");
         assert_eq!(
             std::fs::read_link(dst.join("link")).unwrap(),
@@ -938,10 +1104,10 @@ mod tests {
         std::fs::write(there.join("a.txt"), b"old").unwrap();
 
         let (mut w, _) = worker(ClashChoice::Skip);
-        assert!(
-            !w.put(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
-                .ok()
-                .unwrap()
+        assert_eq!(
+            w.put(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
+                .ok(),
+            Some(Outcome::Skipped)
         );
         assert_eq!(std::fs::read(there.join("a.txt")).unwrap(), b"old");
 
@@ -970,9 +1136,227 @@ mod tests {
         std::fs::write(dst.join("x/2.ogg"), b"2").unwrap();
 
         let (mut w, _) = worker(ClashChoice::Replace);
-        assert!(w.put(&src, &dst, ClipMode::Move).ok().unwrap());
+        assert_eq!(w.put(&src, &dst, ClipMode::Move).ok(), Some(Outcome::Done));
         assert!(dst.join("x/1.ogg").exists() && dst.join("x/2.ogg").exists());
         assert!(!src.exists(), "the merged source is gone");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Every path under `p` (relative), with its kind, for comparing trees.
+    fn listing(p: &Path) -> Vec<(PathBuf, &'static str)> {
+        let mut out = Vec::new();
+        let mut stack = vec![p.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).unwrap().map(|e| e.unwrap()) {
+                let ft = e.file_type().unwrap();
+                let kind = if ft.is_dir() {
+                    stack.push(e.path());
+                    "dir"
+                } else if ft.is_symlink() {
+                    "link"
+                } else if ft.is_fifo() {
+                    "fifo"
+                } else if ft.is_socket() {
+                    "socket"
+                } else {
+                    "file"
+                };
+                out.push((e.path().strip_prefix(p).unwrap().to_path_buf(), kind));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// A move to another filesystem of a folder holding files, a link, a
+    /// named pipe, hard links and a socket (which can't be moved): all but
+    /// the socket arrives (the pipe recreated, the hard links still linked)
+    /// and leaves the source; only the socket and the folders above it
+    /// stay; the removed paths are exactly what left; the outcome says it
+    /// wasn't all moved.
+    #[test]
+    fn move_to_another_filesystem_leaves_only_what_could_not_move() {
+        use std::os::unix::fs::FileTypeExt;
+        let shm = Path::new("/dev/shm");
+        let d = scratch("xfs");
+        let Ok(src_root) = std::fs::metadata(shm)
+            .map(|_| shm.join(format!("spacemap-xfs-{}", std::process::id())))
+        else {
+            return;
+        };
+        let _ = std::fs::remove_dir_all(&src_root);
+        if std::fs::metadata(shm).unwrap().dev() == std::fs::metadata(&d).unwrap().dev() {
+            eprintln!("skipped: /dev/shm is on the same filesystem as the temp folder");
+            return;
+        }
+        let src = src_root.join("proj");
+        std::fs::create_dir_all(src.join("all/deep/er")).unwrap();
+        std::fs::create_dir_all(src.join("part/sub")).unwrap();
+        std::fs::write(src.join("all/deep/er/f"), vec![1u8; 70_000]).unwrap();
+        std::fs::write(src.join("part/a.txt"), b"a").unwrap();
+        std::fs::write(src.join("part/sub/b.txt"), b"b").unwrap();
+        std::fs::hard_link(src.join("part/a.txt"), src.join("all/a-link")).unwrap();
+        std::os::unix::fs::symlink("../part/a.txt", src.join("all/sym")).unwrap();
+        let fifo = src.join("all/pipe");
+        make_fifo(&fifo, 0o640).unwrap();
+        let _socket = std::os::unix::net::UnixListener::bind(src.join("part/sock")).unwrap();
+        let before = listing(&src);
+
+        let (mut w, reports) = worker(ClashChoice::Skip);
+        let dst = d.join("proj");
+        assert_eq!(
+            w.put(&src, &dst, ClipMode::Move).ok(),
+            Some(Outcome::Incomplete)
+        );
+        let mut arrived = listing(&dst);
+        arrived.push((PathBuf::from("part/sock"), "socket"));
+        arrived.sort();
+        assert_eq!(arrived, before, "everything but the socket arrived");
+        assert!(
+            std::fs::symlink_metadata(dst.join("all/pipe"))
+                .unwrap()
+                .file_type()
+                .is_fifo()
+        );
+        assert_eq!(
+            std::fs::metadata(dst.join("all/pipe")).unwrap().mode() & 0o777,
+            0o640
+        );
+        let (a, l) = (
+            std::fs::metadata(dst.join("part/a.txt")).unwrap(),
+            std::fs::metadata(dst.join("all/a-link")).unwrap(),
+        );
+        assert_eq!((a.ino(), a.nlink()), (l.ino(), 2), "hard links stay linked");
+        assert_eq!(
+            listing(&src),
+            vec![
+                (PathBuf::from("part"), "dir"),
+                (PathBuf::from("part/sock"), "socket")
+            ]
+        );
+        let mut removed = std::mem::take(&mut w.removed);
+        removed.sort();
+        assert_eq!(
+            removed,
+            vec![
+                src.join("all"),
+                src.join("part/a.txt"),
+                src.join("part/sub")
+            ],
+            "a folder that left entirely is listed instead of what it held"
+        );
+        let issues: Vec<String> = reports
+            .try_iter()
+            .filter_map(|r| match r {
+                Report::Issue(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("sock"));
+        let _ = std::fs::remove_dir_all(&src_root);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A merge into a folder with a read-only part: what can't go there
+    /// stays at the source, with a note, and the rest moves.
+    #[test]
+    fn move_into_a_read_only_part_keeps_that_part() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("readonly");
+        let src = d.join("m");
+        std::fs::create_dir_all(src.join("locked")).unwrap();
+        std::fs::create_dir_all(src.join("open")).unwrap();
+        std::fs::write(src.join("locked/x"), b"x").unwrap();
+        std::fs::write(src.join("open/y"), b"y").unwrap();
+        let dst = d.join("to/m");
+        std::fs::create_dir_all(dst.join("locked")).unwrap();
+        std::fs::create_dir_all(dst.join("open")).unwrap();
+        std::fs::set_permissions(dst.join("locked"), std::fs::Permissions::from_mode(0o555))
+            .unwrap();
+        let (mut w, reports) = worker(ClashChoice::Replace);
+        let outcome = w.put(&src, &dst, ClipMode::Move).ok();
+        std::fs::set_permissions(dst.join("locked"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        if std::fs::write(dst.join("locked/probe"), b"").is_ok() && outcome == Some(Outcome::Done) {
+            // Running as root: permissions don't stop anything.
+            let _ = std::fs::remove_dir_all(&d);
+            return;
+        }
+        assert_eq!(outcome, Some(Outcome::Incomplete));
+        assert!(dst.join("open/y").exists() && !src.join("open").exists());
+        assert!(src.join("locked/x").exists(), "what couldn't move stays");
+        assert!(
+            reports
+                .try_iter()
+                .any(|r| matches!(r, Report::Issue(t) if t.contains("locked/x")))
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Hard links inside a copied folder stay linked in the copy (one copy
+    /// of the data), also with a third name outside what was copied.
+    #[test]
+    fn copies_keep_hard_links_between_copied_files() {
+        let d = scratch("links");
+        let src = d.join("src");
+        std::fs::create_dir_all(src.join("a")).unwrap();
+        std::fs::create_dir_all(src.join("b")).unwrap();
+        std::fs::write(src.join("a/one"), vec![5u8; 100_000]).unwrap();
+        std::fs::hard_link(src.join("a/one"), src.join("b/two")).unwrap();
+        std::fs::hard_link(src.join("a/one"), d.join("outside")).unwrap();
+        std::fs::write(src.join("b/plain"), b"p").unwrap();
+        let (mut w, _) = worker(ClashChoice::Skip);
+        let dst = d.join("dst");
+        assert_eq!(w.put(&src, &dst, ClipMode::Copy).ok(), Some(Outcome::Done));
+        let (one, two) = (
+            std::fs::metadata(dst.join("a/one")).unwrap(),
+            std::fs::metadata(dst.join("b/two")).unwrap(),
+        );
+        assert_eq!(one.ino(), two.ino());
+        assert_eq!(one.nlink(), 2);
+        assert_ne!(
+            one.ino(),
+            std::fs::metadata(src.join("a/one")).unwrap().ino()
+        );
+        assert_eq!(
+            std::fs::read(dst.join("b/two")).unwrap(),
+            vec![5u8; 100_000]
+        );
+        assert_eq!(std::fs::metadata(src.join("a/one")).unwrap().nlink(), 3);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Too little room refuses before anything is written; a move within
+    /// one filesystem needs no room; sizes the scan doesn't know are
+    /// measured, hard links once.
+    #[test]
+    fn space_is_checked_before_anything_is_written() {
+        let d = scratch("space");
+        let src = d.join("big");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("f"), vec![1u8; 3 << 20]).unwrap();
+        std::fs::hard_link(src.join("f"), src.join("g")).unwrap();
+        let mut seen = HashSet::new();
+        let used = disk_usage(&src, &HashSet::new(), &mut seen);
+        assert!((3 << 20..(3 << 20) + 65_536).contains(&used), "{used}");
+        let (w, _) = worker(ClashChoice::Skip);
+        let target = d.join("to");
+        std::fs::create_dir_all(&target).unwrap();
+        let huge = [Some(u64::MAX)];
+        assert!(
+            w.check_space(std::slice::from_ref(&src), &huge, &target, ClipMode::Copy)
+                .is_err()
+        );
+        assert!(
+            w.check_space(std::slice::from_ref(&src), &huge, &target, ClipMode::Move)
+                .is_ok()
+        );
+        assert!(
+            w.check_space(std::slice::from_ref(&src), &[None], &target, ClipMode::Copy)
+                .is_ok()
+        );
+        assert!(listing(&target).is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 

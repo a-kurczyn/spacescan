@@ -335,3 +335,6 @@ COUNT_FILES=%s 个文件
 SCAN_PROGRESS_COUNTS=%s · %s
 SCAN_PROGRESS_PERCENT=%s% · %s
 COUNT_FOLDERS=%s 个文件夹
+STATUS_WITH_PROBLEMS=%s · %s
+STATUS_NOT_ALL_COPIED=%s 项未完全复制（见“问题”）
+STATUS_NOT_ALL_MOVED=%s 项未完全移动：无法移动的部分仍在原处（见“问题”）

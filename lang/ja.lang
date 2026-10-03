@@ -335,3 +335,6 @@ COUNT_FILES=ファイル %s 個
 SCAN_PROGRESS_COUNTS=%s · %s
 SCAN_PROGRESS_PERCENT=%s% · %s
 COUNT_FOLDERS=フォルダー %s 個
+STATUS_WITH_PROBLEMS=%s · %s
+STATUS_NOT_ALL_COPIED=%s 件は完全にはコピーできませんでした (「問題」を参照)
+STATUS_NOT_ALL_MOVED=%s 件は完全には移動できませんでした。移動できなかったものは元の場所に残っています (「問題」を参照)

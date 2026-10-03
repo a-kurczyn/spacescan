@@ -339,3 +339,6 @@ SCAN_PROGRESS_PERCENT=%s % · %s
 COUNT_FOLDERS=%s папок
 COUNT_FOLDERS_ONE=%s папка
 COUNT_FOLDERS_FEW=%s папки
+STATUS_WITH_PROBLEMS=%s · %s
+STATUS_NOT_ALL_COPIED=Скопировано не полностью: %s (см. «Проблемы»)
+STATUS_NOT_ALL_MOVED=Перемещено не полностью: %s — то, что не удалось переместить, осталось на месте (см. «Проблемы»)
