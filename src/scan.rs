@@ -643,9 +643,11 @@ pub(crate) fn scan_entry(
     node
 }
 
-/// Folders with more entries than this report their files in batches of
-/// this many while being scanned (see `ScanMsg::FilesFound`).
-const FILE_BATCH: usize = 2048;
+/// Folders with more entries than this are read in chunks of this many,
+/// and report the files read so far at most every `REPORT_EVERY` while
+/// being scanned (see `ScanMsg::FilesFound`).
+const CHUNK: usize = 256;
+const REPORT_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// (extension, size, count) per extension, and the Changed times of the
 /// newest and oldest file (NO_TIME if none is known).
@@ -742,21 +744,28 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     }
     let scan =
         |entry: &std::fs::DirEntry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx);
-    // A big folder reports its files in batches as they're read, so the
-    // live chart can color it before it finishes; a small one reports them
-    // when done.
-    let batched = entries.len() > FILE_BATCH;
+    // A big folder is read in chunks and reports the files read so far
+    // every REPORT_EVERY, so the live chart can color it before it
+    // finishes; a small one reports them when done.
+    let batched = entries.len() > CHUNK;
     let mut children: Vec<Node> = Vec::with_capacity(entries.len());
     if batched {
-        for chunk in entries.chunks(FILE_BATCH) {
-            let nodes: Vec<Node> = chunk.par_iter().map(scan).collect();
-            let (exts, times) = file_summary(&nodes);
-            let _ = progress.send(ScanMsg::FilesFound {
-                folder: path.to_path_buf(),
-                exts,
-                times,
-            });
-            children.extend(nodes);
+        let mut reported = 0;
+        let mut last_report = Instant::now();
+        let chunks = entries.chunks(CHUNK);
+        let n_chunks = chunks.len();
+        for (i, chunk) in chunks.enumerate() {
+            children.extend(chunk.par_iter().map(scan).collect::<Vec<Node>>());
+            if last_report.elapsed() >= REPORT_EVERY || i + 1 == n_chunks {
+                let (exts, times) = file_summary(&children[reported..]);
+                let _ = progress.send(ScanMsg::FilesFound {
+                    folder: path.to_path_buf(),
+                    exts,
+                    times,
+                });
+                reported = children.len();
+                last_report = Instant::now();
+            }
         }
     } else {
         children = entries.par_iter().map(scan).collect();
@@ -1238,7 +1247,7 @@ mod live_category_tests {
         std::fs::hard_link(dir.join("a/b/clip.mp4"), dir.join("a/clip-link.mp4")).unwrap();
         // A folder big enough to report its files in batches.
         std::fs::create_dir(dir.join("mail")).unwrap();
-        for i in 0..FILE_BATCH + 100 {
+        for i in 0..CHUNK * 3 {
             std::fs::write(dir.join(format!("mail/{i}.eml")), b"x").unwrap();
         }
         let (tx, rx) = channel();
@@ -1270,8 +1279,8 @@ mod live_category_tests {
                 add_ext(&mut live, ext, size, files);
             }
         }
-        assert_eq!(batches, 2, "the big folder reports in two batches");
-        assert_eq!(live.get("eml").map(|e| e.1), Some(FILE_BATCH as u64 + 100));
+        assert!(batches >= 1, "the big folder reports while being read");
+        assert_eq!(live.get("eml").map(|e| e.1), Some(CHUNK as u64 * 3));
         let cats = CategoryModel::defaults();
         assert_eq!(
             category_rows(&live, &cats),
