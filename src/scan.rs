@@ -700,14 +700,16 @@ pub(crate) fn scan_entry(
 /// (extension, size, count) per extension of the files among `nodes`.
 fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
     let mut exts: Vec<(String, u64, u64)> = Vec::new();
+    let mut buf = [0; 16];
     for c in nodes.iter().filter(|c| !c.is_dir) {
-        let key = ext_key(&c.name);
-        match exts.iter_mut().find(|e| e.0 == key) {
+        // A new string only for an extension not seen yet in this folder.
+        let key = ext_key_in(&c.name, &mut buf);
+        match exts.iter_mut().find(|e| e.0 == *key) {
             Some(e) => {
                 e.1 = e.1.saturating_add(c.size);
                 e.2 += c.file_count.max(1);
             }
-            None => exts.push((key, c.size, c.file_count.max(1))),
+            None => exts.push((key.into_owned(), c.size, c.file_count.max(1))),
         }
     }
     exts

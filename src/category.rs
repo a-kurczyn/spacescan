@@ -57,21 +57,8 @@ impl CategoryModel {
     /// The category of a file called `name`, by its extension (any case);
     /// Other if it has none or it isn't listed.
     pub(crate) fn of_name(&self, name: &str) -> Category {
-        // Short ASCII extensions (nearly all) are lowercased on the stack,
-        // without allocating: this runs for every file during a scan.
-        let ext = match name.rfind('.') {
-            Some(i) if i > 0 => &name[i + 1..],
-            _ => return self.of_ext(&ext_key(name)),
-        };
-        let mut buf = [0u8; 16];
-        if ext.len() <= buf.len() && ext.is_ascii() {
-            let lower = &mut buf[..ext.len()];
-            lower.copy_from_slice(ext.as_bytes());
-            lower.make_ascii_lowercase();
-            // ASCII stays valid UTF-8.
-            return self.of_ext(std::str::from_utf8(lower).unwrap_or_default());
-        }
-        self.of_ext(&ext_key(name))
+        // Runs for every file during a scan, so without heap memory.
+        self.of_ext(&ext_key_in(name, &mut [0; 16]))
     }
 
     /// The category of an `ext_key`.
@@ -294,6 +281,23 @@ pub(crate) struct CategoryRow {
     pub(crate) exts: Vec<(String, u64, u64)>,
 }
 
+/// `ext_key`, without heap memory when the extension is ASCII and fits
+/// in `buf` (nearly always).
+pub(crate) fn ext_key_in<'a>(name: &'a str, buf: &'a mut [u8; 16]) -> std::borrow::Cow<'a, str> {
+    use std::borrow::Cow;
+    let ext = match name.rfind('.') {
+        Some(i) if i > 0 => &name[i + 1..],
+        _ => return Cow::Borrowed(""),
+    };
+    if ext.len() <= buf.len() && ext.is_ascii() {
+        let lower = &mut buf[..ext.len()];
+        lower.copy_from_slice(ext.as_bytes());
+        lower.make_ascii_lowercase();
+        return Cow::Borrowed(std::str::from_utf8(lower).expect("ASCII is UTF-8"));
+    }
+    Cow::Owned(ext_key(name))
+}
+
 /// A file's extension as the categories see it: lowercased, "" if none.
 pub(crate) fn ext_key(name: &str) -> String {
     Path::new(name)
@@ -391,8 +395,23 @@ mod tests {
             "f.ÉML",
             "long.abcdefghijklmnopqrstuvwxyz",
             "a.b.Mp4",
+            "",
+            ".",
+            "..",
+            "...x",
+            "a..",
+            ".a.b",
+            "x.1234567890123456",
+            "x.12345678901234567",
+            "ß.ẞ",
+            "\\x01.Txt",
+            "a.K\u{212a}",
+            "a.İ",
+            "日本.テキスト",
+            "a b.C D",
         ] {
             assert_eq!(m.of_name(name), m.of_ext(&ext_key(name)), "{name}");
+            assert_eq!(ext_key_in(name, &mut [0; 16]), ext_key(name), "{name}");
         }
     }
 
