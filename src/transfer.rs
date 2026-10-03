@@ -588,7 +588,7 @@ impl DiskScanApp {
             ClipMode::Copy => "STATUS_CLIP_COPY",
             ClipMode::Move => "STATUS_CLIP_MOVE",
         };
-        self.status = trf(key, &[&format_count(paths.len() as u64)]);
+        self.status = trn(key, paths.len() as u64, &[&format_count(paths.len() as u64)]);
         self.transfer.clip = Some(Clip { paths, mode });
     }
 
@@ -842,8 +842,8 @@ impl DiskScanApp {
             tr("STATUS_TRANSFER_CANCELLED")
         } else {
             match job.mode {
-                ClipMode::Copy => trf("STATUS_COPIED", &[&count]),
-                ClipMode::Move => trf("STATUS_MOVED", &[&count]),
+                ClipMode::Copy => trn("STATUS_COPIED", placed as u64, &[&count]),
+                ClipMode::Move => trn("STATUS_MOVED", placed as u64, &[&count]),
             }
         };
         let status = self.status.clone();

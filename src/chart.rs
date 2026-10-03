@@ -261,7 +261,7 @@ fn layout_ring(
             start_angle: a0,
             end_angle: a1,
             ring,
-            name: trf("SEG_OTHER_ITEMS", &[&rest.len().to_string()]),
+            name: trn("SEG_OTHER_ITEMS", rest.len() as u64, &[&rest.len().to_string()]),
             size: rest_size,
             file_count: rest.iter().map(|(_, c)| c.file_count).sum(),
             is_dir: false,

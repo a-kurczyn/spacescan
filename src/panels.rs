@@ -558,8 +558,9 @@ impl DiskScanApp {
                     } else if self.filter.is_some() {
                         match (&self.root, &self.full_root) {
                             (Some(r), Some(full)) => {
-                                ui.label(trf(
+                                ui.label(trn(
                                     "FILTER_SHOWING",
+                                    full.file_count,
                                     &[
                                         &format_count(r.file_count),
                                         &format_count(full.file_count),
@@ -1286,7 +1287,7 @@ impl DiskScanApp {
                 Pick::Category(_) => "CAT_NONE_HERE",
                 Pick::Extensions(_) => "EXT_NONE_HERE",
             };
-            let text = trf(key, &[&self.cats.pick_label(pick), &format_count(hidden)]);
+            let text = trn(key, hidden, &[&self.cats.pick_label(pick), &format_count(hidden)]);
             let label = ui.add(
                 egui::Label::new(egui::RichText::new(text).color(ui.visuals().warn_fg_color))
                     .wrap(),

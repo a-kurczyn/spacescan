@@ -423,8 +423,9 @@ impl DiskScanApp {
                 Confirm::EmptyTrash(items) => {
                     ui.heading(tr("TRASH_CONFIRM_TITLE"));
                     ui.add_space(6.0);
-                    ui.label(trf(
+                    ui.label(trn(
                         "TRASH_CONFIRM_BODY",
+                        items.len() as u64,
                         &[&format_count(items.len() as u64)],
                     ));
                     tr("TRASH_CONFIRM_YES")

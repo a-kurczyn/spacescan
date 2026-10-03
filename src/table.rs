@@ -671,7 +671,7 @@ impl DiskScanApp {
                         &[&shown, &format_count(order.flat_files)],
                     )
                 } else {
-                    trf("TABLE_TAG_FLAT", &[&shown])
+                    trn("TABLE_TAG_FLAT", n_rows as u64, &[&shown])
                 };
                 ui.label(format!("· {tag}"));
             } else {
@@ -681,7 +681,10 @@ impl DiskScanApp {
                     "· {}",
                     trf(
                         "TABLE_TAG_FOLDER_COUNTS",
-                        &[&format_count(order.folders), &format_count(files)]
+                        &[
+                            &trn("COUNT_FOLDERS", order.folders, &[&format_count(order.folders)]),
+                            &trn("COUNT_FILES", files, &[&format_count(files)]),
+                        ]
                     )
                 ));
                 if self.table.flat {
