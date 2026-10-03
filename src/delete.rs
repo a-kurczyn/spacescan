@@ -734,6 +734,8 @@ mod tests {
     /// it: scan, live-preview graft, category breakdown, filter, clone,
     /// find, replace, remove, drop, and the delete from disk.
     fn deep_chain(levels: usize) {
+        // As the app does at start (the test binary skips `main`).
+        crate::raise_open_file_limit();
         let base =
             std::env::temp_dir().join(format!("spacemap-deep-{levels}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);

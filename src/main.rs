@@ -1186,7 +1186,7 @@ fn quiet_accessibility_panic() {
 /// keeps one folder open per level; the usual soft limit of 1,024 open
 /// files would cut very deep chains short. Raise it to the hard limit (as
 /// file managers and `find` effectively allow).
-fn raise_open_file_limit() {
+pub(crate) fn raise_open_file_limit() {
     let mut lim = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
