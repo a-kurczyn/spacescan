@@ -169,7 +169,8 @@ fn hidden_warning(ui: &mut egui::Ui, key: &str, (files, size): (u64, u64)) {
 /// file count from every folder above it. Returns what was removed, or
 /// None if `target` isn't in the tree.
 fn remove_from_tree(node: &mut Node, target: &Path) -> Option<(u64, u64)> {
-    let parts = rel_parts(&node.path, target)?;
+    let node_path = node.path();
+    let parts = rel_parts(&node_path, target)?;
     remove_at(node, &parts)
 }
 
@@ -190,7 +191,8 @@ fn remove_at(node: &mut Node, parts: &[&std::ffi::OsStr]) -> Option<(u64, u64)> 
 /// The node at `path`, if it's in the tree.
 pub(crate) fn find_node<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
     let mut n = root;
-    for name in rel_parts(&root.path, path)? {
+    let root_path = root.path();
+    for name in rel_parts(&root_path, path)? {
         n = &n.children[child_named(n, name)?];
     }
     Some(n)
@@ -247,7 +249,7 @@ impl DiskScanApp {
         }
         let real: Vec<&Node> = shown
             .iter()
-            .map(|n| find_node(full, &n.path).unwrap_or(n))
+            .map(|n| find_node(full, &n.path()).unwrap_or(n))
             .collect();
         let total = |nodes: &[&Node]| {
             let size = nodes.iter().map(|n| n.size).fold(0u64, u64::saturating_add);
@@ -255,7 +257,7 @@ impl DiskScanApp {
         };
         let ((shown_files, shown_size), (files, size)) = (total(&shown), total(&real));
         Some(Confirm::Delete {
-            paths: shown.iter().map(|n| n.path.clone()).collect(),
+            paths: shown.iter().map(|n| n.path()).collect(),
             permanent,
             size,
             file_count: files,
@@ -266,7 +268,7 @@ impl DiskScanApp {
             unreadable: self
                 .unreadable
                 .iter()
-                .filter(|u| shown.iter().any(|n| u.starts_with(&n.path)))
+                .filter(|u| shown.iter().any(|n| u.starts_with(n.path())))
                 .count(),
             single_is_dir: (shown.len() == 1).then(|| shown[0].is_dir),
         })
@@ -545,7 +547,7 @@ impl DiskScanApp {
             .iter()
             .flat_map(|f| ["files", "info"].map(|sub| f.join(sub)))
             .filter_map(|dir| find_node(&full, &dir))
-            .flat_map(|n| n.children.iter().map(|c| c.path.clone()))
+            .flat_map(|n| n.children.iter().map(|c| c.path()))
             .collect();
         drop(full);
         self.drop_from_tree(&gone);
@@ -570,14 +572,14 @@ impl DiskScanApp {
         self.rebuild_view_tree();
         self.restore_view(&view_paths);
         if self.free_space.is_some() {
-            self.free_space = self.root.as_ref().and_then(|r| fs_space(&r.path));
+            self.free_space = self.root.as_ref().and_then(|r| fs_space(&r.path()));
         }
     }
 
     pub(crate) fn view_paths(&self, root: &Node) -> Vec<PathBuf> {
         self.view_stack
             .iter()
-            .map(|vp| get_node(root, vp).path.clone())
+            .map(|vp| get_node(root, vp).path())
             .collect()
     }
 

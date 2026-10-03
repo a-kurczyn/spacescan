@@ -60,11 +60,11 @@ impl DiskScanApp {
         // The folder shown: the scan target while scanning, else the folder
         // zoomed into.
         let current_path: Option<PathBuf> = if self.scanning {
-            Some(self.partial_root.path.clone())
+            Some(self.partial_root.path())
         } else {
             root_arc
                 .as_ref()
-                .map(|r| get_node(r, &cur_view_idx).path.clone())
+                .map(|r| get_node(r, &cur_view_idx).path())
         };
         let home = home_dir();
         let mut filters_toggled = false;
@@ -347,7 +347,7 @@ impl DiskScanApp {
             // Open the dialog at the folder currently shown, if any.
             let start_dir = root_arc
                 .as_ref()
-                .map(|r| get_node(r, &cur_view_idx).path.clone());
+                .map(|r| get_node(r, &cur_view_idx).path());
             self.folder_pick_rx = Some(pick_folder_async(start_dir));
         }
         if let Some(result) = self.folder_pick_rx.as_ref().map(|rx| rx.try_recv()) {
@@ -395,7 +395,7 @@ impl DiskScanApp {
             NavAction::None => {}
             NavAction::Reload => {
                 if let Some(root) = &root_arc {
-                    let p = get_node(root, &cur_view_idx).path.clone();
+                    let p = get_node(root, &cur_view_idx).path();
                     self.start_scan(p);
                 }
             }
@@ -972,12 +972,12 @@ impl DiskScanApp {
     /// filter, so every category stays visible (and clickable) while one is
     /// picked.
     pub(crate) fn refresh_cat_breakdown(&mut self, view_node: &Node) {
-        let key = (view_node.path.clone(), self.tree_gen);
+        let key = (view_node.path(), self.tree_gen);
         if self.cat_breakdown_for.as_ref() != Some(&key) {
             let base = self
                 .cat_base
                 .as_deref()
-                .and_then(|b| find_by_path(b, &view_node.path));
+                .and_then(|b| find_by_path(b, &view_node.path()));
             self.cat_breakdown = category_breakdown(base.unwrap_or(view_node), &self.cats);
             self.cat_breakdown_for = Some(key);
         }
@@ -1624,7 +1624,7 @@ impl DiskScanApp {
                 } else {
                     let n = get_node(view, &seg.idx_path);
                     // A folder colored during the scan keeps its fade.
-                    let since = self.live_looks.colored_at(&n.path).or(self.colored_at);
+                    let since = self.live_looks.colored_at(&n.path()).or(self.colored_at);
                     Some((looks.of(n, &self.cats), since))
                 }
             }
@@ -1682,7 +1682,7 @@ impl DiskScanApp {
         // The chart is one painted area: give it a name for screen readers.
         let chart_name = trf(
             "A11Y_CHART",
-            &[&show_path(&view_node.path), &human_size(view_node.size)],
+            &[&show_path(&view_node.path()), &human_size(view_node.size)],
         );
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &chart_name));
@@ -1758,10 +1758,10 @@ impl DiskScanApp {
                         };
                         new_hover = Some(HoverInfo {
                             path: match real_node {
-                                Some(n) => n.path.clone(),
+                                Some(n) => n.path(),
                                 None if seg.is_free => PathBuf::from(&seg.name), // "Free space"
                                 // "Other": its idx_path leads to the folder holding the grouped items.
-                                None => get_node(view_node, &seg.idx_path).path.join(&seg.name),
+                                None => get_node(view_node, &seg.idx_path).path().join(&seg.name),
                             },
                             size: seg.size,
                             file_count: seg.file_count,
@@ -1850,7 +1850,7 @@ impl DiskScanApp {
         // "other", whose idx_path is its parent folder's.
         if response.secondary_clicked() {
             self.context_target = match (&hover_idx_path, hover_is_other) {
-                (Some(ip), false) => Some(get_node(view_node, ip).path.clone()),
+                (Some(ip), false) => Some(get_node(view_node, ip).path()),
                 _ => None,
             };
         }

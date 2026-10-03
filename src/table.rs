@@ -190,7 +190,7 @@ struct RowOrder {
 /// full path.
 fn row_text(node: &Node, flat: bool) -> std::borrow::Cow<'_, str> {
     if flat {
-        show_path(&node.path).into()
+        show_path(&node.path()).into()
     } else {
         node.name.as_str().into()
     }
@@ -203,7 +203,7 @@ fn widest_name(ui: &egui::Ui, rows: &Rows, view: &Node, flat: bool) -> f32 {
     // Length in bytes: quick to get, and close enough to pick them.
     let len = |n: &Node| {
         if flat {
-            n.path.as_os_str().len()
+            n.path_len()
         } else {
             n.name.len()
         }
@@ -239,7 +239,7 @@ fn find_cursor(
     rows: &Rows,
 ) -> Option<usize> {
     let n = rows.len();
-    let at = |i: usize| i < n && rows.node(view, i).path == cursor;
+    let at = |i: usize| i < n && rows.node(view, i).path_is(cursor);
     if let Some(i) = pos.get().filter(|&i| at(i)) {
         return Some(i);
     }
@@ -282,7 +282,7 @@ fn flat_files(
             if dot && !in_dot {
                 w.dot_size = w.dot_size.saturating_add(c.size);
             }
-            if (dot && !w.show_dotfiles) || (!w.hidden.is_empty() && w.hidden.contains(&c.path)) {
+            if (dot && !w.show_dotfiles) || (!w.hidden.is_empty() && w.hidden.contains(&c.path())) {
                 continue;
             }
             if c.is_dir {
@@ -450,7 +450,8 @@ pub(crate) fn replace_in_tree(
     target: &Path,
     new: Node,
 ) -> Option<((u64, u64), (u64, u64))> {
-    let parts = rel_parts(&node.path, target)?;
+    let node_path = node.path();
+    let parts = rel_parts(&node_path, target)?;
     replace_at(node, &parts, new)
 }
 
@@ -577,9 +578,9 @@ impl DiskScanApp {
     /// Draws the contents table of `view_node`, no taller than `max_height`.
     pub(crate) fn table_ui(&mut self, ui: &mut egui::Ui, view_node: &Node, max_height: f32) {
         // Marks belong to the folder they were made in.
-        if self.table.marks_for.as_deref() != Some(view_node.path.as_path()) {
+        if !self.table.marks_for.as_deref().is_some_and(|p| view_node.path_is(p)) {
             self.table.marked.clear();
-            self.table.marks_for = Some(view_node.path.clone());
+            self.table.marks_for = Some(view_node.path());
         }
 
         // The live table during a scan always lists the folder's contents.
@@ -628,7 +629,7 @@ impl DiskScanApp {
         let cursor_row = match found {
             Some(i) => Some(i),
             None => {
-                self.table.cursor = (n_rows > 0).then(|| row(0).path.clone());
+                self.table.cursor = (n_rows > 0).then(|| row(0).path());
                 let first = self.table.cursor.is_some().then_some(0);
                 self.table.cursor_pos.set(first);
                 first
@@ -712,7 +713,7 @@ impl DiskScanApp {
             if !self.table.marked.is_empty() {
                 let size: u64 = (0..n_rows)
                     .map(row)
-                    .filter(|c| self.table.marked.contains(&c.path))
+                    .filter(|c| self.table.marked.contains(&c.path()))
                     .map(|c| c.size)
                     .fold(0u64, u64::saturating_add);
                 ui.strong(format!(
@@ -760,7 +761,7 @@ impl DiskScanApp {
                     .position(|i| row(i).name.to_lowercase().starts_with(&q))
                     .or_else(|| (0..n_rows).position(|i| row(i).name.to_lowercase().contains(&q)));
                 if let Some(i) = hit {
-                    self.table.cursor = Some(row(i).path.clone());
+                    self.table.cursor = Some(row(i).path());
                     self.table.scroll_pending = true;
                 }
             }
@@ -947,7 +948,7 @@ impl DiskScanApp {
                     body.rows(row_h, n_rows, |mut tr_row| {
                         let i = tr_row.index();
                         let c = row(i);
-                        let is_marked = marked.contains(&c.path);
+                        let is_marked = !marked.is_empty() && marked.contains(&c.path());
                         let selected = Some(i) == cursor_row;
                         tr_row.set_selected(selected);
                         let pick = |normal: Color32| if selected { selected_fg } else { normal };
@@ -1101,10 +1102,10 @@ impl DiskScanApp {
             self.table.active_col = shown_sort.column.table_col();
         }
         if let Some(i) = clicked.or(double_clicked).or(ctrl_clicked) {
-            self.table.cursor = Some(row(i).path.clone());
+            self.table.cursor = Some(row(i).path());
         }
         if let Some(i) = ctrl_clicked {
-            self.toggle_mark_of(row(i).path.clone());
+            self.toggle_mark_of(row(i).path());
         }
         self.table.order = Some(order);
         if double_clicked.is_some() {
@@ -1162,7 +1163,7 @@ impl DiskScanApp {
             .filter(|&i| {
                 let c = &children[i];
                 (key.show_dotfiles || !c.name.starts_with('.'))
-                    && (hidden.is_empty() || !hidden.contains(&c.path))
+                    && (hidden.is_empty() || !hidden.contains(&c.path()))
             })
             .collect();
         let cs = key.sort;
@@ -1259,7 +1260,7 @@ impl DiskScanApp {
             return;
         };
         let h = HoverInfo {
-            path: n.path.clone(),
+            path: n.path(),
             size: n.size,
             file_count: n.file_count,
             is_dir: n.is_dir,
@@ -1463,7 +1464,7 @@ impl DiskScanApp {
                 self.clip(ctx, self.selected_targets(), mode);
             }
             if let (Some(text), Some(root)) = (paste, self.root.clone()) {
-                let dest = self.current_view_node(&root).path.clone();
+                let dest = self.current_view_node(&root).path();
                 self.paste_into(dest, &text);
             }
         }
@@ -1506,7 +1507,7 @@ impl DiskScanApp {
 
     /// Path of the cursor row, and whether it's a folder.
     fn cursor_row(&self) -> Option<(PathBuf, bool)> {
-        self.cursor_node().map(|n| (n.path.clone(), n.is_dir))
+        self.cursor_node().map(|n| (n.path(), n.is_dir))
     }
 
     /// Arrow keys: ⬆⬇ previous/next row, ⬅ parent folder, ➡ open the
@@ -1538,7 +1539,7 @@ impl DiskScanApp {
             None => 0,
             Some(i) => (i as isize).saturating_add(delta).clamp(0, n as isize - 1) as usize,
         };
-        self.table.cursor = Some(rows.node(view, i).path.clone());
+        self.table.cursor = Some(rows.node(view, i).path());
         self.table.cursor_pos.set(Some(i));
         self.table.scroll_pending = true;
     }
@@ -1567,7 +1568,7 @@ impl DiskScanApp {
         };
         let view = self.current_view().clone();
         if let Some((_, parent_view)) = view.split_last() {
-            let left = get_node(&root, &view).path.clone();
+            let left = get_node(&root, &view).path();
             self.set_current_view(parent_view.to_vec());
             self.table.cursor = Some(left);
             self.table.scroll_pending = true;
@@ -1699,9 +1700,8 @@ impl DiskScanApp {
         } else {
             match self.listed() {
                 Some((view, rows)) => (0..rows.len())
-                    .map(|i| &rows.node(view, i).path)
-                    .filter(|p| self.table.marked.contains(*p))
-                    .cloned()
+                    .map(|i| rows.node(view, i).path())
+                    .filter(|p| self.table.marked.contains(p))
                     .collect(),
                 None => self.table.marked.iter().cloned().collect(),
             }
@@ -1722,11 +1722,11 @@ impl DiskScanApp {
     pub(crate) fn table_forget(&mut self, gone: &[PathBuf]) {
         let gone: HashSet<&PathBuf> = gone.iter().collect();
         if let (Some(pos), Some((view, rows))) = (self.cursor_index(), self.listed()) {
-            let path = |i: usize| &rows.node(view, i).path;
+            let path = |i: usize| rows.node(view, i).path();
             let next = (pos..rows.len())
-                .find(|&i| !gone.contains(path(i)))
-                .or_else(|| (0..pos).rev().find(|&i| !gone.contains(path(i))));
-            self.table.cursor = next.map(|i| path(i).clone());
+                .find(|&i| !gone.contains(&path(i)))
+                .or_else(|| (0..pos).rev().find(|&i| !gone.contains(&path(i))));
+            self.table.cursor = next.map(path);
         }
         self.table.marked.retain(|p| !gone.contains(p));
         self.table.scroll_pending = true;
@@ -1738,7 +1738,7 @@ impl DiskScanApp {
         let Some(root) = self.root.clone() else {
             return;
         };
-        let target = self.current_view_node(&root).path.clone();
+        let target = self.current_view_node(&root).path();
         self.rescan_folder(target);
     }
 
@@ -1769,7 +1769,7 @@ impl DiskScanApp {
         let Some(mut full) = self.full_root.take() else {
             return false;
         };
-        if full.path == g.target {
+        if full.path_is(&g.target) {
             full = Arc::new(node);
         } else {
             replace_in_tree(Arc::make_mut(&mut full), &g.target, node);
@@ -1779,7 +1779,7 @@ impl DiskScanApp {
         self.restore_view(&g.view_paths);
         self.free_space = g
             .free_space
-            .and(self.root.as_ref().and_then(|r| fs_space(&r.path)));
+            .and(self.root.as_ref().and_then(|r| fs_space(&r.path())));
         self.table.cursor = g.cursor;
         self.table.scroll_pending = true;
         true

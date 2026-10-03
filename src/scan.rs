@@ -13,8 +13,16 @@ pub(crate) fn deep<R>(f: impl FnOnce() -> R) -> R {
 }
 
 pub(crate) struct Node {
+    /// Its name as shown (see `show_os`); also its name on disk when
+    /// `raw` is None, so it's set before the node is placed and not changed
+    /// after.
     pub(crate) name: String,
-    pub(crate) path: PathBuf,
+    /// The folder it's in, shared by everything in that folder; empty for
+    /// a tree's top, whose `raw` is then its whole path.
+    dir: Arc<Path>,
+    /// Its name on disk, when that differs from `name` (escaped or
+    /// translated); None for nearly everything.
+    raw: Option<Box<std::ffi::OsStr>>,
     pub(crate) size: u64,
     pub(crate) file_count: u64,
     pub(crate) is_dir: bool,
@@ -34,7 +42,8 @@ impl Clone for Node {
     fn clone(&self) -> Self {
         deep(|| Node {
             name: self.name.clone(),
-            path: self.path.clone(),
+            dir: self.dir.clone(),
+            raw: self.raw.clone(),
             size: self.size,
             file_count: self.file_count,
             is_dir: self.is_dir,
@@ -46,6 +55,86 @@ impl Clone for Node {
             gid: self.gid,
             btime: self.btime,
         })
+    }
+}
+
+impl Node {
+    /// Its name on disk (the last part of its path).
+    pub(crate) fn disk_name(&self) -> &std::ffi::OsStr {
+        match &self.raw {
+            // A tree's top keeps its whole path.
+            Some(raw) if self.dir.as_os_str().is_empty() => Path::new(raw).file_name().unwrap_or(raw),
+            Some(raw) => raw,
+            None => std::ffi::OsStr::new(&self.name),
+        }
+    }
+
+    /// Its full path.
+    pub(crate) fn path(&self) -> PathBuf {
+        self.dir.join(self.stored_name())
+    }
+
+    /// What `dir` is joined with: its name on disk, or a top's whole path.
+    fn stored_name(&self) -> &std::ffi::OsStr {
+        self.raw
+            .as_deref()
+            .unwrap_or_else(|| std::ffi::OsStr::new(&self.name))
+    }
+
+    /// True if its full path is `p`, without building it (the same as
+    /// `path() == p` for the paths the app makes).
+    pub(crate) fn path_is(&self, p: &Path) -> bool {
+        use std::os::unix::ffi::OsStrExt;
+        let (d, n, p) = (
+            self.dir.as_os_str().as_bytes(),
+            self.stored_name().as_bytes(),
+            p.as_os_str().as_bytes(),
+        );
+        // As `dir.join(name)` builds it.
+        if d.is_empty() || n.first() == Some(&b'/') {
+            p == n
+        } else if d.last() == Some(&b'/') {
+            p.len() == d.len() + n.len() && p.starts_with(d) && p.ends_with(n)
+        } else {
+            p.len() == d.len() + 1 + n.len()
+                && p.starts_with(d)
+                && p[d.len()] == b'/'
+                && p.ends_with(n)
+        }
+    }
+
+    /// Puts it in folder `dir` (shared with its siblings), named `disk` on
+    /// disk. Set `name` first.
+    pub(crate) fn place(&mut self, dir: Arc<Path>, disk: &std::ffi::OsStr) {
+        self.raw = (disk != std::ffi::OsStr::new(&self.name)).then(|| disk.into());
+        self.dir = dir;
+    }
+
+    /// Takes `from`'s place (a copy of it with the same name).
+    pub(crate) fn copy_place(&mut self, from: &Node) {
+        self.dir = from.dir.clone();
+        self.raw = from.raw.clone();
+    }
+
+    /// The length in bytes of its full path, without building it.
+    pub(crate) fn path_len(&self) -> usize {
+        let (d, n) = (self.dir.as_os_str().len(), self.stored_name().len());
+        match d {
+            0 => n,
+            _ if self.dir.as_os_str().as_encoded_bytes().last() == Some(&b'/') => d + n,
+            _ => d + 1 + n,
+        }
+    }
+
+    /// Sets its full path (a tree's top, or a node made on its own).
+    pub(crate) fn set_path(&mut self, p: &Path) {
+        match (p.parent(), p.file_name()) {
+            (Some(parent), Some(file)) => self.place(parent.into(), file),
+            _ => {
+                self.dir = Path::new("").into();
+                self.raw = Some(p.as_os_str().into());
+            }
+        }
     }
 }
 
@@ -66,8 +155,8 @@ impl Drop for Node {
 #[cfg(test)]
 pub(crate) fn test_node(path: &str, size: u64, is_dir: bool, children: Vec<Node>) -> Node {
     let mut n = empty_node();
-    n.path = PathBuf::from(path);
-    n.name = file_name_of(&n.path);
+    n.name = file_name_of(Path::new(path));
+    n.set_path(Path::new(path));
     n.size = size;
     n.file_count = u64::from(!is_dir);
     n.is_dir = is_dir;
@@ -198,7 +287,8 @@ pub(crate) fn format_owner(
 pub(crate) fn empty_node() -> Node {
     Node {
         name: String::new(),
-        path: PathBuf::new(),
+        dir: Path::new("").into(),
+        raw: None,
         size: 0,
         file_count: 0,
         is_dir: true,
@@ -210,6 +300,21 @@ pub(crate) fn empty_node() -> Node {
         gid: 0,
         btime: 0,
     }
+}
+
+/// `disk`, the name on disk, when it differs from `shown`.
+fn raw_name(disk: &std::ffi::OsStr, shown: &str) -> Option<Box<std::ffi::OsStr>> {
+    (disk != std::ffi::OsStr::new(shown)).then(|| disk.into())
+}
+
+/// Folder node `n` (scanned at `path`) placed in its parent's shared
+/// `in_dir`, or on its own path at a tree's top.
+fn placed(mut n: Node, path: &Path, in_dir: Option<&Arc<Path>>) -> Node {
+    match (in_dir, path.file_name()) {
+        (Some(dir), Some(disk)) => n.place(dir.clone(), disk),
+        _ => n.set_path(path),
+    }
+    n
 }
 
 /// `p`'s last part as shown (see `show_os`), or the whole path for "/".
@@ -257,7 +362,8 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
 pub(crate) fn flat_copy(n: &Node) -> Node {
     let shallow = |c: &Node, children: Vec<Node>| Node {
         name: c.name.clone(),
-        path: c.path.clone(),
+        dir: c.dir.clone(),
+        raw: c.raw.clone(),
         size: c.size,
         file_count: c.file_count,
         is_dir: c.is_dir,
@@ -516,7 +622,7 @@ pub(crate) fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
 /// path; `dir` is its folder's handle.
 pub(crate) fn scan_entry(
     entry: &std::fs::DirEntry,
-    parent: &Path,
+    here: &Arc<Path>,
     dir: &DirHandle,
     ctx: &ScanCtx,
     live_parent: Option<&LiveFolder>,
@@ -529,12 +635,11 @@ pub(crate) fn scan_entry(
         ..
     } = *ctx;
     use std::os::unix::fs::MetadataExt;
-    // The name once, from the listing: as text, and joined to the parent.
+    // The name once, from the listing; a full path only where needed.
     let os_name = entry.file_name();
     let name = show_os(&os_name);
-    let mut p = PathBuf::with_capacity(parent.as_os_str().len() + os_name.len() + 1);
-    p.push(parent);
-    p.push(&os_name);
+    let raw = raw_name(&os_name, &name);
+    let full = || here.join(&os_name);
     // Korean script needs non-ASCII bytes.
     if !os_name.is_ascii()
         && !ctx.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
@@ -550,10 +655,13 @@ pub(crate) fn scan_entry(
             // The folder's details come from the listing (relative to the
             // open parent, cheaper than by full path).
             let meta = entry.metadata().ok();
+            let p = full();
             if mounts.contains(&p) {
+                let label = trf("SEG_OTHER_FS", &[&name]);
                 Node {
-                    name: trf("SEG_OTHER_FS", &[&name]),
-                    path: p,
+                    raw: raw_name(&os_name, &label),
+                    name: label,
+                    dir: here.clone(),
                     size: 0,
                     file_count: 0,
                     is_dir: true,
@@ -566,7 +674,7 @@ pub(crate) fn scan_entry(
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
                 }
             } else {
-                deep(|| scan_dir_in(&p, name, meta, dir, ctx, live_parent))
+                deep(|| scan_dir_in(&p, name, Some(here), meta, dir, ctx, live_parent))
             }
         }
         _ => {
@@ -581,13 +689,14 @@ pub(crate) fn scan_entry(
                     birth_secs(&m),
                 ),
                 Err(e) => {
-                    let _ = progress.send(ScanMsg::LogError(friendly_io_error(&p, &e)));
+                    let _ = progress.send(ScanMsg::LogError(friendly_io_error(&full(), &e)));
                     (0, 0, NO_TIME, NO_TIME, 0, 0, 0)
                 }
             };
             Node {
                 name,
-                path: p,
+                dir: here.clone(),
+                raw,
                 size: sz,
                 file_count: 1,
                 is_dir: false,
@@ -630,6 +739,7 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
     scan_dir_in(
         path,
         file_name_of(path),
+        None,
         std::fs::metadata(path).ok(),
         &None,
         ctx,
@@ -644,6 +754,7 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
 fn scan_dir_in(
     path: &Path,
     name: String,
+    in_dir: Option<&Arc<Path>>,
     self_meta: Option<std::fs::Metadata>,
     parent: &DirHandle,
     ctx: &ScanCtx,
@@ -656,20 +767,25 @@ fn scan_dir_in(
     use std::sync::atomic::Ordering;
     if cancel.load(Ordering::Relaxed) {
         // Cancelled: stop at once; the result is discarded.
-        return Node {
-            name,
-            path: path.to_path_buf(),
-            size: 0,
-            file_count: 0,
-            is_dir: true,
-            children: Vec::new(),
-            mode: 0,
-            mtime: NO_TIME,
-            ctime: NO_TIME,
-            uid: 0,
-            gid: 0,
-            btime: 0,
-        };
+        return placed(
+            Node {
+                name,
+                dir: Path::new("").into(),
+                raw: None,
+                size: 0,
+                file_count: 0,
+                is_dir: true,
+                children: Vec::new(),
+                mode: 0,
+                mtime: NO_TIME,
+                ctime: NO_TIME,
+                uid: 0,
+                gid: 0,
+                btime: 0,
+            },
+            path,
+            in_dir,
+        );
     }
     // Keep this folder open when its children's paths may get too long
     // to open directly.
@@ -712,12 +828,14 @@ fn scan_dir_in(
     let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
     // In the live tree, every file read counts at once in its folder.
     let folder = ctx.live.map(|live| live.open(live_parent, path, own_size));
+    // The path its entries share.
+    let here: Arc<Path> = path.into();
     let mut children: Vec<Node> = entries
         .par_iter()
         .map(|entry| {
             let node = scan_entry(
                 entry,
-                path,
+                &here,
                 &handle,
                 ctx,
                 folder.as_ref().map(|o| &*o.folder),
@@ -745,20 +863,25 @@ fn scan_dir_in(
         exts: file_summary(&children),
     });
 
-    Node {
-        name,
-        path: path.to_path_buf(),
-        size,
-        file_count,
-        is_dir: true,
-        children,
-        mode: self_mode,
-        mtime: self_mtime,
-        ctime: self_ctime,
-        uid: self_uid,
-        gid: self_gid,
-        btime: self_meta.as_ref().map(birth_secs).unwrap_or(0),
-    }
+    placed(
+        Node {
+            name,
+            dir: Path::new("").into(),
+            raw: None,
+            size,
+            file_count,
+            is_dir: true,
+            children,
+            mode: self_mode,
+            mtime: self_mtime,
+            ctime: self_ctime,
+            uid: self_uid,
+            gid: self_gid,
+            btime: self_meta.as_ref().map(birth_secs).unwrap_or(0),
+        },
+        path,
+        in_dir,
+    )
 }
 
 pub(crate) enum ScanMsg {
@@ -934,7 +1057,7 @@ pub(crate) fn rel_parts<'a>(base: &Path, target: &'a Path) -> Option<Vec<&'a std
 pub(crate) fn child_named(node: &Node, name: &std::ffi::OsStr) -> Option<usize> {
     node.children
         .iter()
-        .position(|c| c.path.file_name() == Some(name))
+        .position(|c| c.disk_name() == name)
 }
 
 /// Re-finds the folder at `idx` (child indices from `old`'s root) in `new`,
@@ -945,7 +1068,7 @@ pub(crate) fn remap_index_path(old: &Node, new: &Node, idx: &[usize]) -> Vec<usi
     for &i in idx {
         let Some(oc) = o.children.get(i) else { break };
         // Same parent, so the same name means the same folder.
-        let Some(j) = oc.path.file_name().and_then(|name| child_named(n, name)) else {
+        let Some(j) = child_named(n, oc.disk_name()) else {
             break;
         };
         out.push(j);
@@ -957,14 +1080,15 @@ pub(crate) fn remap_index_path(old: &Node, new: &Node, idx: &[usize]) -> Vec<usi
 
 /// Child-index path from `root` down to `target`, if it's in the tree.
 pub(crate) fn index_path_to(root: &Node, target: &Path) -> Option<Vec<usize>> {
-    let rel = target.strip_prefix(&root.path).ok()?;
+    let root_path = root.path();
+    let rel = target.strip_prefix(&root_path).ok()?;
     let mut n = root;
     let mut out = Vec::new();
     for comp in rel.components() {
         let j = n
             .children
             .iter()
-            .position(|c| c.is_dir && c.path.file_name() == Some(comp.as_os_str()))?;
+            .position(|c| c.is_dir && c.disk_name() == comp.as_os_str())?;
         out.push(j);
         n = &n.children[j];
     }
@@ -1423,7 +1547,7 @@ mod mount_tests {
         let child = |name: &str| {
             tree.children
                 .iter()
-                .find(|c| c.path == dir.join(name))
+                .find(|c| c.path_is(&dir.join(name)))
                 .unwrap()
         };
         assert_eq!((child("mounted").file_count, child("mounted").size), (0, 0));
@@ -1491,7 +1615,7 @@ mod scan_dump {
             let _ = write!(
                 s,
                 "NODE {} | {} | {} {} {} {} {} {} {} {} {}",
-                n.path.as_os_str().as_bytes().escape_ascii(),
+                n.path().as_os_str().as_bytes().escape_ascii(),
                 n.name,
                 n.size,
                 n.file_count,
@@ -1511,5 +1635,148 @@ mod scan_dump {
         walk(&tree, &mut lines);
         lines.sort();
         std::fs::write(out, lines.join("\n")).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    /// Every way to read a node's path agrees with `p`, and near misses
+    /// (a byte off, a slash moved, the shown name) don't match.
+    fn check(n: &Node, p: &Path) {
+        assert_eq!(n.path(), p);
+        assert!(n.path_is(p), "{}", p.display());
+        assert_eq!(n.path_len(), p.as_os_str().len(), "{}", p.display());
+        let disk = p.file_name().unwrap_or(p.as_os_str());
+        assert_eq!(n.disk_name(), disk, "{}", p.display());
+        let b = p.as_os_str().as_bytes();
+        let mut longer = b.to_vec();
+        longer.push(b'x');
+        let mut shorter = b.to_vec();
+        shorter.pop();
+        let mut doubled = b"/".to_vec();
+        doubled.extend_from_slice(b);
+        let mut flipped = b.to_vec();
+        *flipped.last_mut().unwrap() ^= 1;
+        for near in [longer, shorter, doubled, flipped] {
+            let near = Path::new(OsStr::from_bytes(&near));
+            assert!(!n.path_is(near), "{} matched {}", p.display(), near.display());
+        }
+        // Moving the last slash keeps the length but isn't the same path.
+        if let Some(i) = b.iter().rposition(|&c| c == b'/')
+            && i > 0
+            && i + 1 < b.len()
+        {
+            let mut moved = b.to_vec();
+            moved.swap(i, i + 1);
+            let moved = Path::new(OsStr::from_bytes(&moved));
+            assert!(!n.path_is(moved), "{} matched {}", p.display(), moved.display());
+        }
+    }
+
+    fn top(name: &str, p: &Path) -> Node {
+        let mut n = empty_node();
+        n.name = name.into();
+        n.set_path(p);
+        n
+    }
+
+    /// Tops: the root, a mount shown by its label, a relative path, a name
+    /// that isn't UTF-8.
+    #[test]
+    fn tops_keep_their_whole_path() {
+        check(&top("/", Path::new("/")), Path::new("/"));
+        check(&top("Backup disk", Path::new("/run/media/u/16TB")), Path::new("/run/media/u/16TB"));
+        check(&top("16TB", Path::new("/run/media/u/16TB")), Path::new("/run/media/u/16TB"));
+        check(&top("rel", Path::new("rel")), Path::new("rel"));
+        check(&top("a/b", Path::new("a/b")), Path::new("a/b"));
+        let odd = Path::new(OsStr::from_bytes(b"/tmp/\xff\xfe\\x"));
+        check(&top(&file_name_of(odd), odd), odd);
+    }
+
+    /// Children placed in a shared folder: in "/", with names shown
+    /// differently from disk (bad UTF-8, a backslash, a newline, a name
+    /// that looks like an escape), and a sibling whose shown name is
+    /// another's disk name.
+    #[test]
+    fn placed_children_match_their_disk_path() {
+        for dir in ["/", "/a", "/a/", "rel", "/a b/\u{1F600}"] {
+            let shared: Arc<Path> = Path::new(dir).into();
+            for disk in [
+                &b"x"[..],
+                b"\xff",
+                b"a\\b",
+                b"line\nbreak",
+                b"\\xFF",
+                b" lead and trail ",
+                b"\xe2\x82",
+            ] {
+                let disk = OsStr::from_bytes(disk);
+                let mut n = empty_node();
+                n.name = show_os(disk);
+                n.place(shared.clone(), disk);
+                check(&n, &Path::new(dir).join(disk));
+                // The shown name never matches when it differs from disk.
+                if n.name.as_bytes() != disk.as_bytes() {
+                    assert!(!n.path_is(&Path::new(dir).join(&n.name)));
+                }
+                let mut copy = empty_node();
+                copy.name = n.name.clone();
+                copy.copy_place(&n);
+                check(&copy, &Path::new(dir).join(disk));
+            }
+        }
+    }
+
+    /// A real scan of names that display differently from disk: every
+    /// node's path exists, and agrees with all the other readings.
+    #[test]
+    fn scanned_paths_exist() {
+        let dir = std::env::temp_dir().join(format!("spacemap-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let names: [&[u8]; 5] = [b"\xff dir", b"back\\slash", b"new\nline", b"\\xFF", b"plain"];
+        for d in names {
+            let sub = dir.join(OsStr::from_bytes(d));
+            std::fs::create_dir_all(&sub).unwrap();
+            for f in names {
+                std::fs::write(sub.join(OsStr::from_bytes(f)), b"1").unwrap();
+            }
+        }
+        let mounts = HashSet::new();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let ctx = ScanCtx {
+            mounts: &mounts,
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &Default::default(),
+            progress_interval: 512,
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: None,
+        };
+        let tree = scan_dir(&dir, &ctx);
+        check(&tree, &dir);
+        let mut seen = 0;
+        let mut stack = vec![&tree];
+        while let Some(n) = stack.pop() {
+            let p = n.path();
+            assert!(std::fs::symlink_metadata(&p).is_ok(), "{}", p.display());
+            check(n, &p);
+            assert_eq!(n.disk_name(), p.file_name().unwrap());
+            seen += 1;
+            stack.extend(n.children.iter());
+        }
+        assert_eq!(seen, 1 + names.len() * (1 + names.len()));
+        let flat = flat_copy(&tree);
+        for f in &flat.children {
+            assert!(std::fs::symlink_metadata(f.path()).is_ok(), "{}", f.path().display());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

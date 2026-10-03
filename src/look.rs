@@ -640,20 +640,12 @@ impl Grouped {
                 any: true,
             },
         );
-        Some(Node {
-            name: trf("SEG_OTHER_ITEMS", &[&self.count.to_string()]),
-            path,
-            size: self.size,
-            file_count: self.file_count,
-            is_dir: true,
-            children: Vec::new(),
-            mode: 0,
-            mtime: NO_TIME,
-            ctime: NO_TIME,
-            uid: 0,
-            gid: 0,
-            btime: 0,
-        })
+        let mut node = empty_node();
+        node.name = trf("SEG_OTHER_ITEMS", &[&self.count.to_string()]);
+        node.size = self.size;
+        node.file_count = self.file_count;
+        node.set_path(&path);
+        Some(node)
     }
 }
 
@@ -700,27 +692,26 @@ impl LiveLooks {
             self.since.entry(key).or_insert(now);
         }
         self.summaries.insert(key, summary);
-        Node {
-            name: file_name_of(&f.path),
-            path: f.path.clone(),
-            size,
-            file_count,
-            is_dir: true,
-            children: Vec::new(),
-            // Unfinished folders' details stay unknown ("…" in the table).
-            mode: fin.map_or(0, |d| d.mode),
-            mtime: fin.map_or(NO_TIME, |d| d.mtime),
-            ctime: fin.map_or(NO_TIME, |d| d.ctime),
-            uid: fin.map_or(0, |d| d.uid),
-            gid: fin.map_or(0, |d| d.gid),
-            btime: 0,
+        let mut node = empty_node();
+        node.name = file_name_of(&f.path);
+        node.size = size;
+        node.file_count = file_count;
+        node.set_path(&f.path);
+        // Unfinished folders' details stay unknown ("…" in the table).
+        if let Some(d) = fin {
+            node.mode = d.mode;
+            node.mtime = d.mtime;
+            node.ctime = d.ctime;
+            node.uid = d.uid;
+            node.gid = d.gid;
         }
+        node
     }
 
     /// The look of folder `node` from what's classified under it so far
     /// (final once it finished), and since when it has one.
     pub(crate) fn get(&self, node: &Node) -> Option<(Look, Instant)> {
-        let key = path_key(&node.path);
+        let key = path_key(&node.path());
         let since = *self.since.get(&key)?;
         let summary = self.summaries.get(&key)?;
         Some((summary.look(node.size), since))
@@ -909,21 +900,21 @@ mod live_stress {
                 n.gid,
             )
         };
-        assert_eq!(key(live), key(fin), "{}", fin.path.display());
+        assert_eq!(key(live), key(fin), "{}", fin.path().display());
         let want = expected(fin, cats).summary();
         assert_eq!(
-            looks.summaries.get(&path_key(&fin.path)),
+            looks.summaries.get(&path_key(&fin.path())),
             Some(&want),
             "{}",
-            fin.path.display()
+            fin.path().display()
         );
         let mut checked = 1;
         for l in &live.children {
             let f = fin
                 .children
                 .iter()
-                .find(|c| c.path == l.path)
-                .unwrap_or_else(|| panic!("{} not in the finished tree", l.path.display()));
+                .find(|c| c.path() == l.path())
+                .unwrap_or_else(|| panic!("{} not in the finished tree", l.path().display()));
             checked += same(l, f, looks, cats);
         }
         checked
@@ -957,11 +948,11 @@ mod live_stress {
                 // may ever go down.
                 fn check(n: &Node, seen: &mut HashMap<PathBuf, (u64, u64)>) {
                     let now = (n.size, n.file_count);
-                    if let Some(&(size, files)) = seen.get(&n.path) {
-                        assert!(now.0 >= size, "{} size went down", n.path.display());
-                        assert!(now.1 >= files, "{} files went down", n.path.display());
+                    if let Some(&(size, files)) = seen.get(&n.path()) {
+                        assert!(now.0 >= size, "{} size went down", n.path().display());
+                        assert!(now.1 >= files, "{} files went down", n.path().display());
                     }
-                    seen.insert(n.path.clone(), now);
+                    seen.insert(n.path(), now);
                     for c in &n.children {
                         check(c, seen);
                     }

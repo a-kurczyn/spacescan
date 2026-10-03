@@ -512,8 +512,8 @@ impl DiskScanApp {
         // After clearing the log, so problems in the file stay listed.
         self.reload_categories();
         self.partial_root = empty_node();
-        self.partial_root.path = path.clone();
         self.partial_root.name = file_name_of(&path);
+        self.partial_root.set_path(&path);
         self.free_space = if is_real_mount_point(&path) {
             fs_space(&path)
         } else {
@@ -617,13 +617,11 @@ impl DiskScanApp {
         let Some(full) = self.full_root.clone() else {
             return;
         };
-        let empty = |full: &Node| Node {
-            name: full.name.clone(),
-            path: full.path.clone(),
-            size: 0,
-            file_count: 0,
-            children: Vec::new(),
-            ..empty_node()
+        let empty = |full: &Node| {
+            let mut n = empty_node();
+            n.name = full.name.clone();
+            n.copy_place(full);
+            n
         };
         let base = match &self.filter {
             Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| empty(&full))),
@@ -825,7 +823,7 @@ impl DiskScanApp {
             return None;
         }
         let root = self.root.as_ref()?;
-        try_get_node(self.current_view_node(root), rel).map(|n| n.path.clone())
+        try_get_node(self.current_view_node(root), rel).map(|n| n.path())
     }
 
     /// Backspace (and ⬅ from the inner ring): steps the chart out to the
@@ -1040,7 +1038,7 @@ impl eframe::App for DiskScanApp {
                 .show(&ctx, |ui| {
                     let n = selected.unwrap_or(view_node);
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                    ui.strong(short_path(&n.path));
+                    ui.strong(short_path(&n.path()));
                     folder_stats_ui(ui, n);
                 });
         }
@@ -1156,7 +1154,7 @@ impl eframe::App for DiskScanApp {
                 self.clip(&ctx, vec![target], mode);
             }
             if let (Some(text), Some(root)) = (paste, self.root.clone()) {
-                let dest = self.current_view_node(&root).path.clone();
+                let dest = self.current_view_node(&root).path();
                 self.paste_into(dest, &text);
             }
             if (typed.contains('D') || typed.contains('T'))

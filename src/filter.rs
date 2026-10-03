@@ -277,23 +277,23 @@ pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) ->
         return None;
     }
     children.sort_by_key(|c| std::cmp::Reverse(c.size));
-    Some(Node {
-        name: n.name.clone(),
-        path: n.path.clone(),
-        size: children
-            .iter()
-            .map(|c| c.size)
-            .fold(0u64, u64::saturating_add),
-        file_count: children.iter().map(|c| c.file_count).sum(),
-        is_dir: true,
-        children,
-        mode: n.mode,
-        mtime: n.mtime,
-        ctime: n.ctime,
-        uid: n.uid,
-        gid: n.gid,
-        btime: n.btime,
-    })
+    let mut kept = empty_node();
+    kept.name = n.name.clone();
+    kept.copy_place(n);
+    kept.size = children
+        .iter()
+        .map(|c| c.size)
+        .fold(0u64, u64::saturating_add);
+    kept.file_count = children.iter().map(|c| c.file_count).sum();
+    kept.is_dir = true;
+    kept.children = children;
+    kept.mode = n.mode;
+    kept.mtime = n.mtime;
+    kept.ctime = n.ctime;
+    kept.uid = n.uid;
+    kept.gid = n.gid;
+    kept.btime = n.btime;
+    Some(kept)
 }
 
 #[cfg(test)]

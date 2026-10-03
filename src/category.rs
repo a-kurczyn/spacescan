@@ -366,12 +366,13 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
 
 /// The folder at `path` inside `root`, if it's there.
 pub(crate) fn find_by_path<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
-    let rel = path.strip_prefix(&root.path).ok()?;
+    let root_path = root.path();
+    let rel = path.strip_prefix(&root_path).ok()?;
     let mut n = root;
-    let mut cur = root.path.clone();
+    let mut cur = root.path();
     for comp in rel.components() {
         cur.push(comp);
-        n = n.children.iter().find(|c| c.path == cur)?;
+        n = n.children.iter().find(|c| c.path_is(&cur))?;
     }
     Some(n)
 }

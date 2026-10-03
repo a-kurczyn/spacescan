@@ -144,7 +144,7 @@ fn layout_ring(
         .children
         .iter()
         .enumerate()
-        .filter(|(_, c)| !hidden.contains(&c.path))
+        .filter(|(_, c)| hidden.is_empty() || !hidden.contains(&c.path()))
         .collect();
 
     // Free space takes its share of the drive's capacity; the content found
