@@ -128,6 +128,33 @@ pub(crate) fn format_mode_ls(mode: u32, is_dir: bool) -> String {
 }
 
 /// A time that isn't known (0 would be a real date: 1970-01-01).
+/// A fast hash for short keys hashed very often (extensions, paths during
+/// a scan), the way the Rust compiler hashes internally: a multiply and a
+/// rotate per word. Not resistant to crafted keys, which don't matter here.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct FxHasher(u64);
+
+impl std::hash::Hasher for FxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        const K: u64 = 0x517c_c1b7_2722_0a95;
+        let (words, rest) = bytes.as_chunks::<8>();
+        for w in words {
+            self.0 = (self.0.rotate_left(5) ^ u64::from_le_bytes(*w)).wrapping_mul(K);
+        }
+        for &b in rest {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(b)).wrapping_mul(K);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub(crate) type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
+/// A HashMap with the fast hash.
+pub(crate) type FxHashMap<K, V> = HashMap<K, V, FxBuild>;
+
 pub(crate) const NO_TIME: i64 = i64::MIN;
 
 /// Unix seconds as local "YYYY-MM-DD HH:MM", or "-" if unknown.
@@ -565,6 +592,7 @@ pub(crate) fn scan_entry(
     path: PathBuf,
     dir: &DirHandle,
     ctx: &ScanCtx,
+    place: LivePlace,
 ) -> Node {
     let ScanCtx {
         mounts,
@@ -603,7 +631,11 @@ pub(crate) fn scan_entry(
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
                 }
             } else {
-                deep(|| scan_dir_in(&p, dir, ctx))
+                let place = LivePlace {
+                    depth: place.depth + 1,
+                    ..place
+                };
+                deep(|| scan_dir_in(&p, dir, ctx, place))
             }
         }
         _ => {
@@ -662,12 +694,17 @@ fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
 }
 
 pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
-    scan_dir_in(path, &None, ctx)
+    let place = LivePlace {
+        depth: 0,
+        chain: None,
+    };
+    scan_dir_in(path, &None, ctx, place)
 }
 
 /// Scans `path`, whose parent folder is open as `parent` when the path is
 /// long (see `DirHandle`).
-fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
+/// `place`: where it is for the live counters, if any.
+fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx, place: LivePlace) -> Node {
     let ScanCtx {
         progress, cancel, ..
     } = *ctx;
@@ -729,14 +766,23 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         use std::os::unix::fs::DirEntryExt;
         entries.sort_by_key(|e| e.ino());
     }
-    // Every file read counts at once in the live chart's counters.
-    let counters = ctx.live.map(|live| live.open(path));
+    // Every file read counts at once in the live chart's counters: this
+    // folder's, if the chart can show it, and those above.
+    let counters = ctx.live.and_then(|live| live.open(path, place.depth));
+    let link = counters.as_ref().map(|o| Chain {
+        counters: &o.counters,
+        up: place.chain,
+    });
+    let place = LivePlace {
+        chain: link.as_ref().or(place.chain),
+        ..place
+    };
     let mut children: Vec<Node> = entries
         .par_iter()
         .map(|entry| {
-            let node = scan_entry(entry, path.join(entry.file_name()), &handle, ctx);
-            if let (Some(live), Some(c)) = (ctx.live, &counters) {
-                live.count(c, &node);
+            let node = scan_entry(entry, path.join(entry.file_name()), &handle, ctx, place);
+            if let (Some(live), Some(chain)) = (ctx.live, place.chain) {
+                live.count(chain, &node);
             }
             node
         })
@@ -751,8 +797,8 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         .fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
-    if let (Some(live), Some(c)) = (ctx.live, &counters) {
-        live.close(path, c);
+    if let (Some(live), Some(open)) = (ctx.live, &counters) {
+        live.close(open);
     }
     let _ = progress.send(ScanMsg::SliceDone {
         path: path.to_path_buf(),
@@ -1265,7 +1311,7 @@ mod scan_perf {
         let in_file_order = std::env::var_os("SPACEMAP_FILE_ORDER").is_some();
         // $SPACEMAP_LIVE=1 counts every file for the live chart, as the app does.
         let live = std::env::var_os("SPACEMAP_LIVE")
-            .map(|_| LiveCounters::new(Arc::new(CategoryModel::defaults()), dir.clone()));
+            .map(|_| LiveCounters::new(Arc::new(CategoryModel::defaults()), 7));
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
             .build()

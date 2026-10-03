@@ -46,7 +46,7 @@ pub(crate) struct Category(pub(crate) usize);
 pub(crate) struct CategoryModel {
     /// Name tokens, translated when shown.
     names: Vec<String>,
-    by_ext: HashMap<String, usize>,
+    by_ext: FxHashMap<String, usize>,
 }
 
 impl CategoryModel {
@@ -113,7 +113,7 @@ impl CategoryModel {
             .ok_or_else(|| tr("ERR_CATEGORIES_NO_LIST"))?;
         let mut model = CategoryModel {
             names: Vec::new(),
-            by_ext: HashMap::new(),
+            by_ext: FxHashMap::default(),
         };
         let mut problems = Vec::new();
         for (n, entry) in list.iter().enumerate() {

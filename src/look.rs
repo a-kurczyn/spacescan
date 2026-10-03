@@ -6,8 +6,8 @@
 //! its oldest.
 
 use super::*;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicI64, AtomicU64};
 
 /// What decides a slice's color.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -154,23 +154,46 @@ pub(crate) fn group_look(looks: impl Iterator<Item = Look>, cats: &CategoryModel
     totals.look(size)
 }
 
-/// One scan thread's share of a folder's counters: bytes and files per
-/// category, newest and oldest Changed time. Kept apart per thread so
-/// threads don't slow each other down updating the same memory.
+/// One scan thread's share of a folder's counters, in one block: bytes
+/// per category, then files per category, then the newest and oldest
+/// Changed time. Each shard has a single writer, its thread, so updates
+/// are plain loads and stores (no locked instructions); other threads only
+/// read it.
 #[repr(align(64))]
-struct Shard {
-    bytes: Vec<AtomicU64>,
-    files: Vec<AtomicU64>,
-    newest: AtomicI64,
-    oldest: AtomicI64,
+struct Shard(Box<[AtomicU64]>);
+
+impl Shard {
+    fn new(categories: usize) -> Self {
+        let mut v: Vec<AtomicU64> = (0..categories * 2).map(|_| AtomicU64::new(0)).collect();
+        v.push(AtomicU64::new(i64::MIN as u64));
+        v.push(AtomicU64::new(i64::MAX as u64));
+        Shard(v.into_boxed_slice())
+    }
+
+    fn bytes(&self, cat: usize) -> &AtomicU64 {
+        &self.0[cat]
+    }
+
+    fn files(&self, cat: usize, categories: usize) -> &AtomicU64 {
+        &self.0[categories + cat]
+    }
+
+    fn newest(&self) -> &AtomicU64 {
+        &self.0[self.0.len() - 2]
+    }
+
+    fn oldest(&self) -> &AtomicU64 {
+        &self.0[self.0.len() - 1]
+    }
 }
 
-/// Running totals of one folder being scanned, updated by the scan threads
-/// for every file. A thread's shard is made when it first counts something
-/// there (most folders are touched by one or two threads).
+/// Running totals of everything under one folder being scanned: each file
+/// read counts in its folder's counters and those of every counted folder
+/// above it. A thread's shard is made when it first counts something
+/// there.
 pub(crate) struct Counters {
     categories: usize,
-    shards: Vec<std::sync::OnceLock<Box<Shard>>>,
+    shards: Box<[std::sync::OnceLock<Shard>]>,
 }
 
 impl Counters {
@@ -182,55 +205,31 @@ impl Counters {
         }
     }
 
-    /// This thread's shard (the last one for threads outside the pool).
-    fn shard(&self) -> &Shard {
-        let i = rayon::current_thread_index().unwrap_or(usize::MAX);
-        self.shards[i.min(self.shards.len() - 1)].get_or_init(|| {
-            Box::new(Shard {
-                bytes: (0..self.categories).map(|_| AtomicU64::new(0)).collect(),
-                files: (0..self.categories).map(|_| AtomicU64::new(0)).collect(),
-                newest: AtomicI64::new(i64::MIN),
-                oldest: AtomicI64::new(i64::MAX),
-            })
-        })
+    /// Shard `i` (see `shard_index`).
+    fn shard(&self, i: usize) -> &Shard {
+        self.shards[i].get_or_init(|| Shard::new(self.categories))
     }
 
-    fn add_file(&self, cat: Category, size: u64, ctime: Option<i64>) {
-        let s = self.shard();
-        s.bytes[cat.0].fetch_add(size, Relaxed);
-        s.files[cat.0].fetch_add(1, Relaxed);
-        if let Some(t) = ctime {
-            s.newest.fetch_max(t, Relaxed);
-            s.oldest.fetch_min(t, Relaxed);
-        }
-    }
-
-    fn add(&self, t: &Totals) {
-        let s = self.shard();
-        for (a, b) in s.bytes.iter().zip(&t.bytes) {
-            a.fetch_add(*b, Relaxed);
-        }
-        for (a, b) in s.files.iter().zip(&t.files) {
-            a.fetch_add(*b, Relaxed);
-        }
-        if let Some(n) = t.newest {
-            s.newest.fetch_max(n, Relaxed);
-        }
-        if let Some(o) = t.oldest {
-            s.oldest.fetch_min(o, Relaxed);
-        }
+    /// The shard of the calling thread: its index in the thread pool, or
+    /// the last shard for the one scan thread outside it.
+    fn shard_index(&self) -> usize {
+        let last = self.shards.len() - 1;
+        rayon::current_thread_index().map_or(last, |i| i.min(last))
     }
 
     /// All shards added up.
     fn snapshot(&self) -> Totals {
-        let categories = self.categories;
-        let mut t = Totals::new(categories);
+        let n = self.categories;
+        let mut t = Totals::new(n);
         for s in self.shards.iter().filter_map(|s| s.get()) {
-            for i in 0..categories {
-                t.bytes[i] = t.bytes[i].saturating_add(s.bytes[i].load(Relaxed));
-                t.files[i] += s.files[i].load(Relaxed);
+            for i in 0..n {
+                t.bytes[i] = t.bytes[i].saturating_add(s.bytes(i).load(Relaxed));
+                t.files[i] += s.files(i, n).load(Relaxed);
             }
-            let (newest, oldest) = (s.newest.load(Relaxed), s.oldest.load(Relaxed));
+            let (newest, oldest) = (
+                s.newest().load(Relaxed) as i64,
+                s.oldest().load(Relaxed) as i64,
+            );
             t.add_times(
                 if newest == i64::MIN { NO_TIME } else { newest },
                 if oldest == i64::MAX { NO_TIME } else { oldest },
@@ -240,95 +239,158 @@ impl Counters {
     }
 }
 
-/// The counters of a running scan, shared by its threads and the window:
-/// every folder being scanned has its own. A finished folder's totals go
-/// into its parent's, so a folder's counters hold its own files read so
-/// far plus its finished subfolders.
+/// The counted folders from one folder up to the scanned one: each file
+/// counts in all of them.
+pub(crate) struct Chain<'a> {
+    pub(crate) counters: &'a Counters,
+    pub(crate) up: Option<&'a Chain<'a>>,
+}
+
+/// Where a folder sits in a scan with live counters: its depth below the
+/// scanned folder, and the nearest counted folders above (or at) it.
+#[derive(Clone, Copy)]
+pub(crate) struct LivePlace<'a> {
+    pub(crate) depth: usize,
+    pub(crate) chain: Option<&'a Chain<'a>>,
+}
+
+/// The counters of a running scan, shared by its threads and the window.
+/// Only folders the chart can show (down to `depth` below the scanned one)
+/// have counters; deeper files count in the nearest counted folder above.
 pub(crate) struct LiveCounters {
     cats: Arc<CategoryModel>,
-    /// The folder being scanned.
-    root: PathBuf,
-    /// Counters of the folders being scanned, and the final totals of
-    /// folders that finished since the window last looked; split by a hash
-    /// of the path so threads seldom wait for each other.
+    /// How deep below the scanned folder folders get counters.
+    depth: usize,
+    /// Counted folders being scanned, and the final totals of those that
+    /// finished since the window last looked, one part per scan thread (a
+    /// folder is opened and finished on the same thread), so threads only
+    /// wait for the window's brief reads.
     active: Vec<std::sync::Mutex<ActivePart>>,
 }
 
 #[derive(Default)]
 struct ActivePart {
-    scanning: HashMap<PathBuf, Arc<Counters>>,
+    /// Numbered slots, reused once free (see `free`).
+    scanning: Vec<Option<(PathBuf, Arc<Counters>)>>,
+    free: Vec<usize>,
     finished: Vec<FolderTotals>,
+}
+
+/// A counted folder being scanned: its counters, and its slot in the
+/// opening thread's part of `LiveCounters::active`.
+pub(crate) struct Open {
+    pub(crate) counters: Arc<Counters>,
+    part: usize,
+    slot: usize,
 }
 
 /// A folder and its totals.
 type FolderTotals = (PathBuf, Totals);
 
 impl LiveCounters {
-    pub(crate) fn new(cats: Arc<CategoryModel>, root: PathBuf) -> Self {
+    /// Counters for a scan, counting folders down to `depth` below the
+    /// scanned one.
+    pub(crate) fn new(cats: Arc<CategoryModel>, depth: usize) -> Self {
         LiveCounters {
             cats,
-            root,
-            active: (0..16).map(|_| Default::default()).collect(),
+            depth,
+            active: (0..rayon::current_num_threads() + 1)
+                .map(|_| Default::default())
+                .collect(),
         }
     }
 
-    /// The part of `active` that holds `path`.
-    fn part(&self, path: &Path) -> &std::sync::Mutex<ActivePart> {
-        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
-        let hash = BuildHasherDefault::<DefaultHasher>::default().hash_one(path);
-        &self.active[hash as usize % self.active.len()]
+    /// The calling thread's part of `active`.
+    fn part_index(&self) -> usize {
+        let last = self.active.len() - 1;
+        rayon::current_thread_index().map_or(last, |i| i.min(last))
     }
 
-    /// Folder `path` starts being scanned: its counters.
-    pub(crate) fn open(&self, path: &Path) -> Arc<Counters> {
-        let c = Arc::new(Counters::new(self.cats.other().0 + 1));
-        self.part(path)
-            .lock()
-            .unwrap()
-            .scanning
-            .insert(path.to_path_buf(), c.clone());
-        c
+    /// Folder `path` at `depth` starts being scanned: its counters, if the
+    /// chart can show it.
+    pub(crate) fn open(&self, path: &Path, depth: usize) -> Option<Open> {
+        if depth > self.depth {
+            return None;
+        }
+        let counters = Arc::new(Counters::new(self.cats.other().0 + 1));
+        let part = self.part_index();
+        let mut p = self.active[part].lock().unwrap();
+        let entry = Some((path.to_path_buf(), counters.clone()));
+        let slot = match p.free.pop() {
+            Some(slot) => {
+                p.scanning[slot] = entry;
+                slot
+            }
+            None => {
+                p.scanning.push(entry);
+                p.scanning.len() - 1
+            }
+        };
+        Some(Open {
+            counters,
+            part,
+            slot,
+        })
     }
 
-    /// `node` was read in a folder with counters `c`: a file counts.
-    pub(crate) fn count(&self, c: &Counters, node: &Node) {
+    /// `node` was read under the counted folders `chain`: a file counts in
+    /// all of them.
+    pub(crate) fn count(&self, chain: &Chain, node: &Node) {
         if node.is_dir {
             return;
         }
-        let ctime = (node.ctime != NO_TIME).then_some(node.ctime);
-        c.add_file(self.cats.of_name(&node.name), node.size, ctime);
-    }
-
-    /// Folder `path` finished: its totals, now final, go into its parent's
-    /// counters, and wait for the window as finished.
-    pub(crate) fn close(&self, path: &Path, c: &Counters) {
-        let totals = c.snapshot();
-        // Into the parent first, then off the list: the window may count
-        // these files twice for a moment, but never misses them.
-        if let Some(parent) = path.parent() {
-            let parent = self
-                .part(parent)
-                .lock()
-                .unwrap()
-                .scanning
-                .get(parent)
-                .cloned();
-            if let Some(parent) = parent {
-                parent.add(&totals);
+        let cat = self.cats.of_name(&node.name).0;
+        let i = chain.counters.shard_index();
+        let mut link = Some(chain);
+        // A folder's newest and oldest also hold for every folder above it,
+        // so the times stop at the first folder they don't change.
+        let t = node.ctime;
+        let (mut newest, mut oldest) = (t != NO_TIME, t != NO_TIME);
+        // This thread is the shard's only writer.
+        let bump = |a: &AtomicU64, by: u64| a.store(a.load(Relaxed).wrapping_add(by), Relaxed);
+        let n = self.cats.other().0 + 1;
+        while let Some(l) = link {
+            let s = l.counters.shard(i);
+            bump(s.bytes(cat), node.size);
+            bump(s.files(cat, n), 1);
+            if newest {
+                newest = (s.newest().load(Relaxed) as i64) < t;
+                if newest {
+                    s.newest().store(t as u64, Relaxed);
+                }
             }
+            if oldest {
+                oldest = (s.oldest().load(Relaxed) as i64) > t;
+                if oldest {
+                    s.oldest().store(t as u64, Relaxed);
+                }
+            }
+            link = l.up;
         }
-        let mut part = self.part(path).lock().unwrap();
-        part.scanning.remove(path);
-        part.finished.push((path.to_path_buf(), totals));
     }
 
-    /// The totals of every folder still being scanned, as of now, and of
-    /// the folders that finished since the last call.
+    /// Counted folder `open` finished: its totals are final.
+    pub(crate) fn close(&self, open: &Open) {
+        let totals = open.counters.snapshot();
+        let mut p = self.active[open.part].lock().unwrap();
+        if let Some((path, _)) = p.scanning[open.slot].take() {
+            p.finished.push((path, totals));
+        }
+        p.free.push(open.slot);
+    }
+
+    /// The totals so far of every counted folder still being scanned, and
+    /// the final totals of those that finished since the last call.
     fn take_snapshot(&self) -> (Vec<FolderTotals>, Vec<FolderTotals>) {
         let (mut scanning, mut finished) = (Vec::new(), Vec::new());
         for part in &self.active {
             let mut part = part.lock().unwrap();
-            scanning.extend(part.scanning.iter().map(|(p, c)| (p.clone(), c.snapshot())));
+            scanning.extend(
+                part.scanning
+                    .iter()
+                    .flatten()
+                    .map(|(p, c)| (p.clone(), c.snapshot())),
+            );
             finished.append(&mut part.finished);
         }
         (scanning, finished)
@@ -336,14 +398,13 @@ impl LiveCounters {
 }
 
 /// Slice looks during a scan, for the live chart: final for finished
-/// folders, and from the counters (refreshed every 100 ms) for folders
-/// still being scanned.
+/// folders, and from the counters (read every 100 ms) for folders still
+/// being scanned.
 #[derive(Default)]
 pub(crate) struct LiveLooks {
     /// Final totals of finished folders.
     done: HashMap<PathBuf, Totals>,
-    /// Totals so far of the folders still being scanned and the folders
-    /// above them.
+    /// Totals so far of the folders still being scanned.
     partial: HashMap<PathBuf, Totals>,
     /// When each folder first had files classified under it.
     since: HashMap<PathBuf, Instant>,
@@ -351,8 +412,7 @@ pub(crate) struct LiveLooks {
 }
 
 impl LiveLooks {
-    /// Reads `counters` again if the last read is 100 ms old: the totals of
-    /// every folder still being scanned, added up the folders above it.
+    /// Reads `counters` again if the last read is 100 ms old.
     pub(crate) fn refresh(&mut self, counters: &LiveCounters) {
         const EVERY: std::time::Duration = std::time::Duration::from_millis(100);
         if self.refreshed.is_some_and(|t| t.elapsed() < EVERY) {
@@ -364,32 +424,18 @@ impl LiveLooks {
     /// Reads `counters` now (see `refresh`).
     pub(crate) fn refresh_now(&mut self, counters: &LiveCounters) {
         self.refreshed = Some(Instant::now());
-        self.partial.clear();
-        let categories = counters.cats.other().0 + 1;
         let (scanning, finished) = counters.take_snapshot();
         let now = Instant::now();
-        for (path, totals) in finished {
+        self.partial.clear();
+        for (path, totals) in scanning.into_iter().chain(finished.iter().cloned()) {
             if !totals.is_empty() {
                 self.since.entry(path.clone()).or_insert(now);
             }
+            self.partial.insert(path, totals);
+        }
+        for (path, totals) in finished {
+            self.partial.remove(&path);
             self.done.insert(path, totals);
-        }
-        for (path, totals) in scanning {
-            if totals.is_empty() {
-                continue;
-            }
-            for folder in path.ancestors() {
-                self.partial
-                    .entry(folder.to_path_buf())
-                    .or_insert_with(|| Totals::new(categories))
-                    .add(&totals);
-                if folder == counters.root {
-                    break;
-                }
-            }
-        }
-        for path in self.partial.keys() {
-            self.since.entry(path.clone()).or_insert(now);
         }
     }
 
@@ -556,24 +602,36 @@ mod tests {
         let root = test_node("/r", 3500, true, vec![sub, flac.clone()]);
         let finished = Looks::build(&root, &cats);
 
-        let counters = LiveCounters::new(Arc::new(cats.clone()), PathBuf::from("/r"));
+        let counters = LiveCounters::new(Arc::new(cats.clone()), 6);
         let mut live = LiveLooks::default();
         // The live tree has folders only.
         let live_sub = test_node("/r/s", 3000, true, vec![]);
         let live_root = test_node("/r", 3500, true, vec![live_sub.clone()]);
-        let r = counters.open(Path::new("/r"));
-        let s = counters.open(Path::new("/r/s"));
-        live.refresh(&counters);
+        let r = counters.open(Path::new("/r"), 0).unwrap();
+        let s = counters.open(Path::new("/r/s"), 1).unwrap();
+        assert!(
+            counters.open(Path::new("/r/s/deep"), 7).is_none(),
+            "too deep to show"
+        );
+        let at_r = Chain {
+            counters: &r.counters,
+            up: None,
+        };
+        let at_s = Chain {
+            counters: &s.counters,
+            up: Some(&at_r),
+        };
+        live.refresh_now(&counters);
         assert!(live.get(&live_root).is_none(), "nothing classified yet");
         // One file read: /r/s and /r already show it.
-        counters.count(&s, &mkv);
+        counters.count(&at_s, &mkv);
         live.refresh_now(&counters);
         let early = live.get(&live_root).unwrap().0;
         assert_eq!((cats.label(early.cat), early.newest), ("Video".into(), 100));
-        counters.count(&s, &txt);
-        counters.close(Path::new("/r/s"), &s);
-        counters.count(&r, &flac);
-        counters.close(Path::new("/r"), &r);
+        counters.count(&at_s, &txt);
+        counters.close(&s);
+        counters.count(&at_r, &flac);
+        counters.close(&r);
         live.refresh_now(&counters);
         assert_eq!(
             live.get(&live_sub).unwrap().0,
@@ -594,6 +652,129 @@ mod tests {
         assert_eq!(shade(0), c);
         assert!(shade(2).r() < shade(1).r() && shade(1).r() < c.r());
         assert_eq!(shade(2), Color32::from_rgb(80, 40, 20));
+    }
+}
+
+/// Live counters under worst-case conditions, checked against the
+/// finished tree.
+#[cfg(test)]
+mod live_stress {
+    use super::*;
+
+    /// Totals of everything under `n`, from the finished tree.
+    fn expected(n: &Node, cats: &CategoryModel) -> Totals {
+        let mut t = Totals::new(cats.other().0 + 1);
+        for c in &n.children {
+            if c.is_dir {
+                t.add(&expected(c, cats));
+            } else {
+                t.add_file(cats.of_name(&c.name), c.size, c.ctime);
+            }
+        }
+        t
+    }
+
+    /// Every folder down to `depth` below `n`, with its depth.
+    fn counted<'a>(n: &'a Node, depth: usize, at: usize, out: &mut Vec<(&'a Node, usize)>) {
+        out.push((n, at));
+        if at < depth {
+            for c in n.children.iter().filter(|c| c.is_dir) {
+                counted(c, depth, at + 1, out);
+            }
+        }
+    }
+
+    /// A huge flat folder that every thread counts in at once, a chain far
+    /// deeper than the counted depth, many tiny and empty folders and a
+    /// link to a folder: the live totals of every counted folder must match
+    /// the finished tree exactly, every time.
+    #[test]
+    fn live_totals_are_exact_under_load() {
+        let dir = std::env::temp_dir().join(format!("spacemap-live-stress-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let exts = ["eml", "JPG", "mkv", "txt", "x", ""];
+        std::fs::create_dir_all(dir.join("flat")).unwrap();
+        for i in 0..12_000 {
+            let ext = exts[i % exts.len()];
+            let name = if ext.is_empty() {
+                format!("f{i}")
+            } else {
+                format!("f{i}.{ext}")
+            };
+            std::fs::write(dir.join("flat").join(name), vec![0u8; i % 5000]).unwrap();
+        }
+        let mut deep = dir.join("chain");
+        for level in 0..40 {
+            deep = deep.join(format!("l{level}"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("bottom.mkv"), vec![0u8; 70_000]).unwrap();
+        for d in 0..300 {
+            let small = dir.join("small").join(format!("d{d}"));
+            std::fs::create_dir_all(&small).unwrap();
+            for f in 0..3 {
+                std::fs::write(
+                    small.join(format!("{f}.{}", exts[(d + f) % 4])),
+                    vec![1u8; d],
+                )
+                .unwrap();
+            }
+        }
+        std::fs::create_dir_all(dir.join("empty/a/b/c")).unwrap();
+        std::os::unix::fs::symlink(dir.join("flat"), dir.join("link-to-flat")).unwrap();
+
+        let cats = CategoryModel::defaults();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .build()
+            .unwrap();
+        const DEPTH: usize = 3;
+        for _ in 0..3 {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let drain = std::thread::spawn(move || rx.into_iter().count());
+            let live = pool.install(|| LiveCounters::new(Arc::new(cats.clone()), DEPTH));
+            let ctx = ScanCtx {
+                mounts: &HashSet::new(),
+                progress: &tx,
+                counter: &Default::default(),
+                cancel: &Default::default(),
+                progress_interval: 512,
+                apparent_size: false,
+                hard_links: Default::default(),
+                saw_hangul: &Default::default(),
+                in_file_order: false,
+                live: Some(&live),
+            };
+            let tree = pool.install(|| scan_dir(&dir, &ctx));
+            drop(tx);
+            drain.join().unwrap();
+
+            let (scanning, finished) = live.take_snapshot();
+            assert!(scanning.is_empty(), "every counted folder was closed");
+            let got: HashMap<PathBuf, Totals> = finished.into_iter().collect();
+            let mut folders = Vec::new();
+            counted(&tree, DEPTH, 0, &mut folders);
+            assert_eq!(
+                got.len(),
+                folders.len(),
+                "only folders down to the counted depth"
+            );
+            for (n, _) in folders {
+                assert_eq!(
+                    got.get(&n.path),
+                    Some(&expected(n, &cats)),
+                    "{}",
+                    n.path.display()
+                );
+            }
+            // The flat files, the one at the bottom of the chain, the small
+            // folders' files and the link (listed, not followed).
+            assert_eq!(
+                expected(&tree, &cats).files.iter().sum::<u64>(),
+                12_000 + 1 + 900 + 1
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

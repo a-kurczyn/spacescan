@@ -530,7 +530,11 @@ impl DiskScanApp {
 
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
-        let live = Arc::new(LiveCounters::new(self.cats.clone(), path.clone()));
+        // Folders as deep as the chart shows get live colors.
+        let live = Arc::new(LiveCounters::new(
+            self.cats.clone(),
+            self.settings.max_render_depth,
+        ));
         self.live_counters = Some(live.clone());
         // A whole drive's progress is measured against its used space; other
         // folders need a counted total.
