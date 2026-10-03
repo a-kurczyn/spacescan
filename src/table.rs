@@ -282,7 +282,7 @@ fn flat_files(
             if dot && !in_dot {
                 w.dot_size = w.dot_size.saturating_add(c.size);
             }
-            if (dot && !w.show_dotfiles) || (!w.hidden.is_empty() && w.hidden.contains(&c.path())) {
+            if (dot && !w.show_dotfiles) || c.is_in(w.hidden) {
                 continue;
             }
             if c.is_dir {
@@ -713,7 +713,7 @@ impl DiskScanApp {
             if !self.table.marked.is_empty() {
                 let size: u64 = (0..n_rows)
                     .map(row)
-                    .filter(|c| self.table.marked.contains(&c.path()))
+                    .filter(|c| c.is_in(&self.table.marked))
                     .map(|c| c.size)
                     .fold(0u64, u64::saturating_add);
                 ui.strong(format!(
@@ -948,7 +948,7 @@ impl DiskScanApp {
                     body.rows(row_h, n_rows, |mut tr_row| {
                         let i = tr_row.index();
                         let c = row(i);
-                        let is_marked = !marked.is_empty() && marked.contains(&c.path());
+                        let is_marked = c.is_in(marked);
                         let selected = Some(i) == cursor_row;
                         tr_row.set_selected(selected);
                         let pick = |normal: Color32| if selected { selected_fg } else { normal };
@@ -1163,7 +1163,7 @@ impl DiskScanApp {
             .filter(|&i| {
                 let c = &children[i];
                 (key.show_dotfiles || !c.name.starts_with('.'))
-                    && (hidden.is_empty() || !hidden.contains(&c.path()))
+                    && !c.is_in(hidden)
             })
             .collect();
         let cs = key.sort;

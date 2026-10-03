@@ -1624,7 +1624,7 @@ impl DiskScanApp {
                 } else {
                     let n = get_node(view, &seg.idx_path);
                     // A folder colored during the scan keeps its fade.
-                    let since = self.live_looks.colored_at(&n.path()).or(self.colored_at);
+                    let since = self.live_looks.colored_at(n).or(self.colored_at);
                     Some((looks.of(n, &self.cats), since))
                 }
             }

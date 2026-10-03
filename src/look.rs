@@ -274,11 +274,26 @@ impl Counters {
 /// same number is vanishingly unlikely, and would only mix two slices'
 /// live colors.
 pub(crate) fn path_key(path: &Path) -> u64 {
-    use std::hash::{BuildHasher, Hasher};
     use std::os::unix::ffi::OsStrExt;
+    bytes_key(path.as_os_str().as_bytes())
+}
+
+fn bytes_key(bytes: &[u8]) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
     let mut h = FxBuild::default().build_hasher();
-    h.write(path.as_os_str().as_bytes());
+    h.write(bytes);
     h.finish()
+}
+
+/// `path_key` of `node`'s path, without allocating it.
+pub(crate) fn node_key(node: &Node) -> u64 {
+    thread_local! {
+        static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    BUF.with_borrow_mut(|buf| {
+        node.write_path(buf);
+        bytes_key(buf)
+    })
 }
 
 /// A finished folder's exact values.
@@ -711,7 +726,7 @@ impl LiveLooks {
     /// The look of folder `node` from what's classified under it so far
     /// (final once it finished), and since when it has one.
     pub(crate) fn get(&self, node: &Node) -> Option<(Look, Instant)> {
-        let key = path_key(&node.path());
+        let key = node_key(node);
         let since = *self.since.get(&key)?;
         let summary = self.summaries.get(&key)?;
         Some((summary.look(node.size), since))
@@ -731,9 +746,12 @@ impl LiveLooks {
         self.since.is_empty()
     }
 
-    /// When folder `path` got a color during the scan, if it did.
-    pub(crate) fn colored_at(&self, path: &Path) -> Option<Instant> {
-        self.since.get(&path_key(path)).copied()
+    /// When folder `node` got a color during the scan, if it did.
+    pub(crate) fn colored_at(&self, node: &Node) -> Option<Instant> {
+        if self.since.is_empty() {
+            return None;
+        }
+        self.since.get(&node_key(node)).copied()
     }
 }
 

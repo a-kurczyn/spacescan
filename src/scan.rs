@@ -126,14 +126,44 @@ impl Node {
         }
     }
 
-    /// Sets its full path (a tree's top, or a node made on its own).
+    /// Sets its full path (a tree's top, or a node made on its own),
+    /// byte for byte as given (so "/a/./b/" stays as is, the way the
+    /// paths of its children start).
     pub(crate) fn set_path(&mut self, p: &Path) {
         match (p.parent(), p.file_name()) {
-            (Some(parent), Some(file)) => self.place(parent.into(), file),
+            (Some(parent), Some(file)) if parent.join(file).as_os_str() == p.as_os_str() => {
+                self.place(parent.into(), file)
+            }
             _ => {
                 self.dir = Path::new("").into();
                 self.raw = Some(p.as_os_str().into());
             }
+        }
+    }
+
+    /// Its full path's bytes, written into `out` (the same as `path()`).
+    pub(crate) fn write_path(&self, out: &mut Vec<u8>) {
+        use std::os::unix::ffi::OsStrExt;
+        let (d, n) = (self.dir.as_os_str().as_bytes(), self.stored_name().as_bytes());
+        out.clear();
+        // As `dir.join(name)` builds it.
+        if !d.is_empty() && n.first() != Some(&b'/') {
+            out.extend_from_slice(d);
+            if d.last() != Some(&b'/') {
+                out.push(b'/');
+            }
+        }
+        out.extend_from_slice(n);
+    }
+
+    /// True if its full path is in `set`. Sets of marked or hidden rows
+    /// are nearly always small: comparing with each one is cheaper than
+    /// building the path to look it up.
+    pub(crate) fn is_in(&self, set: &HashSet<PathBuf>) -> bool {
+        match set.len() {
+            0 => false,
+            1..=16 => set.iter().any(|p| self.path_is(p)),
+            _ => set.contains(&self.path()),
         }
     }
 }
@@ -1728,6 +1758,167 @@ mod path_tests {
                 copy.copy_place(&n);
                 check(&copy, &Path::new(dir).join(disk));
             }
+        }
+    }
+
+    fn scan(p: &Path, mounts: &HashSet<PathBuf>, cancel: bool) -> Node {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(cancel));
+        let ctx = ScanCtx {
+            mounts,
+            progress: &tx,
+            counter: &Default::default(),
+            cancel: &cancel,
+            progress_interval: 512,
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: None,
+        };
+        scan_dir(p, &ctx)
+    }
+
+    fn temp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("spacemap-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Tops without a last name ("/", "..", "/a/..") keep their whole path.
+    #[test]
+    fn tops_without_a_last_name() {
+        for p in ["/", ".", "..", "/a/..", "a/.."] {
+            let p = Path::new(p);
+            let n = top(&file_name_of(p), p);
+            assert_eq!(n.path().as_os_str(), p.as_os_str());
+            assert!(n.path_is(p));
+            assert_eq!(n.path_len(), p.as_os_str().len());
+        }
+    }
+
+    /// A scan started on an untidy path ("/x/./d/", "/x/d//"): the top's
+    /// path stays byte for byte what its children's paths start with, so
+    /// lookups by "top path + child name" and the live colors' keys match.
+    #[test]
+    fn untidy_tops_match_their_children() {
+        let base = temp("untidy");
+        std::fs::create_dir_all(base.join("d/sub")).unwrap();
+        std::fs::write(base.join("d/sub/f"), b"1").unwrap();
+        std::fs::write(base.join("d/file"), b"1").unwrap();
+        let b = base.display();
+        for p in [
+            format!("{b}/d/./"),
+            format!("{b}/d/."),
+            format!("{b}/d//"),
+            format!("{b}/./d"),
+            format!("{b}//d"),
+            format!("{b}/d/"),
+            format!("{b}/d/../d"),
+        ] {
+            let p = Path::new(&p);
+            let root = scan(p, &HashSet::new(), false);
+            assert_eq!(root.path().as_os_str(), p.as_os_str());
+            assert!(root.path_is(p));
+            assert_eq!(root.path_len(), p.as_os_str().len());
+            assert_eq!(node_key(&root), path_key(p));
+            assert_eq!(root.children.len(), 2, "{}", p.display());
+            for c in &root.children {
+                let at = root.path().join(c.disk_name());
+                assert!(c.path_is(&at), "{}", at.display());
+                assert_eq!(node_key(c), path_key(&at));
+                assert!(crate::delete::find_node(&root, &at).is_some(), "{}", at.display());
+                if c.is_dir {
+                    assert!(crate::category::find_by_path(&root, &at).is_some());
+                    assert_eq!(index_path_to(&root, &at).map(|v| v.len()), Some(1));
+                }
+            }
+        }
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A cancelled scan's top, and a mount left out of a scan under a name
+    /// that isn't UTF-8: both keep their path on disk, not their label.
+    #[test]
+    fn cancelled_tops_and_odd_mounts() {
+        let base = temp("odd-mount");
+        let odd = base.join(OsStr::from_bytes(b"m\xff"));
+        std::fs::create_dir_all(&odd).unwrap();
+        let cancelled = scan(&base, &HashSet::new(), true);
+        check(&cancelled, &base);
+        let mounts: HashSet<PathBuf> = [odd.clone()].into();
+        let root = scan(&base, &mounts, false);
+        let i = child_named(&root, odd.file_name().unwrap()).unwrap();
+        let m = &root.children[i];
+        check(m, &odd);
+        assert!(!m.path_is(&base.join(&m.name)));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Siblings where one's shown name looks like the other's escape
+    /// (a literal "\xFF" on disk next to the byte 0xFF): lookups pick the
+    /// right one.
+    #[test]
+    fn lookalike_siblings_stay_apart() {
+        let base = temp("lookalike");
+        let names: [&[u8]; 3] = [b"\\xff", b"\\xFF", b"\\"];
+        let odd: &[u8] = &[0xff];
+        for n in names.iter().chain([&odd]) {
+            std::fs::write(base.join(OsStr::from_bytes(n)), b"1").unwrap();
+        }
+        let root = scan(&base, &HashSet::new(), false);
+        assert_eq!(root.children.len(), 4);
+        for n in names.iter().chain([&odd]) {
+            let disk = OsStr::from_bytes(n);
+            let at = base.join(disk);
+            let found = crate::delete::find_node(&root, &at).unwrap();
+            assert_eq!(found.disk_name(), disk);
+            let one: HashSet<PathBuf> = [at.clone()].into();
+            let hits: Vec<_> = root.children.iter().filter(|c| c.is_in(&one)).collect();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].disk_name(), disk);
+        }
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// `is_in` gives the same answer for small sets (compared one by one)
+    /// and big ones (looked up), with near misses in both.
+    #[test]
+    fn is_in_small_and_big_sets() {
+        let shared: Arc<Path> = Path::new("/a/b").into();
+        let mut n = empty_node();
+        n.name = show_os(OsStr::from_bytes(b"c\xff"));
+        n.place(shared, OsStr::from_bytes(b"c\xff"));
+        let me = n.path();
+        let near = |k: usize| PathBuf::from(format!("/a/b/c{k}"));
+        for size in [0, 1, 2, 16, 17, 100] {
+            let mut set: HashSet<PathBuf> = (0..size).map(near).collect();
+            set.insert(PathBuf::from("/a/b"));
+            set.insert(PathBuf::from("/a/bc\u{ff}"));
+            set.insert(PathBuf::from("/a/b/c\\xFF"));
+            assert!(!n.is_in(&set), "{size}");
+            set.insert(me.clone());
+            assert!(n.is_in(&set), "{size}");
+        }
+    }
+
+    /// The live colors' key of a node is the key of its path, for every kind
+    /// of place.
+    #[test]
+    fn node_keys_match_path_keys() {
+        for p in ["/", "/a", "/a/", "rel", "/a//b/./c/", ".."] {
+            let p = Path::new(p);
+            let n = top(&file_name_of(p), p);
+            assert_eq!(node_key(&n), path_key(&n.path()));
+            assert_eq!(node_key(&n), path_key(p));
+        }
+        for dir in ["/", "/a", "/a/", "", "rel"] {
+            let mut n = empty_node();
+            n.name = show_os(OsStr::from_bytes(b"x\xff"));
+            n.place(Path::new(dir).into(), OsStr::from_bytes(b"x\xff"));
+            assert_eq!(node_key(&n), path_key(&n.path()), "{dir}");
         }
     }
 
