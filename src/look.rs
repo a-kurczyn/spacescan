@@ -161,12 +161,12 @@ pub(crate) struct LiveLooks {
 }
 
 impl LiveLooks {
-    /// Folder `node` (in the live tree under `root`) finished: `exts` and
-    /// `times` are its own files' (extension, size, count) and newest and
-    /// oldest Changed times.
-    pub(crate) fn folder_done(
+    /// Files were classified in folder `folder` (under `root`): `exts` and
+    /// `times` are their (extension, size, count) and newest and oldest
+    /// Changed times. They count for it and every folder above it.
+    pub(crate) fn add_files(
         &mut self,
-        node: &Node,
+        folder: &Path,
         root: &Path,
         exts: &[(String, u64, u64)],
         times: (i64, i64),
@@ -180,16 +180,29 @@ impl LiveLooks {
         }
         own.add_times(times.0, times.1);
         let now = Instant::now();
-        for folder in node.path.ancestors() {
+        for f in folder.ancestors() {
             self.totals
-                .entry(folder.to_path_buf())
+                .entry(f.to_path_buf())
                 .or_insert_with(|| (Totals::new(own.bytes.len()), now))
                 .0
                 .add(&own);
-            if folder == root {
+            if f == root {
                 break;
             }
         }
+    }
+
+    /// Folder `node` (in the live tree under `root`) finished, with its
+    /// files not yet added (see `add_files`): its look is now final.
+    pub(crate) fn folder_done(
+        &mut self,
+        node: &Node,
+        root: &Path,
+        exts: &[(String, u64, u64)],
+        times: (i64, i64),
+        cats: &CategoryModel,
+    ) {
+        self.add_files(&node.path, root, exts, times, cats);
         let look = self.totals[&node.path].0.look(node.size);
         self.done.insert(node.path.clone(), look);
     }

@@ -643,6 +643,35 @@ pub(crate) fn scan_entry(
     node
 }
 
+/// Folders with more entries than this report their files in batches of
+/// this many while being scanned (see `ScanMsg::FilesFound`).
+const FILE_BATCH: usize = 2048;
+
+/// (extension, size, count) per extension, and the Changed times of the
+/// newest and oldest file (NO_TIME if none is known).
+type FileSummary = (Vec<(String, u64, u64)>, (i64, i64));
+
+/// The files among `nodes`, summed up.
+fn file_summary(nodes: &[Node]) -> FileSummary {
+    let mut exts: Vec<(String, u64, u64)> = Vec::new();
+    let mut times: Option<(i64, i64)> = None;
+    for c in nodes.iter().filter(|c| !c.is_dir) {
+        if c.ctime != NO_TIME {
+            let (newest, oldest) = times.unwrap_or((c.ctime, c.ctime));
+            times = Some((newest.max(c.ctime), oldest.min(c.ctime)));
+        }
+        let key = ext_key(&c.name);
+        match exts.iter_mut().find(|e| e.0 == key) {
+            Some(e) => {
+                e.1 = e.1.saturating_add(c.size);
+                e.2 += c.file_count.max(1);
+            }
+            None => exts.push((key, c.size, c.file_count.max(1))),
+        }
+    }
+    (exts, times.unwrap_or((NO_TIME, NO_TIME)))
+}
+
 pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
     scan_dir_in(path, &None, ctx)
 }
@@ -711,12 +740,28 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         use std::os::unix::fs::DirEntryExt;
         entries.sort_by_key(|e| e.ino());
     }
-    let children: Vec<Node> = entries
-        .par_iter()
-        .map(|entry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx))
-        .collect();
+    let scan =
+        |entry: &std::fs::DirEntry| scan_entry(entry, path.join(entry.file_name()), &handle, ctx);
+    // A big folder reports its files in batches as they're read, so the
+    // live chart can color it before it finishes; a small one reports them
+    // when done.
+    let batched = entries.len() > FILE_BATCH;
+    let mut children: Vec<Node> = Vec::with_capacity(entries.len());
+    if batched {
+        for chunk in entries.chunks(FILE_BATCH) {
+            let nodes: Vec<Node> = chunk.par_iter().map(scan).collect();
+            let (exts, times) = file_summary(&nodes);
+            let _ = progress.send(ScanMsg::FilesFound {
+                folder: path.to_path_buf(),
+                exts,
+                times,
+            });
+            children.extend(nodes);
+        }
+    } else {
+        children = entries.par_iter().map(scan).collect();
+    }
 
-    let mut children = children;
     children.sort_by_key(|c| std::cmp::Reverse(c.size));
     // The folder's own entry uses space too. Saturating: apparent sizes of
     // sparse files can add up past u64.
@@ -726,22 +771,12 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         .fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
-    let mut exts: Vec<(String, u64, u64)> = Vec::new();
-    let mut times: Option<(i64, i64)> = None;
-    for c in children.iter().filter(|c| !c.is_dir) {
-        if c.ctime != NO_TIME {
-            let (newest, oldest) = times.unwrap_or((c.ctime, c.ctime));
-            times = Some((newest.max(c.ctime), oldest.min(c.ctime)));
-        }
-        let key = ext_key(&c.name);
-        match exts.iter_mut().find(|e| e.0 == key) {
-            Some(e) => {
-                e.1 = e.1.saturating_add(c.size);
-                e.2 += c.file_count.max(1);
-            }
-            None => exts.push((key, c.size, c.file_count.max(1))),
-        }
-    }
+    // Files already reported in batches aren't reported again.
+    let (exts, times) = if batched {
+        (Vec::new(), (NO_TIME, NO_TIME))
+    } else {
+        file_summary(&children)
+    };
     let _ = progress.send(ScanMsg::SliceDone {
         path: path.to_path_buf(),
         size,
@@ -752,7 +787,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         uid: self_uid,
         gid: self_gid,
         exts,
-        times: times.unwrap_or((NO_TIME, NO_TIME)),
+        times,
     });
 
     Node {
@@ -789,6 +824,14 @@ pub(crate) enum ScanMsg {
         exts: Vec<(String, u64, u64)>,
         /// Changed times of the newest and oldest file directly in it
         /// (NO_TIME if none), for the live chart's colors.
+        times: (i64, i64),
+    },
+    /// A batch of files read in a big folder that's still being scanned:
+    /// the same summary as a finished folder's `exts` and `times`. Those
+    /// files aren't reported again when the folder finishes.
+    FilesFound {
+        folder: PathBuf,
+        exts: Vec<(String, u64, u64)>,
         times: (i64, i64),
     },
     Done(Node, f64),
@@ -1193,6 +1236,11 @@ mod live_category_tests {
         std::fs::write(dir.join("a/b/noext"), vec![0u8; 9_000]).unwrap();
         std::fs::write(dir.join("a/b/clip.mp4"), vec![0u8; 7_000]).unwrap();
         std::fs::hard_link(dir.join("a/b/clip.mp4"), dir.join("a/clip-link.mp4")).unwrap();
+        // A folder big enough to report its files in batches.
+        std::fs::create_dir(dir.join("mail")).unwrap();
+        for i in 0..FILE_BATCH + 100 {
+            std::fs::write(dir.join(format!("mail/{i}.eml")), b"x").unwrap();
+        }
         let (tx, rx) = channel();
         let ctx = ScanCtx {
             mounts: &HashSet::new(),
@@ -1208,13 +1256,22 @@ mod live_category_tests {
         let tree = scan_dir(&dir, &ctx);
         drop(tx);
         let mut live = ExtTotals::new();
+        let mut batches = 0;
         for msg in rx {
-            if let ScanMsg::SliceDone { exts, .. } = msg {
-                for (ext, size, files) in exts {
-                    add_ext(&mut live, ext, size, files);
+            let exts = match msg {
+                ScanMsg::SliceDone { exts, .. } => exts,
+                ScanMsg::FilesFound { exts, .. } => {
+                    batches += 1;
+                    exts
                 }
+                _ => continue,
+            };
+            for (ext, size, files) in exts {
+                add_ext(&mut live, ext, size, files);
             }
         }
+        assert_eq!(batches, 2, "the big folder reports in two batches");
+        assert_eq!(live.get("eml").map(|e| e.1), Some(FILE_BATCH as u64 + 100));
         let cats = CategoryModel::defaults();
         assert_eq!(
             category_rows(&live, &cats),

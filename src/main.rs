@@ -887,6 +887,19 @@ impl DiskScanApp {
                             self.log_truncated += 1;
                         }
                     }
+                    Ok(ScanMsg::FilesFound {
+                        folder,
+                        exts,
+                        times,
+                    }) => {
+                        let root = self.partial_root.path.clone();
+                        self.live_looks
+                            .add_files(&folder, &root, &exts, times, &self.cats);
+                        for (ext, size, files) in exts {
+                            add_ext(&mut self.live_exts, ext, size, files);
+                        }
+                        self.partial_gen += 1;
+                    }
                     Ok(ScanMsg::SliceDone {
                         path,
                         size,
