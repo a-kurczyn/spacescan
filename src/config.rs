@@ -104,7 +104,9 @@ fn read_settings() -> Result<Option<String>, Unreadable> {
 
 /// `file` (a JSON object) read into `T` one field at a time, starting from
 /// `default`: a field whose value doesn't fit keeps its default and is
-/// listed in `dropped` as "section.field". For a list, only the entries that
+/// listed in `dropped` as "section.field". A number its field can't hold
+/// (negative, fractional or too big) becomes the nearest one it can, for
+/// the allowed ranges to clamp later. For a list, only the entries that
 /// don't fit are dropped.
 fn lenient<T: Serialize + DeserializeOwned>(
     default: T,
@@ -128,6 +130,16 @@ fn lenient<T: Serialize + DeserializeOwned>(
             merged = trial;
             continue;
         }
+        if let Some(x) = value.as_f64() {
+            let near = nearest_numbers(x).into_iter().find(|n| {
+                trial[key] = n.clone();
+                fits(&trial)
+            });
+            if let Some(n) = near {
+                merged[key] = n;
+                continue;
+            }
+        }
         if let Value::Array(items) = value {
             let keep: Vec<Value> = items
                 .iter()
@@ -146,6 +158,25 @@ fn lenient<T: Serialize + DeserializeOwned>(
         dropped.push(format!("{section}.{key}"));
     }
     serde_json::from_value(merged).unwrap_or(default)
+}
+
+/// Whole numbers closest to `x`, nearest first, for a field that can't hold
+/// `x` itself: `x` rounded, then 0 if it's negative, else the largest value
+/// of each unsigned size.
+fn nearest_numbers(x: f64) -> Vec<Value> {
+    let r = x.round();
+    if r < 0.0 {
+        vec![Value::from(r as i64), Value::from(0)]
+    } else {
+        let mut out = Vec::new();
+        if r < u64::MAX as f64 {
+            out.push(Value::from(r as u64));
+        }
+        out.extend(
+            [u64::MAX, u32::MAX.into(), u16::MAX.into(), u8::MAX.into()].map(Value::from),
+        );
+        out
+    }
 }
 
 impl Config {
@@ -334,19 +365,45 @@ mod tests {
             let (cfg, needs_save, problem) = Config::load();
             assert_eq!(cfg.language, "es");
             assert_eq!(cfg.chart.hub_radius_frac, 0.3);
-            assert_eq!(cfg.chart.stroke_alpha, Settings::default().stroke_alpha);
-            assert_eq!(
-                cfg.chart.max_render_depth,
-                Settings::default().max_render_depth
-            );
+            assert_eq!(cfg.chart.stroke_alpha, u8::MAX);
+            assert_eq!(cfg.chart.max_render_depth, *Settings::DEPTH.start());
             assert!(cfg.table.sort == SortColumn::Files && cfg.table.dirs_first);
             assert!(cfg.table.hidden_columns == vec![TableCol::Perms]);
             assert!(needs_save);
             let problem = problem.unwrap();
-            assert!(
-                problem.contains("chart.stroke_alpha") && problem.contains("table.hidden_columns")
-            );
+            assert!(!problem.contains("chart.") && problem.contains("table.hidden_columns"));
             assert!(settings_file().with_extension("json.bad").exists());
+        });
+    }
+
+    /// Numbers a setting can't hold land on the nearest allowed value:
+    /// negative to the lowest, huge (beyond any integer) to the highest,
+    /// fractions rounded; a number given as text keeps the default.
+    #[test]
+    fn out_of_range_numbers_are_clamped() {
+        with_home(|_| {
+            std::fs::write(
+                settings_file(),
+                r#"{"chart":{"age_steps":-3,"age_darkest_pct":1e300,"age_days":40.6,
+                    "flat_rows":-1e30,"max_children_shown":18446744073709551616,
+                    "max_render_depth":"3","hub_radius_frac":1e300,"min_segment_angle_deg":-0.0}}"#,
+            )
+            .unwrap();
+            let (cfg, needs_save, problem) = Config::load();
+            let c = &cfg.chart;
+            assert_eq!(c.age_steps, *Settings::AGE_STEPS.start());
+            assert_eq!(c.age_darkest_pct, *Settings::AGE_DARKEST.end());
+            assert_eq!(c.age_days, 41);
+            assert_eq!(c.flat_rows, *Settings::FLAT_ROWS.start());
+            assert_eq!(c.max_children_shown, *Settings::MAX_CHILDREN.end());
+            assert_eq!(c.max_render_depth, Settings::default().max_render_depth);
+            assert_eq!(c.hub_radius_frac, *Settings::HUB.end());
+            assert_eq!(c.min_segment_angle_deg, *Settings::MIN_ANGLE.start());
+            assert!(needs_save);
+            assert_eq!(
+                problem.as_deref().map(|p| p.contains("chart.max_render_depth")),
+                Some(true)
+            );
         });
     }
 
