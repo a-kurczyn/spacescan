@@ -1989,7 +1989,11 @@ mod flat_tests {
         app.rebuild_view_tree();
         assert_eq!(draw(&mut app), ["d", "c.txt"]);
         let order = app.table.order.as_ref().unwrap();
-        assert_eq!((order.folders, order.rows.len()), (1, 2), "1 folder, 1 file");
+        assert_eq!(
+            (order.folders, order.rows.len()),
+            (1, 2),
+            "1 folder, 1 file"
+        );
         app.table.flat = true;
         assert_eq!(draw(&mut app), ["a.eml", "b.mkv", "c.txt"]);
         app.pick = Some(Pick::extension("eml"));
