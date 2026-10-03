@@ -1041,7 +1041,7 @@ impl eframe::App for DiskScanApp {
         // grow; each row glides to its new place.
         if !self.summary_view && (self.scanning || self.root.is_some()) {
             let rows: Vec<Category> = if self.scanning {
-                self.live_looks.order(&self.partial_root.path)
+                self.live_looks.order()
             } else {
                 let root = self.root.clone().expect("checked above");
                 self.refresh_cat_breakdown(self.current_view_node(&root));
