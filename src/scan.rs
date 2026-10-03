@@ -727,7 +727,12 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
     let mut exts: Vec<(String, u64, u64)> = Vec::new();
+    let mut times: Option<(i64, i64)> = None;
     for c in children.iter().filter(|c| !c.is_dir) {
+        if c.ctime != NO_TIME {
+            let (newest, oldest) = times.unwrap_or((c.ctime, c.ctime));
+            times = Some((newest.max(c.ctime), oldest.min(c.ctime)));
+        }
         let key = ext_key(&c.name);
         match exts.iter_mut().find(|e| e.0 == key) {
             Some(e) => {
@@ -747,6 +752,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         uid: self_uid,
         gid: self_gid,
         exts,
+        times: times.unwrap_or((NO_TIME, NO_TIME)),
     });
 
     Node {
@@ -781,6 +787,9 @@ pub(crate) enum ScanMsg {
         /// (extension, size, file count) of the files directly in it, for
         /// the category bar's live totals (see `ext_key`).
         exts: Vec<(String, u64, u64)>,
+        /// Changed times of the newest and oldest file directly in it
+        /// (NO_TIME if none), for the live chart's colors.
+        times: (i64, i64),
     },
     Done(Node, f64),
     Error(String),

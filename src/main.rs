@@ -227,6 +227,10 @@ struct DiskScanApp {
     looks: Option<(u64, Looks)>,
     /// When the last scan finished: slice colors fade in from then.
     colored_at: Option<Instant>,
+    /// Slice looks of the running (or last) scan's folders as they
+    /// finished, and when: the live chart's colors, and the fade-in times
+    /// kept for the finished chart.
+    live_looks: LiveLooks,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -394,6 +398,7 @@ impl Default for DiskScanApp {
             cats: Arc::new(CategoryModel::defaults()),
             looks: None,
             colored_at: None,
+            live_looks: Default::default(),
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::new(),
@@ -481,6 +486,7 @@ impl DiskScanApp {
         self.live_gen += 1;
         self.live_view = empty_node();
         self.live_exts.clear();
+        self.live_looks = Default::default();
         self.cat_breakdown.clear();
         self.cat_breakdown_for = None;
         self.status = tr("STATUS_SCANNING");
@@ -888,6 +894,7 @@ impl DiskScanApp {
                         uid,
                         gid,
                         exts,
+                        times,
                     }) => {
                         graft_slice(
                             &mut self.partial_root,
@@ -900,6 +907,9 @@ impl DiskScanApp {
                             uid,
                             gid,
                         );
+                        if let Some(node) = crate::delete::find_node(&self.partial_root, &path) {
+                            self.live_looks.folder_done(node, &exts, times, &self.cats);
+                        }
                         for (ext, size, files) in exts {
                             add_ext(&mut self.live_exts, ext, size, files);
                         }
@@ -949,6 +959,11 @@ impl eframe::App for DiskScanApp {
         let ctx = ui.ctx().clone();
         self.typing = ctx.text_edit_focused();
         let scan_backlog = self.poll_scan();
+        // The live looks' fade-in times are done with once the chart has
+        // faded in.
+        if !self.scanning && self.color_fade() >= 1.0 && !self.live_looks.is_empty() {
+            self.live_looks = Default::default();
+        }
         // The Korean font: once a Korean name is found, or for a Korean UI.
         let korean_needed = self.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
             || current_lang_code() == "ko";

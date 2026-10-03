@@ -951,8 +951,9 @@ impl DiskScanApp {
         for seg in &segs {
             let colors = SliceColoring {
                 free_color,
-                view: None,
-                now: 0,
+                view: Some(&self.partial_root),
+                live: true,
+                now: now_secs(),
             };
             self.draw_segment(&painter, seg, (center, hub_radius, ring_thickness), &colors);
         }
@@ -1567,12 +1568,10 @@ impl DiskScanApp {
         }
     }
 
-    /// How far slice colors have faded in after the last scan: 0 (grey) to
-    /// 1 (full color) over 0.8 s.
+    /// How far the chart's legends have faded in after the last scan: 0
+    /// (hidden) to 1.
     pub(crate) fn color_fade(&self) -> f32 {
-        const FADE: f32 = 0.8;
-        self.colored_at
-            .map_or(1.0, |t| (t.elapsed().as_secs_f32() / FADE).min(1.0))
+        color_fade(self.colored_at)
     }
 
     /// Draws one slice of the chart in its color. `geom` is (center, hub
@@ -1588,28 +1587,59 @@ impl DiskScanApp {
         let SliceColoring {
             free_color,
             view,
+            live,
             now,
         } = *colors;
         let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
         let dark = painter.ctx().global_style().visuals.dark_mode;
         let gray = self.cats.color(self.cats.other(), dark);
+        // The slice's look and when it became known (to fade in from then).
+        let known = |view: &Node| -> Option<(Look, Option<Instant>)> {
+            let parent = || get_node(view, &seg.idx_path[..seg.idx_path.len() - 1]);
+            if live {
+                // During a scan: only folders that finished, and an "other"
+                // slice once all its items have.
+                if seg.is_other {
+                    let parent = parent();
+                    let found: Option<Vec<(Look, Instant)>> = seg
+                        .rest
+                        .iter()
+                        .filter_map(|&i| parent.children.get(i))
+                        .map(|n| self.live_looks.get(&n.path))
+                        .collect();
+                    let found = found?;
+                    let since = found.iter().map(|f| f.1).max();
+                    Some((
+                        group_look(found.into_iter().map(|f| f.0), &self.cats),
+                        since,
+                    ))
+                } else {
+                    let (look, since) = self.live_looks.get(&get_node(view, &seg.idx_path).path)?;
+                    Some((look, Some(since)))
+                }
+            } else {
+                let (_, looks) = self.looks.as_ref()?;
+                if seg.is_other {
+                    let rest = seg.rest.iter().filter_map(|&i| parent().children.get(i));
+                    Some((looks.of_group(rest, &self.cats), self.colored_at))
+                } else {
+                    let n = get_node(view, &seg.idx_path);
+                    // A folder colored during the scan keeps its fade.
+                    let since = self.live_looks.colored_at(&n.path).or(self.colored_at);
+                    Some((looks.of(n, &self.cats), since))
+                }
+            }
+        };
         let colors = if seg.is_free {
             (free_color, free_color)
         } else {
-            match (view, &self.looks) {
-                (Some(view), Some((_, looks))) => {
-                    let look = if seg.is_other {
-                        let parent = get_node(view, &seg.idx_path[..seg.idx_path.len() - 1]);
-                        let rest = seg.rest.iter().filter_map(|&i| parent.children.get(i));
-                        looks.of_group(rest, &self.cats)
-                    } else {
-                        looks.of(get_node(view, &seg.idx_path), &self.cats)
-                    };
+            match view.and_then(known) {
+                Some((look, since)) => {
                     let (newest, oldest) = self
                         .settings
                         .age_shades()
                         .look_colors(&look, now, &self.cats, dark);
-                    let fade = self.color_fade();
+                    let fade = color_fade(since);
                     let finish = |c: Color32| {
                         // "Other" is paler, to read as a group.
                         let c = if seg.is_other {
@@ -1617,13 +1647,13 @@ impl DiskScanApp {
                         } else {
                             c
                         };
-                        // Right after a scan, colors fade in from grey.
+                        // Colors fade in from grey once known.
                         gray.lerp_to_gamma(c, fade)
                     };
                     (finish(newest), finish(oldest))
                 }
-                // While scanning: grey until the colors are known.
-                _ => (gray, gray),
+                // Grey until the colors are known.
+                None => (gray, gray),
             }
         };
         draw_arc_mesh(
@@ -1706,6 +1736,7 @@ impl DiskScanApp {
             let colors = SliceColoring {
                 free_color,
                 view: Some(view_node),
+                live: false,
                 now,
             };
             self.draw_segment(painter, seg, geom, &colors);
@@ -2063,12 +2094,21 @@ struct ExtRow {
     cat: Category,
 }
 
+/// How far a color known since `since` has faded in from grey: 0 to 1
+/// over 0.8 s (1 if there's no time).
+fn color_fade(since: Option<Instant>) -> f32 {
+    const FADE: f32 = 0.8;
+    since.map_or(1.0, |t| (t.elapsed().as_secs_f32() / FADE).min(1.0))
+}
+
 /// How slices are colored: by category and age when `view` (the folder the
 /// chart shows) is given, else by branch (during a scan).
 #[derive(Clone, Copy)]
 struct SliceColoring<'a> {
     free_color: Color32,
     view: Option<&'a Node>,
+    /// `view` is the live tree of a running scan.
+    live: bool,
     /// The current time, for slice ages.
     now: i64,
 }

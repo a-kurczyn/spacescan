@@ -129,16 +129,74 @@ impl Looks {
         nodes: impl Iterator<Item = &'a Node>,
         cats: &CategoryModel,
     ) -> Look {
+        group_look(nodes.map(|n| self.of(n, cats)), cats)
+    }
+}
+
+/// The look of several looks together: the category with the most bytes,
+/// and the newest and oldest of their files.
+pub(crate) fn group_look(looks: impl Iterator<Item = Look>, cats: &CategoryModel) -> Look {
+    let mut totals = Totals::new(cats.other().0 + 1);
+    let mut size = 0u64;
+    for look in looks {
+        totals.bytes[look.cat.0] = totals.bytes[look.cat.0].saturating_add(look.size);
+        totals.files[look.cat.0] += 1;
+        totals.add_times(look.newest, look.oldest);
+        size = size.saturating_add(look.size);
+    }
+    totals.look(size)
+}
+
+/// Slice looks during a scan. A folder's look is known once it finishes
+/// (its subfolders always finish first), and never changes after that.
+#[derive(Default)]
+pub(crate) struct LiveLooks {
+    /// Totals of finished folders whose parent hasn't finished yet.
+    pending: HashMap<PathBuf, Totals>,
+    /// Each finished folder's look, and when it became known.
+    looks: HashMap<PathBuf, (Look, Instant)>,
+}
+
+impl LiveLooks {
+    /// Folder `node` (in the live tree) finished: `exts` and `times` are its
+    /// own files' (extension, size, count) and newest and oldest Changed
+    /// times.
+    pub(crate) fn folder_done(
+        &mut self,
+        node: &Node,
+        exts: &[(String, u64, u64)],
+        times: (i64, i64),
+        cats: &CategoryModel,
+    ) {
         let mut totals = Totals::new(cats.other().0 + 1);
-        let mut size = 0u64;
-        for n in nodes {
-            let look = self.of(n, cats);
-            totals.bytes[look.cat.0] = totals.bytes[look.cat.0].saturating_add(look.size);
-            totals.files[look.cat.0] += 1;
-            totals.add_times(look.newest, look.oldest);
-            size = size.saturating_add(look.size);
+        for (ext, size, files) in exts {
+            let cat = cats.of_ext(ext);
+            totals.bytes[cat.0] = totals.bytes[cat.0].saturating_add(*size);
+            totals.files[cat.0] += files;
         }
-        totals.look(size)
+        totals.add_times(times.0, times.1);
+        for c in node.children.iter().filter(|c| c.is_dir) {
+            if let Some(sub) = self.pending.remove(&c.path) {
+                totals.add(&sub);
+            }
+        }
+        self.looks
+            .insert(node.path.clone(), (totals.look(node.size), Instant::now()));
+        self.pending.insert(node.path.clone(), totals);
+    }
+
+    /// The look of folder `path` and when it became known, once finished.
+    pub(crate) fn get(&self, path: &Path) -> Option<(Look, Instant)> {
+        self.looks.get(path).copied()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.looks.is_empty()
+    }
+
+    /// When folder `path` got its color, if it did during the scan.
+    pub(crate) fn colored_at(&self, path: &Path) -> Option<Instant> {
+        self.looks.get(path).map(|l| l.1)
     }
 }
 
@@ -253,6 +311,41 @@ mod tests {
         assert_eq!((root_look.newest, root_look.oldest), (2000, 1000));
         let file = looks.of(&root.children[0].children[0], &cats);
         assert_eq!(cats.label(file.cat), "Documents");
+    }
+
+    /// Looks worked out as folders finish match the finished tree's.
+    #[test]
+    fn live_looks_match_finished_looks() {
+        let cats = CategoryModel::defaults();
+        let file = |p: &str, size: u64, ctime: i64| {
+            let mut n = test_node(p, size, false, vec![]);
+            n.ctime = ctime;
+            n
+        };
+        let sub = test_node(
+            "/r/s",
+            3000,
+            true,
+            vec![file("/r/s/a.mkv", 2000, 100), file("/r/s/b.txt", 1000, 900)],
+        );
+        let root = test_node("/r", 3500, true, vec![sub, file("/r/c.flac", 500, 50)]);
+        let finished = Looks::build(&root, &cats);
+        // The live tree has folders only.
+        let live_sub = test_node("/r/s", 3000, true, vec![]);
+        let live_root = test_node("/r", 3500, true, vec![live_sub.clone()]);
+        let mut live = LiveLooks::default();
+        let mkv_txt = [("mkv".to_string(), 2000, 1), ("txt".to_string(), 1000, 1)];
+        live.folder_done(&live_sub, &mkv_txt, (900, 100), &cats);
+        assert!(live.get(Path::new("/r")).is_none(), "not finished yet");
+        live.folder_done(&live_root, &[("flac".to_string(), 500, 1)], (50, 50), &cats);
+        assert_eq!(
+            live.get(Path::new("/r/s")).unwrap().0,
+            finished.of(&root.children[0], &cats)
+        );
+        assert_eq!(
+            live.get(Path::new("/r")).unwrap().0,
+            finished.of(&root, &cats)
+        );
     }
 
     #[test]
