@@ -591,9 +591,9 @@ pub(crate) struct ScanCtx<'a> {
     pub(crate) cancel: &'a Arc<std::sync::atomic::AtomicBool>,
     /// Count file lengths instead of the disk space actually used.
     pub(crate) apparent_size: bool,
-    /// Files with several hard links, by (device, inode): each is counted
-    /// once, like `du`, under its first name in path order.
-    pub(crate) hard_links: std::sync::Mutex<HashMap<(u64, u64), HardLink>>,
+    /// Files with several hard links: each is counted once, like `du`,
+    /// under its first name in byte order.
+    pub(crate) hard_links: HardLinks,
     /// Set once any name has Korean script in it, so the app can load a
     /// font for it (see `install_fallback_fonts`).
     pub(crate) saw_hangul: &'a std::sync::atomic::AtomicBool,
@@ -604,44 +604,98 @@ pub(crate) struct ScanCtx<'a> {
     pub(crate) live: Option<&'a LiveTree>,
 }
 
+/// The files with several hard links met during a scan.
+#[derive(Default)]
+pub(crate) struct HardLinks {
+    /// By (device, inode), split by inode so scan threads rarely wait for
+    /// each other.
+    shards: [std::sync::Mutex<FxHashMap<(u64, u64), HardLink>>; 16],
+}
+
 /// A file with several hard links met during a scan.
 pub(crate) struct HardLink {
     size: u64,
     /// The name its size was counted under (the first one read).
-    counted: PathBuf,
-    /// Its first name in path order, where the size belongs.
-    first: PathBuf,
+    counted: LinkName,
+    /// Its first name in byte order, where the size belongs, if that's
+    /// another name.
+    first: Option<LinkName>,
+}
+
+/// One name of a file with several hard links.
+pub(crate) struct LinkName {
+    /// The folder it's in (shared with the folder's entries).
+    dir: Arc<Path>,
+    name: Box<std::ffi::OsStr>,
+}
+
+/// True if `dir` joined with `name` comes before `other`'s full path in
+/// byte order.
+fn path_before(dir: &Path, name: &std::ffi::OsStr, other: &LinkName) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    thread_local! {
+        static BUFS: std::cell::RefCell<(Vec<u8>, Vec<u8>)> =
+            const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+    }
+    let join = |out: &mut Vec<u8>, dir: &Path, name: &std::ffi::OsStr| {
+        let dir = dir.as_os_str().as_bytes();
+        out.clear();
+        out.extend_from_slice(dir);
+        if !dir.is_empty() && !dir.ends_with(b"/") {
+            out.push(b'/');
+        }
+        out.extend_from_slice(name.as_bytes());
+    };
+    BUFS.with_borrow_mut(|(a, b)| {
+        join(a, dir, name);
+        join(b, &other.dir, &other.name);
+        a < b
+    })
 }
 
 impl ScanCtx<'_> {
-    /// Size to count for an entry at `path`: disk space actually allocated
-    /// (so a sparse file counts what it really uses), or its length when
-    /// `apparent_size` is set. A file with several hard links counts at the
-    /// first of its names read (see `count_links_at_first_names`).
-    fn size_of(&self, m: &std::fs::Metadata, path: impl FnOnce() -> PathBuf) -> u64 {
+    /// Size to count for an entry: disk space actually allocated (so a
+    /// sparse file counts what it really uses), or its length when
+    /// `apparent_size` is set.
+    fn size_of(&self, m: &std::fs::Metadata) -> u64 {
         use std::os::unix::fs::MetadataExt;
-        let size = if self.apparent_size {
+        if self.apparent_size {
             m.len()
         } else {
             m.blocks() * 512
-        };
-        if m.is_dir() || m.nlink() < 2 {
-            return size;
         }
-        let path = path();
-        match self.hard_links.lock().unwrap().entry((m.dev(), m.ino())) {
+    }
+
+    /// Size to count for file `name` in folder `here`, which has several
+    /// hard links and uses `size`: all of it at the first of its names read,
+    /// none at the others (see `count_links_at_first_names`).
+    fn link_size(
+        &self,
+        m: &std::fs::Metadata,
+        size: u64,
+        here: &Arc<Path>,
+        name: &std::ffi::OsStr,
+    ) -> u64 {
+        use std::os::unix::fs::MetadataExt;
+        let this = || LinkName {
+            dir: here.clone(),
+            name: name.into(),
+        };
+        let shard = &self.hard_links.shards[(m.ino() % 16) as usize];
+        match shard.lock().unwrap().entry((m.dev(), m.ino())) {
             std::collections::hash_map::Entry::Vacant(v) => {
                 v.insert(HardLink {
                     size,
-                    counted: path.clone(),
-                    first: path,
+                    counted: this(),
+                    first: None,
                 });
                 size
             }
             std::collections::hash_map::Entry::Occupied(mut o) => {
                 let link = o.get_mut();
-                if path < link.first {
-                    link.first = path;
+                let first = link.first.as_ref().unwrap_or(&link.counted);
+                if path_before(here, name, first) {
+                    link.first = Some(this());
                 }
                 0
             }
@@ -674,15 +728,23 @@ pub(crate) fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
     }
 }
 
-/// Scans one folder entry: a folder on the same filesystem is scanned into
-/// a subtree, anything else becomes a file node. `path` is the entry's full
-/// path; `dir` is its folder's handle.
+/// The folder an entry is scanned in.
+pub(crate) struct InFolder<'a> {
+    /// Its handle, open when paths below it get long (see `DirHandle`).
+    handle: &'a DirHandle,
+    /// Its place in the live tree (None: above the scanned folder).
+    live: Option<&'a LiveFolder>,
+    /// Set when a file with several hard links is found in it or below.
+    links: &'a std::sync::atomic::AtomicBool,
+}
+
+/// Scans one entry of folder `here`: a folder on the same filesystem is
+/// scanned into a subtree, anything else becomes a file node.
 pub(crate) fn scan_entry(
     entry: &std::fs::DirEntry,
     here: &Arc<Path>,
-    dir: &DirHandle,
+    parent: &InFolder,
     ctx: &ScanCtx,
-    live_parent: Option<&LiveFolder>,
 ) -> Node {
     let ScanCtx {
         mounts, progress, ..
@@ -727,13 +789,21 @@ pub(crate) fn scan_entry(
                     btime: meta.as_ref().map(birth_secs).unwrap_or(0),
                 }
             } else {
-                deep(|| scan_dir_in(&p, name, Some(here), meta, dir, ctx, live_parent))
+                deep(|| scan_dir_in(&p, name, Some(here), meta, parent, ctx))
             }
         }
         _ => {
             let (sz, mode, mtime, ctime, uid, gid, btime) = match entry.metadata() {
                 Ok(m) => (
-                    ctx.size_of(&m, full),
+                    match ctx.size_of(&m) {
+                        size if m.nlink() > 1 => {
+                            parent
+                                .links
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            ctx.link_size(&m, size, here, &os_name)
+                        }
+                        size => size,
+                    },
                     m.mode(),
                     m.mtime(),
                     m.ctime(),
@@ -783,12 +853,17 @@ fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
     exts
 }
 
-/// A folder's order: largest first, then by name, so the same contents
-/// always come in the same order.
-fn largest_first(a: &Node, b: &Node) -> std::cmp::Ordering {
-    b.size
-        .cmp(&a.size)
-        .then_with(|| a.disk_name().cmp(b.disk_name()))
+/// Sorts the entries of a folder holding files with several hard links
+/// (directly or further down): largest first, equal sizes by name, so the
+/// order is the same whichever name of a file was counted. (Elsewhere,
+/// equal sizes keep the listing's order.)
+fn sort_largest_first(children: &mut [Node]) {
+    children.sort_by_key(|c| std::cmp::Reverse(c.size));
+    for same in children.chunk_by_mut(|a, b| a.size == b.size) {
+        if same.len() > 1 {
+            same.sort_unstable_by(|a, b| a.disk_name().cmp(b.disk_name()));
+        }
+    }
 }
 
 pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
@@ -797,91 +872,131 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
         file_name_of(path),
         None,
         std::fs::metadata(path).ok(),
-        &None,
+        &InFolder {
+            handle: &None,
+            live: None,
+            links: &Default::default(),
+        },
         ctx,
-        None,
     );
-    let links = std::mem::take(&mut *ctx.hard_links.lock().unwrap());
-    count_links_at_first_names(&mut root, path, links.into_values());
+    let links = ctx
+        .hard_links
+        .shards
+        .iter()
+        .flat_map(|s| std::mem::take(&mut *s.lock().unwrap()).into_values());
+    count_links_at_first_names(&mut root, path, links);
     root
 }
 
+/// Size changes inside one folder: bytes to add to (or remove from) files
+/// in it, by name, and the changes inside its subfolders.
+#[derive(Default)]
+struct SizeChanges {
+    files: Vec<(std::ffi::OsString, i128)>,
+    folders: FxHashMap<std::ffi::OsString, SizeChanges>,
+}
+
+impl SizeChanges {
+    /// The changes inside subfolder `name`.
+    fn folder(&mut self, name: &std::ffi::OsStr) -> &mut SizeChanges {
+        if !self.folders.contains_key(name) {
+            self.folders.insert(name.to_owned(), SizeChanges::default());
+        }
+        self.folders.get_mut(name).expect("just inserted")
+    }
+}
+
 /// Moves the size of each hard-linked file from the name it was counted
-/// under to its first name in path order, so the same files always give the
+/// under to its first name in byte order, so the same files always give the
 /// same folder sizes, however the scan's threads met them. `path` is the
 /// path `root` was scanned at.
 fn count_links_at_first_names(root: &mut Node, path: &Path, links: impl Iterator<Item = HardLink>) {
-    // Size changes per folder: (name in it, bytes to add or remove).
-    let mut changes: HashMap<PathBuf, Vec<(std::ffi::OsString, i128)>> = HashMap::new();
-    for link in links.filter(|l| l.counted != l.first && l.size > 0) {
-        for (at, delta) in [
-            (link.counted, -i128::from(link.size)),
-            (link.first, i128::from(link.size)),
-        ] {
-            if let (Some(dir), Some(name)) = (at.parent(), at.file_name()) {
-                changes
-                    .entry(dir.to_path_buf())
-                    .or_default()
-                    .push((name.to_owned(), delta));
-            }
+    let mut changes = SizeChanges::default();
+    for link in links.filter(|l| l.size > 0) {
+        let Some(first) = link.first else { continue };
+        let size = i128::from(link.size);
+        for (at, delta) in [(link.counted, -size), (first, size)] {
+            let Ok(rel) = at.dir.strip_prefix(path) else {
+                continue;
+            };
+            let here = rel.iter().fold(&mut changes, |c, part| c.folder(part));
+            here.files.push((at.name.into(), delta));
         }
     }
-    if changes.is_empty() {
-        return;
+    if !changes.files.is_empty() || !changes.folders.is_empty() {
+        apply_size_changes(root, &changes);
     }
-    // The folders to walk through: every folder above a change.
-    let mut on_the_way: HashSet<PathBuf> = HashSet::new();
-    for dir in changes.keys() {
-        on_the_way.extend(dir.ancestors().map(Path::to_path_buf));
-    }
-    fn walk(
-        n: &mut Node,
-        at: &mut PathBuf,
-        changes: &HashMap<PathBuf, Vec<(std::ffi::OsString, i128)>>,
-        on_the_way: &HashSet<PathBuf>,
-    ) -> i128 {
-        let add = |size: u64, delta: i128| {
-            u64::try_from((i128::from(size) + delta).max(0)).unwrap_or(u64::MAX)
-        };
-        let mut total = 0;
-        let mut changed = false;
-        for (name, delta) in changes.get(at.as_path()).into_iter().flatten() {
-            if let Some(i) = child_named(n, name) {
-                n.children[i].size = add(n.children[i].size, *delta);
-                total += delta;
-                changed = true;
-            }
-        }
-        for c in n.children.iter_mut().filter(|c| c.is_dir) {
-            at.push(c.disk_name());
-            if on_the_way.contains(at.as_path()) {
-                let delta = deep(|| walk(c, at, changes, on_the_way));
-                total += delta;
-                changed |= delta != 0;
-            }
-            at.pop();
-        }
-        if changed {
-            n.size = add(n.size, total);
-            n.children.sort_by(largest_first);
-        }
-        total
-    }
-    walk(root, &mut path.to_path_buf(), &changes, &on_the_way);
 }
 
-/// Scans `path`, whose parent folder is open as `parent` when the path is
-/// long (see `DirHandle`).
-/// `name` is its name as shown, `self_meta` its details, `live_parent` its
-/// parent in the live tree (None: the scanned folder).
+/// Applies `changes` inside folder `n`, re-sorting each folder whose
+/// contents changed size; returns how much `n` grew.
+fn apply_size_changes(n: &mut Node, changes: &SizeChanges) -> i128 {
+    let add = |size: u64, delta: i128| {
+        u64::try_from((i128::from(size) + delta).max(0)).unwrap_or(u64::MAX)
+    };
+    // Children by name, looked up at once when there are many to find.
+    let wanted = changes.files.len() + changes.folders.len();
+    let by_name: Option<FxHashMap<&std::ffi::OsStr, usize>> = (wanted > 8).then(|| {
+        n.children
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.disk_name(), i))
+            .collect()
+    });
+    let find = |name: &std::ffi::OsStr| match &by_name {
+        Some(m) => m.get(name).copied(),
+        None => child_named(n, name),
+    };
+    let files: Vec<(usize, i128)> = changes
+        .files
+        .iter()
+        .filter_map(|(name, delta)| Some((find(name)?, *delta)))
+        .collect();
+    let folders: Vec<(usize, &SizeChanges)> = changes
+        .folders
+        .iter()
+        .filter_map(|(name, sub)| Some((find(name)?, sub)))
+        .collect();
+    drop(by_name);
+    let mut total = 0;
+    let mut resized = !files.is_empty();
+    for (i, delta) in &files {
+        n.children[*i].size = add(n.children[*i].size, *delta);
+        total += delta;
+    }
+    // Subfolders in parallel: each is changed on its own.
+    let subs: FxHashMap<usize, &SizeChanges> = folders.into_iter().collect();
+    let deltas: Vec<i128> = if subs.is_empty() {
+        Vec::new()
+    } else {
+        n.children
+            .par_iter_mut()
+            .enumerate()
+            .filter_map(|(i, c)| Some((c, *subs.get(&i)?)))
+            .filter(|(c, _)| c.is_dir)
+            .map(|(c, sub)| deep(|| apply_size_changes(c, sub)))
+            .collect()
+    };
+    for delta in deltas {
+        total += delta;
+        resized |= delta != 0;
+    }
+    n.size = add(n.size, total);
+    if resized {
+        sort_largest_first(&mut n.children);
+    }
+    total
+}
+
+/// Scans folder `path`, in folder `parent`. `name` is its name as shown,
+/// `self_meta` its details.
 fn scan_dir_in(
     path: &Path,
     name: String,
     in_dir: Option<&Arc<Path>>,
     self_meta: Option<std::fs::Metadata>,
-    parent: &DirHandle,
+    parent: &InFolder,
     ctx: &ScanCtx,
-    live_parent: Option<&LiveFolder>,
 ) -> Node {
     let ScanCtx {
         progress, cancel, ..
@@ -912,7 +1027,7 @@ fn scan_dir_in(
     }
     // Keep this folder open when its children's paths may get too long
     // to open directly.
-    let open_at = openable(path, parent);
+    let open_at = openable(path, parent.handle);
     let handle: DirHandle = if path.as_os_str().len() + 256 > LONG_PATH {
         std::fs::File::open(&open_at).ok()
     } else {
@@ -948,23 +1063,22 @@ fn scan_dir_in(
         entries.sort_by_key(|e| e.ino());
     }
     // The folder's own entry uses space too.
-    let own_size = self_meta
-        .as_ref()
-        .map_or(0, |m| ctx.size_of(m, || path.to_path_buf()));
+    let own_size = self_meta.as_ref().map_or(0, |m| ctx.size_of(m));
     // In the live tree, every file read counts at once in its folder.
-    let folder = ctx.live.map(|live| live.open(live_parent, path, own_size));
+    let folder = ctx.live.map(|live| live.open(parent.live, path, own_size));
     // The path its entries share.
     let here: Arc<Path> = path.into();
+    // Set when a file with several hard links is found below.
+    let links_here = std::sync::atomic::AtomicBool::new(false);
     let mut children: Vec<Node> = entries
         .par_iter()
         .map(|entry| {
-            let node = scan_entry(
-                entry,
-                &here,
-                &handle,
-                ctx,
-                folder.as_ref().map(|o| &*o.folder),
-            );
+            let this = InFolder {
+                handle: &handle,
+                live: folder.as_ref().map(|o| &*o.folder),
+                links: &links_here,
+            };
+            let node = scan_entry(entry, &here, &this, ctx);
             if let (Some(live), Some(f)) = (ctx.live, &folder) {
                 live.count(f, &node);
             }
@@ -972,7 +1086,14 @@ fn scan_dir_in(
         })
         .collect();
 
-    children.sort_by(largest_first);
+    if links_here.load(std::sync::atomic::Ordering::Relaxed) {
+        parent
+            .links
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        sort_largest_first(&mut children);
+    } else {
+        children.sort_by_key(|c| std::cmp::Reverse(c.size));
+    }
     // Saturating: apparent sizes of sparse files can add up past u64.
     let size = children
         .iter()
@@ -2078,10 +2199,11 @@ mod hard_link_tests {
     }
 
     /// Hard links across folders at different depths, in one folder, three
-    /// names for one file, names where path order and byte order differ
-    /// ("a/…" before "a-c/…"), and thousands of linked files: every scan,
-    /// with any number of threads, gives the same sizes everywhere, with
-    /// each file's size at its first name in path order and counted once.
+    /// names for one file, names where byte order isn't folder order
+    /// ("a-c/…" before "a/b/…"), and thousands of linked files: every scan,
+    /// with any number of threads, gives the same sizes and order
+    /// everywhere, with each file's size at its first name in byte order and
+    /// counted once.
     #[test]
     fn hard_links_count_at_their_first_name_every_time() {
         let dir = std::env::temp_dir().join(format!("spacemap-links-{}", std::process::id()));
@@ -2099,6 +2221,17 @@ mod hard_link_tests {
         std::fs::hard_link(dir.join("a-c/order"), dir.join("a/b/order")).unwrap();
         std::fs::write(dir.join("same/y"), &mb[..200_000]).unwrap();
         std::fs::hard_link(dir.join("same/y"), dir.join("same/x")).unwrap();
+        // Equal-size sibling folders, with links inside one and across two:
+        // folders above the links keep one order, whatever was counted first.
+        for t in 0..6 {
+            let at = dir.join(format!("ties/t{t}"));
+            std::fs::create_dir_all(&at).unwrap();
+            for f in 0..4 {
+                std::fs::write(at.join(format!("f{f}")), [3u8; 9000]).unwrap();
+            }
+        }
+        std::fs::hard_link(dir.join("ties/t3/f0"), dir.join("ties/t3/g0")).unwrap();
+        std::fs::hard_link(dir.join("ties/t1/f1"), dir.join("ties/t4/g1")).unwrap();
         for i in 0..2000 {
             let f = dir.join(format!("many2/f{i}"));
             std::fs::write(&f, [1u8; 5000]).unwrap();
@@ -2129,8 +2262,8 @@ mod hard_link_tests {
                 ),
                 0
             );
-            assert!(size_at("a/b/order") > 0, "a/b/order comes before a-c/order");
-            assert_eq!(size_at("a-c/order"), 0);
+            assert!(size_at("a-c/order") > 0, "'-' comes before '/'");
+            assert_eq!(size_at("a/b/order"), 0);
             assert!(size_at("same/x") > 0);
             assert_eq!(size_at("same/y"), 0);
             assert!(size_at("many1") > size_at("many2"));
