@@ -307,7 +307,19 @@ pub(crate) fn file_name_of(p: &Path) -> String {
 /// `\t` or `\x1B`, and a backslash as `\\`.
 pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     use std::os::unix::ffi::OsStrExt;
-    let mut out = String::new();
+    // Nearly every name is valid UTF-8 with nothing to escape: a plain copy.
+    if let Ok(text) = std::str::from_utf8(s.as_bytes()) {
+        let plain = |c: char| c != '\\' && !c.is_control();
+        let clean = if text.is_ascii() {
+            text.bytes().all(|b| b >= 0x20 && b != 0x7f && b != b'\\')
+        } else {
+            text.chars().all(plain)
+        };
+        if clean {
+            return text.to_owned();
+        }
+    }
+    let mut out = String::with_capacity(s.len());
     for chunk in s.as_bytes().utf8_chunks() {
         for c in chunk.valid().chars() {
             match c {
@@ -589,7 +601,7 @@ pub(crate) fn openable(path: &Path, parent: &DirHandle) -> PathBuf {
 /// path; `dir` is its folder's handle.
 pub(crate) fn scan_entry(
     entry: &std::fs::DirEntry,
-    path: PathBuf,
+    parent: &Path,
     dir: &DirHandle,
     ctx: &ScanCtx,
     place: LivePlace,
@@ -602,10 +614,16 @@ pub(crate) fn scan_entry(
         ..
     } = *ctx;
     use std::os::unix::fs::MetadataExt;
-    let p = path;
-    if !ctx.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
-        && p.file_name()
-            .is_some_and(|n| n.to_string_lossy().chars().any(is_hangul))
+    // The name once, from the listing: as text, and joined to the parent.
+    let os_name = entry.file_name();
+    let name = show_os(&os_name);
+    let mut p = PathBuf::with_capacity(parent.as_os_str().len() + os_name.len() + 1);
+    p.push(parent);
+    p.push(&os_name);
+    // Korean script needs non-ASCII bytes.
+    if !os_name.is_ascii()
+        && !ctx.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
+        && name.chars().any(is_hangul)
     {
         ctx.saw_hangul
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -614,10 +632,12 @@ pub(crate) fn scan_entry(
     let node = match ft {
         Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
             // Other filesystems mounted inside aren't entered (like `du -x`).
+            // The folder's details come from the listing (relative to the
+            // open parent, cheaper than by full path).
             let meta = entry.metadata().ok();
             if mounts.contains(&p) {
                 Node {
-                    name: trf("SEG_OTHER_FS", &[&file_name_of(&p)]),
+                    name: trf("SEG_OTHER_FS", &[&name]),
                     path: p,
                     size: 0,
                     file_count: 0,
@@ -635,7 +655,7 @@ pub(crate) fn scan_entry(
                     depth: place.depth + 1,
                     ..place
                 };
-                deep(|| scan_dir_in(&p, dir, ctx, place))
+                deep(|| scan_dir_in(&p, name, meta, dir, ctx, place))
             }
         }
         _ => {
@@ -655,7 +675,7 @@ pub(crate) fn scan_entry(
                 }
             };
             Node {
-                name: file_name_of(&p),
+                name,
                 path: p,
                 size: sz,
                 file_count: 1,
@@ -698,19 +718,33 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
         depth: 0,
         chain: None,
     };
-    scan_dir_in(path, &None, ctx, place)
+    scan_dir_in(
+        path,
+        file_name_of(path),
+        std::fs::metadata(path).ok(),
+        &None,
+        ctx,
+        place,
+    )
 }
 
 /// Scans `path`, whose parent folder is open as `parent` when the path is
 /// long (see `DirHandle`).
-/// `place`: where it is for the live counters, if any.
-fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx, place: LivePlace) -> Node {
+/// `name` is its name as shown, `self_meta` its details, `place` where it
+/// is for the live counters.
+fn scan_dir_in(
+    path: &Path,
+    name: String,
+    self_meta: Option<std::fs::Metadata>,
+    parent: &DirHandle,
+    ctx: &ScanCtx,
+    place: LivePlace,
+) -> Node {
     let ScanCtx {
         progress, cancel, ..
     } = *ctx;
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
-    let name = file_name_of(path);
     if cancel.load(Ordering::Relaxed) {
         // Cancelled: stop at once; the result is discarded.
         return Node {
@@ -743,7 +777,6 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx, place: LivePlace)
         }
         None => open_at.clone(),
     };
-    let self_meta = std::fs::metadata(&listing).ok();
     let self_mode = self_meta.as_ref().map(|m| m.mode()).unwrap_or(0);
     let self_mtime = self_meta.as_ref().map(|m| m.mtime()).unwrap_or(NO_TIME);
     let self_ctime = self_meta.as_ref().map(|m| m.ctime()).unwrap_or(NO_TIME);
@@ -780,7 +813,7 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx, place: LivePlace)
     let mut children: Vec<Node> = entries
         .par_iter()
         .map(|entry| {
-            let node = scan_entry(entry, path.join(entry.file_name()), &handle, ctx, place);
+            let node = scan_entry(entry, path, &handle, ctx, place);
             if let (Some(live), Some(chain)) = (ctx.live, place.chain) {
                 live.count(chain, &node);
             }
@@ -1066,6 +1099,52 @@ mod tests {
             show_os(std::ffi::OsStr::new("ünïcödé 日本語")),
             "ünïcödé 日本語"
         );
+    }
+
+    /// The quick copy for plain names gives exactly what the careful,
+    /// escaping path gives, for every kind of odd name.
+    #[test]
+    fn plain_names_take_the_quick_path_safely() {
+        // The careful path, as it was before the quick copy.
+        fn careful(s: &std::ffi::OsStr) -> String {
+            let mut out = String::new();
+            for chunk in s.as_bytes().utf8_chunks() {
+                for c in chunk.valid().chars() {
+                    match c {
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\t' => out.push_str("\\t"),
+                        '\r' => out.push_str("\\r"),
+                        c if c.is_control() => out.push_str(&format!("\\x{:02X}", c as u32)),
+                        c => out.push(c),
+                    }
+                }
+                for b in chunk.invalid() {
+                    out.push_str(&format!("\\x{b:02X}"));
+                }
+            }
+            out
+        }
+        let names: &[&[u8]] = &[
+            b"",
+            b"plain.txt",
+            b"with space",
+            b"back\\slash",
+            b"del\x7f",
+            b"bell\x07",
+            "next-line\u{85}".as_bytes(),
+            "caf\u{e9}\u{9f}".as_bytes(),
+            "\u{d55c}\u{ae00}.txt".as_bytes(),
+            b"\xc3\xa9t\xc3\xa9\xff",
+            b"\xc2",
+            b"\xc3\x28",
+            "emoji \u{1f600}".as_bytes(),
+            "rtl \u{202e}".as_bytes(),
+        ];
+        for name in names {
+            let os = std::ffi::OsStr::from_bytes(name);
+            assert_eq!(show_os(os), careful(os), "{name:?}");
+        }
     }
 
     #[test]
