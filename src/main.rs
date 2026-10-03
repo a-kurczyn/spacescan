@@ -911,7 +911,9 @@ impl DiskScanApp {
                             gid,
                         );
                         if let Some(node) = crate::delete::find_node(&self.partial_root, &path) {
-                            self.live_looks.folder_done(node, &exts, times, &self.cats);
+                            let root = self.partial_root.path.clone();
+                            self.live_looks
+                                .folder_done(node, &root, &exts, times, &self.cats);
                         }
                         for (ext, size, files) in exts {
                             add_ext(&mut self.live_exts, ext, size, files);

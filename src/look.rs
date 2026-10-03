@@ -147,56 +147,71 @@ pub(crate) fn group_look(looks: impl Iterator<Item = Look>, cats: &CategoryModel
     totals.look(size)
 }
 
-/// Slice looks during a scan. A folder's look is known once it finishes
-/// (its subfolders always finish first), and never changes after that.
+/// Slice looks during a scan. Every folder keeps running totals of the
+/// files classified under it so far: when a folder finishes, its own files
+/// are added to it and to every folder above it, up to the scanned one.
+/// A finished folder's look is final.
 #[derive(Default)]
 pub(crate) struct LiveLooks {
-    /// Totals of finished folders whose parent hasn't finished yet.
-    pending: HashMap<PathBuf, Totals>,
-    /// Each finished folder's look, and when it became known.
-    looks: HashMap<PathBuf, (Look, Instant)>,
+    /// Totals of every folder with files classified under it so far, and
+    /// when the first ones arrived.
+    totals: HashMap<PathBuf, (Totals, Instant)>,
+    /// Finished folders' looks.
+    done: HashMap<PathBuf, Look>,
 }
 
 impl LiveLooks {
-    /// Folder `node` (in the live tree) finished: `exts` and `times` are its
-    /// own files' (extension, size, count) and newest and oldest Changed
-    /// times.
+    /// Folder `node` (in the live tree under `root`) finished: `exts` and
+    /// `times` are its own files' (extension, size, count) and newest and
+    /// oldest Changed times.
     pub(crate) fn folder_done(
         &mut self,
         node: &Node,
+        root: &Path,
         exts: &[(String, u64, u64)],
         times: (i64, i64),
         cats: &CategoryModel,
     ) {
-        let mut totals = Totals::new(cats.other().0 + 1);
+        let mut own = Totals::new(cats.other().0 + 1);
         for (ext, size, files) in exts {
             let cat = cats.of_ext(ext);
-            totals.bytes[cat.0] = totals.bytes[cat.0].saturating_add(*size);
-            totals.files[cat.0] += files;
+            own.bytes[cat.0] = own.bytes[cat.0].saturating_add(*size);
+            own.files[cat.0] += files;
         }
-        totals.add_times(times.0, times.1);
-        for c in node.children.iter().filter(|c| c.is_dir) {
-            if let Some(sub) = self.pending.remove(&c.path) {
-                totals.add(&sub);
+        own.add_times(times.0, times.1);
+        let now = Instant::now();
+        for folder in node.path.ancestors() {
+            self.totals
+                .entry(folder.to_path_buf())
+                .or_insert_with(|| (Totals::new(own.bytes.len()), now))
+                .0
+                .add(&own);
+            if folder == root {
+                break;
             }
         }
-        self.looks
-            .insert(node.path.clone(), (totals.look(node.size), Instant::now()));
-        self.pending.insert(node.path.clone(), totals);
+        let look = self.totals[&node.path].0.look(node.size);
+        self.done.insert(node.path.clone(), look);
     }
 
-    /// The look of folder `path` and when it became known, once finished.
-    pub(crate) fn get(&self, path: &Path) -> Option<(Look, Instant)> {
-        self.looks.get(path).copied()
+    /// The look of folder `node` from what's classified under it so far
+    /// (final once it finished), and since when it has one.
+    pub(crate) fn get(&self, node: &Node) -> Option<(Look, Instant)> {
+        let (totals, since) = self.totals.get(&node.path)?;
+        let look = match self.done.get(&node.path) {
+            Some(look) => *look,
+            None => totals.look(node.size),
+        };
+        Some((look, *since))
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.looks.is_empty()
+        self.totals.is_empty()
     }
 
-    /// When folder `path` got its color, if it did during the scan.
+    /// When folder `path` got a color during the scan, if it did.
     pub(crate) fn colored_at(&self, path: &Path) -> Option<Instant> {
-        self.looks.get(path).map(|l| l.1)
+        self.totals.get(path).map(|t| t.1)
     }
 }
 
@@ -333,19 +348,29 @@ mod tests {
         // The live tree has folders only.
         let live_sub = test_node("/r/s", 3000, true, vec![]);
         let live_root = test_node("/r", 3500, true, vec![live_sub.clone()]);
+        let r = Path::new("/r");
         let mut live = LiveLooks::default();
+        assert!(live.get(&live_root).is_none(), "nothing classified yet");
         let mkv_txt = [("mkv".to_string(), 2000, 1), ("txt".to_string(), 1000, 1)];
-        live.folder_done(&live_sub, &mkv_txt, (900, 100), &cats);
-        assert!(live.get(Path::new("/r")).is_none(), "not finished yet");
-        live.folder_done(&live_root, &[("flac".to_string(), 500, 1)], (50, 50), &cats);
+        live.folder_done(&live_sub, r, &mkv_txt, (900, 100), &cats);
+        // Unfinished, /r already shows what's classified under it: video.
+        let early = live.get(&live_root).unwrap().0;
         assert_eq!(
-            live.get(Path::new("/r/s")).unwrap().0,
+            (cats.label(early.cat), early.newest, early.oldest),
+            ("Video".into(), 900, 100)
+        );
+        live.folder_done(
+            &live_root,
+            r,
+            &[("flac".to_string(), 500, 1)],
+            (50, 50),
+            &cats,
+        );
+        assert_eq!(
+            live.get(&live_sub).unwrap().0,
             finished.of(&root.children[0], &cats)
         );
-        assert_eq!(
-            live.get(Path::new("/r")).unwrap().0,
-            finished.of(&root, &cats)
-        );
+        assert_eq!(live.get(&live_root).unwrap().0, finished.of(&root, &cats));
     }
 
     #[test]

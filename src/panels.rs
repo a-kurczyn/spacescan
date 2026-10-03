@@ -1597,24 +1597,23 @@ impl DiskScanApp {
         let known = |view: &Node| -> Option<(Look, Option<Instant>)> {
             let parent = || get_node(view, &seg.idx_path[..seg.idx_path.len() - 1]);
             if live {
-                // During a scan: only folders that finished, and an "other"
-                // slice once all its items have.
+                // During a scan: what's classified under each folder so far;
+                // an "other" slice from those of its items that have any.
                 if seg.is_other {
                     let parent = parent();
-                    let found: Option<Vec<(Look, Instant)>> = seg
+                    let found: Vec<(Look, Instant)> = seg
                         .rest
                         .iter()
                         .filter_map(|&i| parent.children.get(i))
-                        .map(|n| self.live_looks.get(&n.path))
+                        .filter_map(|n| self.live_looks.get(n))
                         .collect();
-                    let found = found?;
-                    let since = found.iter().map(|f| f.1).max();
+                    let since = found.iter().map(|f| f.1).min()?;
                     Some((
                         group_look(found.into_iter().map(|f| f.0), &self.cats),
-                        since,
+                        Some(since),
                     ))
                 } else {
-                    let (look, since) = self.live_looks.get(&get_node(view, &seg.idx_path).path)?;
+                    let (look, since) = self.live_looks.get(get_node(view, &seg.idx_path))?;
                     Some((look, Some(since)))
                 }
             } else {
