@@ -1270,6 +1270,7 @@ impl DiskScanApp {
             ctime: Some(n.ctime),
             uid: Some(n.uid),
             gid: Some(n.gid),
+            age_range: None,
         };
         if !h.is_dir {
             self.ensure_mime_lookup(&h.path);

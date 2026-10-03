@@ -515,6 +515,15 @@ pub(crate) fn details_grid(
                 ui.label(format_epoch(ct));
                 ui.end_row();
             }
+            // Debug rows, not translated.
+            if let Some((newest, oldest)) = h.age_range {
+                ui.label("Newest:");
+                ui.label(format_epoch(newest));
+                ui.end_row();
+                ui.label("Oldest:");
+                ui.label(format_epoch(oldest));
+                ui.end_row();
+            }
             if let Some(m) = h.mode {
                 ui.label(tr("HOVER_PERMS"));
                 ui.label(format_perms(m));

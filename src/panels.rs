@@ -1774,6 +1774,21 @@ impl DiskScanApp {
                             ctime: real_node.map(|n| n.ctime),
                             uid: real_node.map(|n| n.uid),
                             gid: real_node.map(|n| n.gid),
+                            age_range: self.looks.as_ref().and_then(|(_, looks)| {
+                                let look = if seg.is_other {
+                                    let parent = get_node(
+                                        view_node,
+                                        &seg.idx_path[..seg.idx_path.len() - 1],
+                                    );
+                                    let rest =
+                                        seg.rest.iter().filter_map(|&i| parent.children.get(i));
+                                    looks.of_group(rest, &self.cats)
+                                } else {
+                                    let n = real_node.filter(|n| n.is_dir)?;
+                                    looks.of(n, &self.cats)
+                                };
+                                Some((look.newest, look.oldest))
+                            }),
                         });
                         // Free space can't be opened or used by the menu.
                         hover_idx_path = if seg.is_free {

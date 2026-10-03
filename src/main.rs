@@ -50,6 +50,9 @@ struct HoverInfo {
     ctime: Option<i64>,
     uid: Option<u32>,
     gid: Option<u32>,
+    /// Debug: Changed times of the newest and oldest file inside (folders
+    /// and "other" slices), as used for the slice's colors.
+    age_range: Option<(i64, i64)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
