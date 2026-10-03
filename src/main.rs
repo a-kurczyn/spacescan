@@ -236,7 +236,7 @@ struct DiskScanApp {
     live_looks: LiveLooks,
     /// The running scan's counters, read every 100 ms into `live_looks`.
     live_tree: Option<Arc<LiveTree>>,
-    /// When the live tree was last read.
+    /// When the live tree is to be read next.
     live_read_at: Option<Instant>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
@@ -955,11 +955,9 @@ impl eframe::App for DiskScanApp {
         // as the chart currently shows.
         if self.scanning
             && let Some(tree) = self.live_tree.clone()
-            && self
-                .live_read_at
-                .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(100))
+            && self.live_read_at.is_none_or(|t| Instant::now() >= t)
         {
-            self.live_read_at = Some(Instant::now());
+            let started = Instant::now();
             // The smallest slice the chart can draw, as a share of the circle.
             let min_angle = if self.settings.unlimited_slices {
                 0.02
@@ -975,6 +973,11 @@ impl eframe::App for DiskScanApp {
                 self.partial_root = root;
                 self.partial_gen += 1;
             }
+            // The next read in 100 ms, or later if reading took long, so the
+            // window always has time for everything else.
+            let took = started.elapsed();
+            self.live_read_at =
+                Some(started + (took * 5).max(std::time::Duration::from_millis(100)));
         }
         // The live looks' fade-in times are done with once the chart has
         // faded in.

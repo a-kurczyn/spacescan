@@ -194,9 +194,8 @@ impl Shard {
     }
 }
 
-/// Running totals of everything under one folder being scanned: each file
-/// read counts in its folder's counters and those of every counted folder
-/// above it. One shard per scan thread, made when the thread first counts
+/// Running totals of the files directly in one folder being scanned. One
+/// shard per scan thread, made when the thread first counts
 /// something there; each has a single writer, so updates are plain loads
 /// and stores (no locked instructions). Threads beyond the expected number
 /// share the last shard with locked updates, so no count is ever lost.
@@ -477,13 +476,18 @@ impl LiveTree {
     ) -> Option<Node> {
         let root = self.root.get()?;
         looks.summaries.clear();
-        // First the scanned folder's size, for the smallest slice.
-        let total = self.read(root, None, 0, false, looks, Instant::now()).size;
+        // The smallest slice, from the scanned folder's size at the last read
+        // (which only grows); the first read works it out.
+        let total = match looks.last_total {
+            0 => self.read(root, None, 0, false, looks, Instant::now()).size,
+            known => known,
+        };
         let min_size = (total as f64 * min_share) as u64;
         // The scanned folder's own children are all kept: the table lists
         // them.
         let read = self.read(root, Some(depth), min_size, true, looks, Instant::now());
         looks.root = read.totals;
+        looks.last_total = read.size;
         read.node
     }
 
@@ -535,7 +539,11 @@ impl LiveTree {
                 // Small and finished: its stored values, no node.
                 Some(d) if small(d.size) => Read {
                     size: d.size,
-                    totals: c.totals.lock().unwrap().clone(),
+                    // Only an unfinished folder still adds them up.
+                    totals: match finished {
+                        None => c.totals.lock().unwrap().clone(),
+                        Some(_) => None,
+                    },
                     node: None,
                 },
                 _ => deep(|| self.read(c, below, min_size, false, looks, now)),
@@ -552,14 +560,15 @@ impl LiveTree {
                     None if f.done.get().is_some() => {
                         return self.read(f, depth, min_size, keep_all, looks, now);
                     }
-                    None => {}
+                    None => debug_assert!(false, "a subfolder's totals went missing"),
                 }
                 size = size.saturating_add(r.size);
             }
-            if below.is_some() || depth == Some(0) {
+            // Subfolders only where they're shown.
+            if below.is_some() {
                 match r.node {
                     Some(n) if !small(r.size) => kids.push(n),
-                    _ => grouped.add(c, r.size, looks),
+                    _ => grouped.add(c, &r),
                 }
             }
         }
@@ -593,14 +602,16 @@ struct Grouped {
 }
 
 impl Grouped {
-    fn add(&mut self, c: &LiveFolder, size: u64, looks: &LiveLooks) {
+    /// Adds subfolder `c`, read as `r`.
+    fn add(&mut self, c: &LiveFolder, r: &Read) {
         self.count += 1;
-        self.size = self.size.saturating_add(size);
+        self.size = self.size.saturating_add(r.size);
         if let Some(d) = c.done.get() {
             self.file_count += d.file_count;
-            self.looks.push(d.summary.look(size));
-        } else if let Some(s) = looks.summaries.get(&path_key(&c.path)) {
-            self.looks.push(s.look(size));
+            self.looks.push(d.summary.look(r.size));
+        } else if let Some(t) = &r.totals {
+            self.file_count += t.files.iter().sum::<u64>();
+            self.looks.push(t.summary().look(r.size));
         }
     }
 
@@ -669,6 +680,8 @@ pub(crate) struct LiveLooks {
     since: FxHashMap<u64, Instant>,
     /// The scanned folder's totals so far, for the category order.
     root: Option<Totals>,
+    /// The scanned folder's size at the last read.
+    last_total: u64,
 }
 
 impl LiveLooks {
@@ -940,17 +953,24 @@ mod live_stress {
         };
         let tree = std::thread::scope(|scope| {
             scope.spawn(|| {
+                // Every folder's size and file count at the last read: none
+                // may ever go down.
+                fn check(n: &Node, seen: &mut HashMap<PathBuf, (u64, u64)>) {
+                    let now = (n.size, n.file_count);
+                    if let Some(&(size, files)) = seen.get(&n.path) {
+                        assert!(now.0 >= size, "{} size went down", n.path.display());
+                        assert!(now.1 >= files, "{} files went down", n.path.display());
+                    }
+                    seen.insert(n.path.clone(), now);
+                    for c in &n.children {
+                        check(c, seen);
+                    }
+                }
                 let mut looks = LiveLooks::default();
-                let (mut size, mut files) = (0, 0);
+                let mut seen = HashMap::new();
                 while reading.load(Relaxed) {
-                    if let Some(root) = live.snapshot(3, 0.0, &mut looks) {
-                        assert!(root.size >= size, "size went down: {size} -> {}", root.size);
-                        assert!(
-                            root.file_count >= files,
-                            "files went down: {files} -> {}",
-                            root.file_count
-                        );
-                        (size, files) = (root.size, root.file_count);
+                    if let Some(root) = live.snapshot(usize::MAX, 0.0, &mut looks) {
+                        check(&root, &mut seen);
                     }
                     std::thread::yield_now();
                 }
@@ -1095,6 +1115,48 @@ mod live_stress {
         assert_eq!((grouped.size, grouped.file_count), (subs, 3000));
         assert!(looks.get(grouped).is_some(), "the entry has a color");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A group of tiny folders, some finished and some still being
+    /// scanned, adds up all their files and bytes.
+    #[test]
+    fn groups_count_unfinished_members() {
+        let cats = CategoryModel::defaults();
+        let live = LiveTree::new(Arc::new(cats.clone()));
+        let root = live.open(None, Path::new("/r"), 0);
+        let big = live.open(Some(&root.folder), Path::new("/r/big"), 0);
+        live.count(
+            &big,
+            &test_node("/r/big/huge.mkv", 1_000_000, false, vec![]),
+        );
+        let p = live.open(Some(&root.folder), Path::new("/r/p"), 0);
+        let mut open = Vec::new();
+        for i in 0..20 {
+            let t = live.open(Some(&p.folder), Path::new(&format!("/r/p/t{i}")), 0);
+            for f in 0..3 {
+                live.count(
+                    &t,
+                    &test_node(&format!("/r/p/t{i}/{f}.txt"), 10, false, vec![]),
+                );
+            }
+            if i % 2 == 0 {
+                live.close(t, 30, 3, 0, 0, 0, 0, 0);
+            } else {
+                open.push(t);
+            }
+        }
+        let mut looks = LiveLooks::default();
+        let snap = live.snapshot(5, 0.1, &mut looks).unwrap();
+        let p_node = snap.children.iter().find(|c| c.name == "p").unwrap();
+        assert_eq!((p_node.size, p_node.file_count), (600, 60));
+        assert_eq!(p_node.children.len(), 1, "all 20 grouped");
+        let g = &p_node.children[0];
+        assert_eq!(
+            (g.size, g.file_count),
+            (600, 60),
+            "finished and unfinished members"
+        );
+        drop(open);
     }
 
     /// Times before 1970, unknown times and sizes that add up past the

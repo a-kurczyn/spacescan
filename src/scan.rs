@@ -212,10 +212,7 @@ pub(crate) fn empty_node() -> Node {
     }
 }
 
-/// Puts a finished folder's totals into the live scan tree at
-/// `target_path`, creating the folders above it as needed. Each folder
-/// above gets the sum of what's known so far, until its own totals arrive.
-#[allow(clippy::too_many_arguments)]
+/// `p`'s last part as shown (see `show_os`), or the whole path for "/".
 pub(crate) fn file_name_of(p: &Path) -> String {
     p.file_name().map(show_os).unwrap_or_else(|| show_path(p))
 }
