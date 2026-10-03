@@ -88,7 +88,6 @@ SETTINGS_MAX_LOG_LINES=Lignes de problèmes conservées (max.)
 SETTINGS_SCANNING=Analyse
 SETTINGS_APPARENT_SIZE=Compter la taille apparente
 SETTINGS_APPARENT_SIZE_HOVER=Compte la longueur de chaque fichier au lieu de l'espace disque qu'il occupe. Désactivé : les fichiers creux comptent ce qu'ils occupent vraiment et les fichiers à liens physiques une seule fois, comme du. À activer pour les disques réseau ou FUSE qui n'indiquent pas l'espace occupé. Prend effet à la prochaine analyse.
-SETTINGS_PROGRESS_INTERVAL=Intervalle de progression (éléments, toujours une puissance de 2)
 SETTINGS_DEFAULTS=Valeurs par défaut
 SETTINGS_LANGUAGE=Langue
 
@@ -110,9 +109,6 @@ ERR_CANNOT_STAT=Impossible de lire les informations de %s : %s
 ERR_NETWORK_URL='%s://' est une adresse réseau, pas un chemin monté — montez-la d'abord (p. ex. via le navigateur réseau de votre gestionnaire de fichiers), puis saisissez le chemin local réel où elle est montée (souvent sous /run/user/<uid>/gvfs/...).
 ERR_NOT_A_DIRECTORY=Ce n'est pas un dossier (c'est un fichier) : %s
 ERR_FOLDER_DIALOG_FAILED=La boîte de dialogue des dossiers n'a pas pu s'ouvrir (xdg-desktop-portal est-il lancé ?)
-SCAN_PROGRESS_ITEMS_SCANNED=%s éléments analysés
-SCAN_PROGRESS_OF_TOTAL=%s éléments sur %s
-SCAN_PROGRESS_ITEMS=%s éléments
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=introuvable (aucun fichier ou dossier de ce nom)
@@ -335,3 +331,7 @@ CLASH_MERGE=Fusionner les dossiers
 CLASH_CANCEL=Tout annuler
 TABLE_TAG_CLIP_COPY=%s à copier
 TABLE_TAG_CLIP_MOVE=%s à déplacer
+COUNT_FILES=%s fichiers
+COUNT_FILES_ONE=%s fichier
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s % · %s

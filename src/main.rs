@@ -105,8 +105,6 @@ struct Settings {
     stroke_alpha: u8,
     tess_px_per_step: f32,
     max_log_lines: usize,
-    /// The "N items scanned" counter updates every 2^this entries.
-    progress_interval_pow2: u32,
     /// Count file lengths instead of disk space used (from the next scan).
     apparent_size: bool,
     /// Most rows in the contents table's flat list.
@@ -131,7 +129,6 @@ impl Settings {
     const STROKE_WIDTH: RangeInclusive<f32> = 0.0..=3.0;
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
     const LOG_LINES: RangeInclusive<usize> = 50..=5000;
-    const PROGRESS_POW2: RangeInclusive<u32> = 0..=16;
     const FLAT_ROWS: RangeInclusive<usize> = 100..=100_000;
 
     fn sanitized(mut self) -> Self {
@@ -168,9 +165,6 @@ impl Settings {
         self.max_log_lines = self
             .max_log_lines
             .clamp(*Self::LOG_LINES.start(), *Self::LOG_LINES.end());
-        self.progress_interval_pow2 = self
-            .progress_interval_pow2
-            .clamp(*Self::PROGRESS_POW2.start(), *Self::PROGRESS_POW2.end());
         self.flat_rows = self
             .flat_rows
             .clamp(*Self::FLAT_ROWS.start(), *Self::FLAT_ROWS.end());
@@ -205,7 +199,6 @@ impl Default for Settings {
             stroke_alpha: 90,
             tess_px_per_step: 3.0,
             max_log_lines: 500,
-            progress_interval_pow2: 9, // every 512 entries
             apparent_size: false,
             flat_rows: 1000,
             flat_all: false,
@@ -263,9 +256,6 @@ struct DiskScanApp {
     view_stack: Vec<Vec<usize>>,
     scanning: bool,
     scan_rx: Option<Receiver<ScanMsg>>,
-    scanned_count: u64,
-    /// Counting pass for the current scan (folder scans only).
-    entry_count: Option<Arc<EntryCount>>,
     /// Highest progress shown this scan, so the bar never moves backwards.
     progress_shown: f32,
     scan_start: Instant,
@@ -363,8 +353,6 @@ impl Default for DiskScanApp {
             view_stack: vec![vec![]],
             scanning: false,
             scan_rx: None,
-            scanned_count: 0,
-            entry_count: None,
             progress_shown: 0.0,
             scan_start: Instant::now(),
             hidden: HashSet::new(),
@@ -502,7 +490,6 @@ impl DiskScanApp {
         // This scan reports again whatever it can't read under `path`.
         self.unreadable.retain(|u| !u.starts_with(&path));
         self.scan_start = Instant::now();
-        self.scanned_count = 0;
         self.selection = None;
         self.progress_shown = 0.0;
         self.view_stack = vec![vec![]];
@@ -527,7 +514,6 @@ impl DiskScanApp {
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.cancel_flag = Some(cancel.clone());
 
-        let progress_interval: u64 = 1u64 << self.settings.progress_interval_pow2;
         let apparent_size = self.settings.apparent_size;
         let saw_hangul = self.saw_hangul.clone();
 
@@ -537,15 +523,7 @@ impl DiskScanApp {
         let live = Arc::new(LiveTree::new(self.cats.clone()));
         self.live_tree = Some(live.clone());
         self.live_read_at = None;
-        // A whole drive's progress is measured against its used space; other
-        // folders need a counted total.
-        let entry_count = self
-            .free_space
-            .is_none()
-            .then(|| Arc::new(EntryCount::default()));
-        self.entry_count = entry_count.clone();
         std::thread::spawn(move || {
-            let counter = std::sync::atomic::AtomicU64::new(0);
             let start = Instant::now();
             if !path.exists() {
                 let _ = tx.send(ScanMsg::Error(trf(
@@ -561,40 +539,11 @@ impl DiskScanApp {
                 )));
                 return;
             }
-            let mounts = Arc::new(mount_points());
-            let scan_finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            if let Some(count) = entry_count {
-                let (path, cancel, scan_finished, mounts) = (
-                    path.clone(),
-                    cancel.clone(),
-                    scan_finished.clone(),
-                    mounts.clone(),
-                );
-                std::thread::spawn(move || {
-                    use std::sync::atomic::Ordering;
-                    let stop =
-                        || cancel.load(Ordering::Relaxed) || scan_finished.load(Ordering::Relaxed);
-                    // Only for scans that take a while: a quick one finishes
-                    // before the count would help, and shouldn't pay for it.
-                    let start = Instant::now();
-                    while start.elapsed() < std::time::Duration::from_millis(300) {
-                        if stop() {
-                            return;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    count_entries(&path, &mounts, &count.found, &stop);
-                    if !stop() {
-                        count.done.store(true, Ordering::Relaxed);
-                    }
-                });
-            }
+            let mounts = mount_points();
             let ctx = ScanCtx {
                 mounts: &mounts,
                 progress: &tx,
-                counter: &counter,
                 cancel: &cancel,
-                progress_interval,
                 apparent_size,
                 hard_links: Default::default(),
                 saw_hangul: &saw_hangul,
@@ -602,7 +551,6 @@ impl DiskScanApp {
                 live: Some(&live),
             };
             let root = scan_dir(&path, &ctx);
-            scan_finished.store(true, std::sync::atomic::Ordering::Relaxed);
             if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = tx.send(ScanMsg::Done(root, start.elapsed().as_secs_f64()));
             }
@@ -893,9 +841,6 @@ impl DiskScanApp {
                 }
                 processed += 1;
                 match rx.try_recv() {
-                    Ok(ScanMsg::Progress(n)) => {
-                        self.scanned_count = n;
-                    }
                     Ok(ScanMsg::Unreadable(p)) => {
                         self.unreadable.push(p);
                     }

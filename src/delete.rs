@@ -771,9 +771,7 @@ mod tests {
         let ctx = ScanCtx {
             mounts: &HashSet::new(),
             progress: &tx,
-            counter: &Default::default(),
             cancel: &Default::default(),
-            progress_interval: 512,
             apparent_size: true,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),

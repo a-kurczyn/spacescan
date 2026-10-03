@@ -88,7 +88,6 @@ SETTINGS_MAX_LOG_LINES=保存する問題の最大行数
 SETTINGS_SCANNING=スキャン
 SETTINGS_APPARENT_SIZE=見かけのサイズで数える
 SETTINGS_APPARENT_SIZE_HOVER=使用しているディスク容量ではなく、各ファイルの長さを数えます。オフ: du と同様に、スパースファイルは実際の使用量で、ハードリンクされたファイルは一度だけ数えます。使用量を報告しないネットワークや FUSE のドライブではオンにしてください。次回のスキャンから有効です。
-SETTINGS_PROGRESS_INTERVAL=進捗の報告間隔 (項目数、常に2のべき乗)
 SETTINGS_DEFAULTS=既定値に戻す
 SETTINGS_LANGUAGE=言語
 
@@ -110,9 +109,6 @@ ERR_CANNOT_STAT=%s の情報を取得できません: %s
 ERR_NETWORK_URL='%s://' はネットワークのアドレスで、マウントされたパスではありません — 先にマウントし (例: ファイルマネージャーのネットワーク表示から)、マウント先の実際のローカルパスを入力してください (多くは /run/user/<uid>/gvfs/... の下)。
 ERR_NOT_A_DIRECTORY=フォルダーではありません (ファイルです): %s
 ERR_FOLDER_DIALOG_FAILED=フォルダー選択ダイアログを開けませんでした (xdg-desktop-portal は動いていますか?)
-SCAN_PROGRESS_ITEMS_SCANNED=%s 項目をスキャン済み
-SCAN_PROGRESS_OF_TOTAL=%s / %s 項目
-SCAN_PROGRESS_ITEMS=%s 項目
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=見つかりません (そのファイルやフォルダーはありません)
@@ -335,3 +331,6 @@ CLASH_MERGE=フォルダーを統合
 CLASH_CANCEL=すべて中止
 TABLE_TAG_CLIP_COPY=コピー %s 件
 TABLE_TAG_CLIP_MOVE=移動 %s 件
+COUNT_FILES=%s 個のファイル
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s% · %s

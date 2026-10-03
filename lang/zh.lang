@@ -88,7 +88,6 @@ SETTINGS_MAX_LOG_LINES=保存的问题行数上限
 SETTINGS_SCANNING=扫描
 SETTINGS_APPARENT_SIZE=按表观大小计算
 SETTINGS_APPARENT_SIZE_HOVER=按每个文件的长度计算，而不是它占用的磁盘空间。关闭时：与 du 相同，稀疏文件按实际占用计算，硬链接文件只计算一次。对于不报告占用空间的网络或 FUSE 驱动器，请打开此项。下次扫描时生效。
-SETTINGS_PROGRESS_INTERVAL=进度报告间隔（项数，始终为 2 的幂）
 SETTINGS_DEFAULTS=恢复默认
 SETTINGS_LANGUAGE=语言
 
@@ -110,9 +109,6 @@ ERR_CANNOT_STAT=无法读取 %s 的信息：%s
 ERR_NETWORK_URL='%s://' 是网络地址，不是已挂载的路径 — 请先挂载它（例如通过文件管理器的“网络”视图），再输入它实际挂载到的本地路径（通常在 /run/user/<uid>/gvfs/... 下）。
 ERR_NOT_A_DIRECTORY=不是文件夹（这是一个文件）：%s
 ERR_FOLDER_DIALOG_FAILED=无法打开文件夹对话框（xdg-desktop-portal 是否在运行？）
-SCAN_PROGRESS_ITEMS_SCANNED=已扫描 %s 项
-SCAN_PROGRESS_OF_TOTAL=%s / %s 项
-SCAN_PROGRESS_ITEMS=%s 项
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=找不到（没有该文件或文件夹）
@@ -335,3 +331,6 @@ CLASH_MERGE=合并文件夹
 CLASH_CANCEL=全部取消
 TABLE_TAG_CLIP_COPY=待复制 %s 项
 TABLE_TAG_CLIP_MOVE=待移动 %s 项
+COUNT_FILES=%s 个文件
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s% · %s

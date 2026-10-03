@@ -88,7 +88,6 @@ SETTINGS_MAX_LOG_LINES=Макс. хранимых строк проблем
 SETTINGS_SCANNING=Анализ
 SETTINGS_APPARENT_SIZE=Считать видимый размер
 SETTINGS_APPARENT_SIZE_HOVER=Считает длину каждого файла вместо занимаемого им места на диске. Выключено: разреженные файлы учитываются по реально занятому месту, а файлы с жёсткими ссылками — один раз, как в du. Включите для сетевых дисков или FUSE, которые не сообщают занятое место. Действует со следующего анализа.
-SETTINGS_PROGRESS_INTERVAL=Интервал отчёта о прогрессе (элементы, всегда степень двойки)
 SETTINGS_DEFAULTS=По умолчанию
 SETTINGS_LANGUAGE=Язык
 
@@ -110,9 +109,6 @@ ERR_CANNOT_STAT=Не удалось получить сведения о %s: %s
 ERR_NETWORK_URL='%s://' — сетевой адрес, а не смонтированный путь. Сначала смонтируйте его (например, через раздел «Сеть» файлового менеджера), затем введите реальный локальный путь, куда он смонтирован (часто в /run/user/<uid>/gvfs/...).
 ERR_NOT_A_DIRECTORY=Это не папка (это файл): %s
 ERR_FOLDER_DIALOG_FAILED=Не удалось открыть окно выбора папки (запущен ли xdg-desktop-portal?)
-SCAN_PROGRESS_ITEMS_SCANNED=Проанализировано элементов: %s
-SCAN_PROGRESS_OF_TOTAL=%s из %s элементов
-SCAN_PROGRESS_ITEMS=Элементов: %s
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=не найдено (нет такого файла или папки)
@@ -335,3 +331,8 @@ CLASH_MERGE=Объединить папки
 CLASH_CANCEL=Отменить всё
 TABLE_TAG_CLIP_COPY=к копированию: %s
 TABLE_TAG_CLIP_MOVE=к перемещению: %s
+COUNT_FILES=%s файлов
+COUNT_FILES_ONE=%s файл
+COUNT_FILES_FEW=%s файла
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s % · %s

@@ -89,7 +89,6 @@ SETTINGS_MAX_LOG_LINES=Máx. líneas de incidencias guardadas
 SETTINGS_SCANNING=Escaneo
 SETTINGS_APPARENT_SIZE=Contar tamaño aparente
 SETTINGS_APPARENT_SIZE_HOVER=Contar la longitud de cada archivo en lugar del espacio en disco que ocupa. Desactivado: los archivos dispersos cuentan lo que realmente ocupan y los enlazados con enlaces duros cuentan una vez, como du. Actívalo en unidades de red o FUSE que no informan del uso de disco. Se aplica en el próximo escaneo.
-SETTINGS_PROGRESS_INTERVAL=Intervalo de progreso (elementos, siempre potencia de 2)
 SETTINGS_DEFAULTS=Restablecer
 SETTINGS_LANGUAGE=Idioma
 
@@ -111,9 +110,6 @@ ERR_CANNOT_STAT=No se puede obtener información de %s: %s
 ERR_NETWORK_URL='%s://' es una URL de red, no una ruta montada — móntala primero (p. ej. desde el navegador de red de tu gestor de archivos), luego escribe la ruta local real donde queda montada (a menudo bajo /run/user/<uid>/gvfs/...).
 ERR_NOT_A_DIRECTORY=No es una carpeta (es un archivo): %s
 ERR_FOLDER_DIALOG_FAILED=No se pudo abrir el diálogo de carpetas (¿está xdg-desktop-portal en ejecución?)
-SCAN_PROGRESS_ITEMS_SCANNED=%s elementos escaneados
-SCAN_PROGRESS_OF_TOTAL=%s de %s elementos
-SCAN_PROGRESS_ITEMS=%s elementos
 
 # ---- Errores de E/S del sistema de archivos ----
 ERR_IO_NOT_FOUND=no encontrado (no existe ese archivo o carpeta)
@@ -340,3 +336,7 @@ CLASH_MERGE=Combinar carpetas
 CLASH_CANCEL=Cancelar todo
 TABLE_TAG_CLIP_COPY=%s para copiar
 TABLE_TAG_CLIP_MOVE=%s para mover
+COUNT_FILES=%s archivos
+COUNT_FILES_ONE=%s archivo
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s % · %s

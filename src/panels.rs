@@ -698,19 +698,6 @@ impl DiskScanApp {
                         ui.label(tr("SETTINGS_SCANNING"));
                         ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
                             .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
-                        ui.add(
-                            egui::Slider::new(
-                                &mut s.progress_interval_pow2,
-                                Settings::PROGRESS_POW2,
-                            )
-                            .custom_formatter(|v, _| format!("{}", 1u64 << (v as u32)))
-                            .custom_parser(|s| {
-                                s.parse::<u64>().ok().map(|v| {
-                                    v.max(1).next_power_of_two().trailing_zeros().min(16) as f64
-                                })
-                            })
-                            .text(tr("SETTINGS_PROGRESS_INTERVAL")),
-                        );
 
                         ui.separator();
                         if ui.button(tr("SETTINGS_DEFAULTS")).clicked() {
@@ -2035,54 +2022,40 @@ impl DiskScanApp {
         }
     }
 
-    /// Scan progress bar, `width` wide, labelled with the count so far.
-    /// Shared by the chart preview and the live table.
+    /// Scan progress, `width` wide: for a whole drive, a bar of the bytes
+    /// scanned out of its used space with the percentage; for anything else,
+    /// a spinner. Both show the files and bytes found so far.
     pub(crate) fn scan_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
-        // A whole drive: bytes scanned out of its used space. Any other folder:
-        // entries scanned out of the counting pass's total.
-        let used_target = self
+        let files = self.partial_root.file_count;
+        let counts = trf(
+            "SCAN_PROGRESS_COUNTS",
+            &[
+                &trn("COUNT_FILES", files, &[&format_count(files)]),
+                &human_size(self.partial_root.size),
+            ],
+        );
+        let used = self
             .free_space
-            .map(|(total, free)| total.saturating_sub(free));
-        let (raw, label) = match used_target.filter(|&u| u > 0) {
-            Some(u) => (
-                self.partial_root.size as f64 / u as f64,
-                trf(
-                    "SCAN_PROGRESS_ITEMS_SCANNED",
-                    &[&format_count(self.scanned_count)],
-                ),
-            ),
-            None => {
-                use std::sync::atomic::Ordering;
-                let (found, counted) = self.entry_count.as_ref().map_or((0, false), |c| {
-                    (
-                        c.found.load(Ordering::Relaxed),
-                        c.done.load(Ordering::Relaxed),
-                    )
-                });
-                let total = found.max(self.scanned_count).max(1);
-                let label = if counted {
-                    trf(
-                        "SCAN_PROGRESS_OF_TOTAL",
-                        &[&format_count(self.scanned_count), &format_count(total)],
-                    )
-                } else {
-                    trf("SCAN_PROGRESS_ITEMS", &[&format_count(self.scanned_count)])
-                };
-                // Until counting finishes the total is too low: the bar stays at 0
-                // meanwhile (the label shows progress).
-                (
-                    if counted {
-                        self.scanned_count as f64 / total as f64
-                    } else {
-                        0.0
-                    },
-                    label,
-                )
-            }
+            .map(|(total, free)| total.saturating_sub(free))
+            .filter(|&u| u > 0);
+        let Some(used) = used else {
+            let h = ui.spacing().interact_size.y;
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, h),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add(egui::Spinner::new().size(h * 0.8));
+                    ui.label(counts);
+                },
+            );
+            return;
         };
+        let raw = self.partial_root.size as f64 / used as f64;
+        // The bar never moves backwards.
         self.progress_shown = self.progress_shown.max(raw.clamp(0.0, 1.0) as f32);
         let fraction = self.progress_shown;
-
+        let percent = ((fraction * 100.0) as u32).to_string();
+        let label = trf("SCAN_PROGRESS_PERCENT", &[&percent, &counts]);
         let bar_resp = ui.add(egui::ProgressBar::new(fraction).desired_width(width));
         // Centered on the bar. (egui's built-in ProgressBar text sits at the
         // left edge instead.)

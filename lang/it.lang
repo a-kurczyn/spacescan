@@ -88,7 +88,6 @@ SETTINGS_MAX_LOG_LINES=Righe di problemi conservate (max.)
 SETTINGS_SCANNING=Analisi
 SETTINGS_APPARENT_SIZE=Conta la dimensione apparente
 SETTINGS_APPARENT_SIZE_HOVER=Conta la lunghezza di ogni file invece dello spazio su disco che occupa. Disattivato: i file sparsi contano ciò che occupano davvero e i file con collegamenti fisici una volta sola, come du. Attivalo per unità di rete o FUSE che non riportano lo spazio occupato. Ha effetto dalla prossima analisi.
-SETTINGS_PROGRESS_INTERVAL=Intervallo di avanzamento (elementi, sempre una potenza di 2)
 SETTINGS_DEFAULTS=Valori predefiniti
 SETTINGS_LANGUAGE=Lingua
 
@@ -110,9 +109,6 @@ ERR_CANNOT_STAT=Impossibile leggere le informazioni di %s: %s
 ERR_NETWORK_URL='%s://' è un indirizzo di rete, non un percorso montato — montalo prima (ad es. dalla vista Rete del tuo gestore di file), poi digita il percorso locale reale in cui è montato (spesso sotto /run/user/<uid>/gvfs/...).
 ERR_NOT_A_DIRECTORY=Non è una cartella (è un file): %s
 ERR_FOLDER_DIALOG_FAILED=Impossibile aprire la finestra delle cartelle (xdg-desktop-portal è in esecuzione?)
-SCAN_PROGRESS_ITEMS_SCANNED=%s elementi analizzati
-SCAN_PROGRESS_OF_TOTAL=%s elementi su %s
-SCAN_PROGRESS_ITEMS=%s elementi
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=non trovato (nessun file o cartella con questo nome)
@@ -335,3 +331,7 @@ CLASH_MERGE=Unisci le cartelle
 CLASH_CANCEL=Annulla tutto
 TABLE_TAG_CLIP_COPY=%s da copiare
 TABLE_TAG_CLIP_MOVE=%s da spostare
+COUNT_FILES=%s file
+COUNT_FILES_ONE=%s file
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s% · %s

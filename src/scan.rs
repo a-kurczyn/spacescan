@@ -583,9 +583,7 @@ pub(crate) struct ScanCtx<'a> {
     /// not entered. Anything else is scanned, btrfs subvolumes included.
     pub(crate) mounts: &'a HashSet<PathBuf>,
     pub(crate) progress: &'a Sender<ScanMsg>,
-    pub(crate) counter: &'a std::sync::atomic::AtomicU64,
     pub(crate) cancel: &'a Arc<std::sync::atomic::AtomicBool>,
-    pub(crate) progress_interval: u64,
     /// Count file lengths instead of the disk space actually used.
     pub(crate) apparent_size: bool,
     /// (device, inode) of files with several hard links already counted,
@@ -658,11 +656,7 @@ pub(crate) fn scan_entry(
     live_parent: Option<&LiveFolder>,
 ) -> Node {
     let ScanCtx {
-        mounts,
-        progress,
-        counter,
-        progress_interval,
-        ..
+        mounts, progress, ..
     } = *ctx;
     use std::os::unix::fs::MetadataExt;
     // The name once, from the listing; a full path only where needed.
@@ -679,7 +673,7 @@ pub(crate) fn scan_entry(
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let ft = entry.file_type();
-    let node = match ft {
+    match ft {
         Ok(ft) if ft.is_dir() && !ft.is_symlink() => {
             // Other filesystems mounted inside aren't entered (like `du -x`).
             // The folder's details come from the listing (relative to the
@@ -739,12 +733,7 @@ pub(crate) fn scan_entry(
                 btime,
             }
         }
-    };
-    let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if n % progress_interval.max(1) == 0 {
-        let _ = progress.send(ScanMsg::Progress(n));
     }
-    node
 }
 
 /// (extension, size, count) per extension of the files among `nodes`.
@@ -915,7 +904,6 @@ fn scan_dir_in(
 }
 
 pub(crate) enum ScanMsg {
-    Progress(u64),
     /// A folder (at any depth) finished scanning: (extension, size, file
     /// count) of the files directly in it, for the category bar's live
     /// totals (see `ext_key`). Sizes and colors come from the live tree.
@@ -927,46 +915,6 @@ pub(crate) enum ScanMsg {
     LogError(String),
     /// A folder whose contents couldn't be listed (its size is unknown).
     Unreadable(PathBuf),
-}
-
-/// The running result of the counting pass, for the progress bar. Shared
-/// directly rather than sent as a message, so a backlog of scan messages
-/// can't delay it.
-#[derive(Default)]
-pub(crate) struct EntryCount {
-    pub(crate) found: std::sync::atomic::AtomicU64,
-    pub(crate) done: std::sync::atomic::AtomicBool,
-}
-
-/// Counts the entries under `path` that the scan will visit, from folder
-/// listings alone (no per-file stat), so it finishes well ahead of the scan
-/// and gives the progress bar its total.
-pub(crate) fn count_entries(
-    path: &Path,
-    mounts: &HashSet<PathBuf>,
-    found: &std::sync::atomic::AtomicU64,
-    stop: &(dyn Fn() -> bool + Sync),
-) {
-    use std::sync::atomic::Ordering;
-    if stop() {
-        return;
-    }
-    let Ok(rd) = std::fs::read_dir(path) else {
-        return;
-    };
-    let entries: Vec<std::fs::DirEntry> = rd.filter_map(|e| e.ok()).collect();
-    found.fetch_add(entries.len() as u64, Ordering::Relaxed);
-    entries.par_iter().for_each(|e| {
-        let is_dir = e
-            .file_type()
-            .is_ok_and(|ft| ft.is_dir() && !ft.is_symlink());
-        if is_dir {
-            let child = e.path();
-            if !mounts.contains(&child) {
-                deep(|| count_entries(&child, mounts, found, stop));
-            }
-        }
-    });
 }
 
 pub(crate) fn human_size(bytes: u64) -> String {
@@ -1242,15 +1190,12 @@ mod memory {
         let root = PathBuf::from(std::env::var("SPACEMAP_MEM_TREE").unwrap_or_else(|_| "/".into()));
         let (tx, rx) = channel();
         std::thread::spawn(move || for _ in rx {});
-        let counter = std::sync::atomic::AtomicU64::new(0);
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let scan = || {
             let ctx = ScanCtx {
                 mounts: &HashSet::new(),
                 progress: &tx,
-                counter: &counter,
                 cancel: &cancel,
-                progress_interval: 512,
                 apparent_size: false,
                 hard_links: Default::default(),
                 saw_hangul: &Default::default(),
@@ -1323,9 +1268,7 @@ mod hangul_tests {
         let ctx = ScanCtx {
             mounts: &HashSet::new(),
             progress: &tx,
-            counter: &Default::default(),
             cancel: &Default::default(),
-            progress_interval: 512,
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &seen,
@@ -1381,9 +1324,7 @@ mod live_category_tests {
         let ctx = ScanCtx {
             mounts: &HashSet::new(),
             progress: &tx,
-            counter: &Default::default(),
             cancel: &Default::default(),
-            progress_interval: 512,
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
@@ -1463,9 +1404,7 @@ mod scan_perf {
             let ctx = ScanCtx {
                 mounts: &HashSet::new(),
                 progress: &tx,
-                counter: &Default::default(),
                 cancel: &Default::default(),
-                progress_interval: 512,
                 apparent_size: false,
                 hard_links: Default::default(),
                 saw_hangul: &Default::default(),
@@ -1520,9 +1459,7 @@ mod order_tests {
             let ctx = ScanCtx {
                 mounts: &HashSet::new(),
                 progress: &tx,
-                counter: &Default::default(),
                 cancel: &Default::default(),
-                progress_interval: 512,
                 apparent_size: true,
                 hard_links: Default::default(),
                 saw_hangul: &Default::default(),
@@ -1564,9 +1501,7 @@ mod mount_tests {
         let ctx = ScanCtx {
             mounts: &mounts,
             progress: &tx,
-            counter: &Default::default(),
             cancel: &Default::default(),
-            progress_interval: 512,
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
@@ -1628,9 +1563,7 @@ mod scan_dump {
         let ctx = ScanCtx {
             mounts: &mount_points(),
             progress: &tx,
-            counter: &Default::default(),
             cancel: &Default::default(),
-            progress_interval: 512,
             apparent_size: apparent,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
@@ -1768,9 +1701,7 @@ mod path_tests {
         let ctx = ScanCtx {
             mounts,
             progress: &tx,
-            counter: &Default::default(),
             cancel: &cancel,
-            progress_interval: 512,
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
@@ -1942,9 +1873,7 @@ mod path_tests {
         let ctx = ScanCtx {
             mounts: &mounts,
             progress: &tx,
-            counter: &Default::default(),
             cancel: &Default::default(),
-            progress_interval: 512,
             apparent_size: false,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),

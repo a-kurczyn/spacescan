@@ -65,6 +65,8 @@ pub(crate) fn parse_kv_file(text: &str) -> HashMap<String, String> {
 pub(crate) struct Lang {
     pub(crate) code: String,
     pub(crate) map: HashMap<String, String>,
+    /// Keys given by the language itself (not filled in from English).
+    own: HashSet<String>,
 }
 
 impl Lang {
@@ -72,23 +74,41 @@ impl Lang {
     /// then the user's file for it, each overriding the one before.
     pub(crate) fn load(code: &str) -> Lang {
         let mut map = parse_kv_file(built_in("en").unwrap_or_default());
+        let mut own = HashSet::new();
+        let mut add = |lines: HashMap<String, String>| {
+            own.extend(lines.keys().cloned());
+            map.extend(lines);
+        };
         if code != "en"
             && let Some(text) = built_in(code)
         {
-            map.extend(parse_kv_file(text));
+            add(parse_kv_file(text));
         }
         if let Some(text) = read_small_file(&lang_dir().join(format!("{code}.lang"))) {
-            map.extend(parse_kv_file(&text));
+            add(parse_kv_file(&text));
         }
         Lang {
             code: code.to_string(),
             map,
+            own,
         }
     }
 
     /// The string for `key`, or the key itself if there is none.
     pub(crate) fn get<'a>(&'a self, key: &'a str) -> &'a str {
         self.map.get(key).map(|s| s.as_str()).unwrap_or(key)
+    }
+
+    /// Like `t`, for a phrase about `n` things: uses the language's form for
+    /// that number (`KEY_ONE`, `KEY_FEW`) when it has one, else `KEY`.
+    pub(crate) fn tn(&self, key: &str, n: u64, args: &[&str]) -> String {
+        // A form only counts if it comes from the same language as `key`, so
+        // an English "1 file" never shows inside another language.
+        let same_source = |k: &str| self.own.contains(k) == self.own.contains(key);
+        match plural_form(&self.code, n).map(|f| format!("{key}_{f}")) {
+            Some(k) if self.map.contains_key(&k) && same_source(&k) => self.t(&k, args),
+            _ => self.t(key, args),
+        }
     }
 
     /// The string for `key` with each `%s` replaced by the next of `args`.
@@ -125,6 +145,31 @@ pub(crate) fn tr(key: &str) -> String {
 /// The translated string for `key` with its `%s` placeholders filled in.
 pub(crate) fn trf(key: &str, args: &[&str]) -> String {
     LANG.read().unwrap().t(key, args)
+}
+
+/// Like `trf`, for a phrase about `n` things (see `Lang::tn`).
+pub(crate) fn trn(key: &str, n: u64, args: &[&str]) -> String {
+    LANG.read().unwrap().tn(key, n, args)
+}
+
+/// Which special plural form language `code` uses for the number `n`, if
+/// any ("ONE" for 1 in English, "FEW" for 2–4 in Russian...).
+fn plural_form(code: &str, n: u64) -> Option<&'static str> {
+    match code {
+        "ja" | "zh" | "ko" => None,
+        "fr" => (n <= 1).then_some("ONE"),
+        "ru" => {
+            let (last, last2) = (n % 10, n % 100);
+            if last == 1 && last2 != 11 {
+                Some("ONE")
+            } else if (2..=4).contains(&last) && !(12..=14).contains(&last2) {
+                Some("FEW")
+            } else {
+                None
+            }
+        }
+        _ => (n == 1).then_some("ONE"),
+    }
 }
 
 pub(crate) fn current_lang_code() -> String {
@@ -241,8 +286,9 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Every built-in language has a name and exactly English's keys, each
-    /// with as many `%s` placeholders as in English.
+    /// Every built-in language has a name and exactly English's keys (plural
+    /// forms aside: each language has its own), each with as many `%s`
+    /// placeholders as in English.
     #[test]
     fn built_in_languages_match_english() {
         let en = parse_kv_file(built_in("en").unwrap());
@@ -252,20 +298,90 @@ mod tests {
                 "{code}: no '# name:' first line"
             );
             let map = parse_kv_file(text);
-            let missing: Vec<&String> = en.keys().filter(|k| !map.contains_key(*k)).collect();
-            let extra: Vec<&String> = map.keys().filter(|k| !en.contains_key(*k)).collect();
+            let form = |k: &str| k.ends_with("_ONE") || k.ends_with("_FEW");
+            let missing: Vec<&String> = en
+                .keys()
+                .filter(|k| !form(k) && !map.contains_key(*k))
+                .collect();
+            let extra: Vec<&String> = map
+                .keys()
+                .filter(|k| !form(k) && !en.contains_key(*k))
+                .collect();
             assert!(
                 missing.is_empty() && extra.is_empty(),
                 "{code}: missing {missing:?}, extra {extra:?}"
             );
             for (key, value) in &map {
+                let base = key.trim_end_matches("_ONE").trim_end_matches("_FEW");
+                assert!(en.contains_key(base), "{code}: {key} has no base phrase");
                 assert_eq!(
                     value.matches("%s").count(),
-                    en[key].matches("%s").count(),
+                    en[base].matches("%s").count(),
                     "{code}: {key}"
                 );
                 assert!(!value.trim().is_empty(), "{code}: {key} is empty");
             }
         }
+    }
+
+    fn lang(code: &str, own: &[(&str, &str)]) -> Lang {
+        let mut lang = Lang::load("en");
+        lang.code = code.into();
+        for (k, v) in own {
+            lang.map.insert(k.to_string(), v.to_string());
+            lang.own.insert(k.to_string());
+        }
+        lang
+    }
+
+    /// Each language picks the right form at its edges: Russian 1, 2–4, 11–14,
+    /// 21, 111, 0; French 0 and 1; none in Japanese; English 1 vs 0 and 2.
+    #[test]
+    fn plural_forms_at_their_edges() {
+        let ru = lang(
+            "ru",
+            &[("N", "%s many"), ("N_ONE", "%s one"), ("N_FEW", "%s few")],
+        );
+        for (n, form) in [
+            (0, "many"),
+            (1, "one"),
+            (2, "few"),
+            (4, "few"),
+            (5, "many"),
+            (11, "many"),
+            (12, "many"),
+            (14, "many"),
+            (21, "one"),
+            (22, "few"),
+            (111, "many"),
+            (112, "many"),
+            (1001, "one"),
+            (u64::MAX, "many"),
+        ] {
+            assert_eq!(ru.tn("N", n, &[&n.to_string()]), format!("{n} {form}"));
+        }
+        let fr = lang("fr", &[("N", "%s pl"), ("N_ONE", "%s sg")]);
+        assert_eq!(fr.tn("N", 0, &["0"]), "0 sg");
+        assert_eq!(fr.tn("N", 1, &["1"]), "1 sg");
+        assert_eq!(fr.tn("N", 2, &["2"]), "2 pl");
+        let ja = lang("ja", &[("N", "%s x"), ("N_ONE", "%s never")]);
+        assert_eq!(ja.tn("N", 1, &["1"]), "1 x");
+        let en = Lang::load("en");
+        assert_eq!(en.tn("COUNT_FILES", 1, &["1"]), "1 file");
+        assert_eq!(en.tn("COUNT_FILES", 0, &["0"]), "0 files");
+        assert_eq!(en.tn("COUNT_FILES", 2, &["2"]), "2 files");
+    }
+
+    /// A language that translates a phrase but not its "one" form keeps its
+    /// own phrase for 1 (never the English singular); a language missing
+    /// both falls back to English for both.
+    #[test]
+    fn plural_forms_never_mix_languages() {
+        let es = lang("es", &[("COUNT_FILES", "%s archivos")]);
+        assert_eq!(es.tn("COUNT_FILES", 1, &["1"]), "1 archivos");
+        let xx = lang("xx", &[]);
+        assert_eq!(xx.tn("COUNT_FILES", 1, &["1"]), "1 file");
+        assert_eq!(xx.tn("COUNT_FILES", 3, &["3"]), "3 files");
+        assert_eq!(xx.tn("NO_SUCH_KEY", 1, &["1"]), "NO_SUCH_KEY");
     }
 }

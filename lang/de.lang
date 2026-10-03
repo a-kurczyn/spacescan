@@ -88,7 +88,6 @@ SETTINGS_MAX_LOG_LINES=Gespeicherte Problemzeilen (max.)
 SETTINGS_SCANNING=Durchsuchen
 SETTINGS_APPARENT_SIZE=Scheinbare Größe zählen
 SETTINGS_APPARENT_SIZE_HOVER=Zählt die Länge jeder Datei statt des belegten Speicherplatzes. Aus: Sparse-Dateien zählen, was sie wirklich belegen, und Dateien mit harten Links nur einmal, wie du. Für Netzwerk- oder FUSE-Laufwerke einschalten, die keine Belegung melden. Gilt ab dem nächsten Durchsuchen.
-SETTINGS_PROGRESS_INTERVAL=Intervall der Fortschrittsanzeige (Elemente, immer eine Zweierpotenz)
 SETTINGS_DEFAULTS=Standardwerte
 SETTINGS_LANGUAGE=Sprache
 
@@ -110,9 +109,6 @@ ERR_CANNOT_STAT=Informationen zu %s nicht lesbar: %s
 ERR_NETWORK_URL='%s://' ist eine Netzwerkadresse, kein eingehängter Pfad — hängen Sie sie zuerst ein (z. B. über die Netzwerkansicht Ihres Dateimanagers) und geben Sie dann den echten lokalen Pfad ein, unter dem sie eingehängt ist (oft unter /run/user/<uid>/gvfs/...).
 ERR_NOT_A_DIRECTORY=Kein Ordner (es ist eine Datei): %s
 ERR_FOLDER_DIALOG_FAILED=Der Ordnerdialog ließ sich nicht öffnen (läuft xdg-desktop-portal?)
-SCAN_PROGRESS_ITEMS_SCANNED=%s Elemente durchsucht
-SCAN_PROGRESS_OF_TOTAL=%s von %s Elementen
-SCAN_PROGRESS_ITEMS=%s Elemente
 
 # ---- Filesystem I/O errors ----
 ERR_IO_NOT_FOUND=nicht gefunden (keine solche Datei und kein solcher Ordner)
@@ -335,3 +331,7 @@ CLASH_MERGE=Ordner zusammenführen
 CLASH_CANCEL=Alles abbrechen
 TABLE_TAG_CLIP_COPY=%s zum Kopieren
 TABLE_TAG_CLIP_MOVE=%s zum Verschieben
+COUNT_FILES=%s Dateien
+COUNT_FILES_ONE=%s Datei
+SCAN_PROGRESS_COUNTS=%s · %s
+SCAN_PROGRESS_PERCENT=%s % · %s
