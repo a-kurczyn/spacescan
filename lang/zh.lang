@@ -341,3 +341,4 @@ STATUS_NOT_ALL_MOVED=%s 项未完全移动：无法移动的部分仍在原处�
 FILTER_CASE_NAME=区分大小写
 A11Y_PATH_BAR=文件夹路径
 ERR_CLIPBOARD_NO_ANSWER=剪贴板没有响应：未粘贴任何内容
+TABLE_TAG_SO_FAR=目前 %s

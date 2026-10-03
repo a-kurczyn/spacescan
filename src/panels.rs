@@ -2084,6 +2084,10 @@ impl DiskScanApp {
         let percent = ((fraction * 100.0) as u32).to_string();
         let label = trf("SCAN_PROGRESS_PERCENT", &[&percent, &counts]);
         let bar_resp = ui.add(egui::ProgressBar::new(fraction).desired_width(width));
+        // The text is painted over the bar: screen readers get it as its name.
+        ui.ctx().accesskit_node_builder(bar_resp.id, |node| {
+            node.set_label(label.clone());
+        });
         // Centered on the bar. (egui's built-in ProgressBar text sits at the
         // left edge instead.)
         let text_color = ui.visuals().selection.stroke.color;

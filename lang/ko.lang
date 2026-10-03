@@ -341,3 +341,4 @@ STATUS_NOT_ALL_MOVED=%s개 항목을 완전히 이동하지 못함: 이동하지
 FILTER_CASE_NAME=대소문자 구분
 A11Y_PATH_BAR=폴더 경로
 ERR_CLIPBOARD_NO_ANSWER=클립보드가 응답하지 않음: 아무것도 붙여넣지 않음
+TABLE_TAG_SO_FAR=지금까지 %s

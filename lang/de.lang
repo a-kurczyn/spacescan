@@ -354,3 +354,4 @@ STATUS_NOT_ALL_MOVED_ONE=%s Element nicht vollständig verschoben: Was nicht ver
 FILTER_CASE_NAME=Groß-/Kleinschreibung beachten
 A11Y_PATH_BAR=Ordnerpfad
 ERR_CLIPBOARD_NO_ANSWER=Die Zwischenablage hat nicht geantwortet: nichts eingefügt
+TABLE_TAG_SO_FAR=bisher %s

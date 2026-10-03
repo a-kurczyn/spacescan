@@ -355,3 +355,4 @@ STATUS_NOT_ALL_MOVED_ONE=%s item não movido por completo: o que não pôde ser 
 FILTER_CASE_NAME=Diferenciar maiúsculas
 A11Y_PATH_BAR=Caminho da pasta
 ERR_CLIPBOARD_NO_ANSWER=A área de transferência não respondeu: nada foi colado
+TABLE_TAG_SO_FAR=%s até agora

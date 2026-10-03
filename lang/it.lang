@@ -353,3 +353,4 @@ STATUS_NOT_ALL_MOVED_ONE=%s elemento non spostato del tutto: ciò che non è sta
 FILTER_CASE_NAME=Maiuscole/minuscole
 A11Y_PATH_BAR=Percorso della cartella
 ERR_CLIPBOARD_NO_ANSWER=Gli appunti non hanno risposto: non è stato incollato nulla
+TABLE_TAG_SO_FAR=%s finora

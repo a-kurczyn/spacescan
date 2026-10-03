@@ -345,3 +345,4 @@ STATUS_NOT_ALL_MOVED=Перемещено не полностью: %s — то, 
 FILTER_CASE_NAME=Учитывать регистр
 A11Y_PATH_BAR=Путь к папке
 ERR_CLIPBOARD_NO_ANSWER=Буфер обмена не ответил: ничего не вставлено
+TABLE_TAG_SO_FAR=пока %s

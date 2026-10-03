@@ -972,23 +972,29 @@ impl DiskScanApp {
             }
         };
         let mut sources = Vec::new();
+        // Problems with what was picked, listed again after the rescan of
+        // the target folder (which starts a fresh Issues list).
+        let mut issues = Vec::new();
         for p in paths {
             if std::fs::symlink_metadata(&p).is_err() {
-                self.log_issue(trf(
+                issues.push(trf(
                     "ERR_COPY_FAILED",
                     &[&show_path(&p), &tr("ERR_IO_NOT_FOUND")],
                 ));
             } else if p.is_dir() && dest.starts_with(&p) {
-                self.log_issue(trf("ERR_PASTE_INTO_ITSELF", &[&show_path(&p)]));
+                issues.push(trf("ERR_PASTE_INTO_ITSELF", &[&show_path(&p)]));
             } else if mode == ClipMode::Move && p.parent() == Some(dest.as_path()) {
                 // Already there.
             } else if mode == ClipMode::Move
                 && let Err(e) = mount_guard(&p)
             {
-                self.log_issue(e);
+                issues.push(e);
             } else {
                 sources.push(p);
             }
+        }
+        for issue in &issues {
+            self.log_issue(issue.clone());
         }
         if sources.is_empty() {
             return;
@@ -1034,7 +1040,7 @@ impl DiskScanApp {
             answers,
             cancel,
             clash: None,
-            issues: Vec::new(),
+            issues,
         });
     }
 

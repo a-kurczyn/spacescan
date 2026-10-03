@@ -372,3 +372,4 @@ STATUS_NOT_ALL_MOVED_ONE=%s item not fully moved: what couldn't be moved is stil
 FILTER_CASE_NAME=Match case
 A11Y_PATH_BAR=Folder path
 ERR_CLIPBOARD_NO_ANSWER=The clipboard didn't answer: nothing was pasted
+TABLE_TAG_SO_FAR=%s so far

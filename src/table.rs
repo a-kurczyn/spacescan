@@ -691,6 +691,14 @@ impl DiskScanApp {
                     trn("TABLE_TAG_FLAT", n_rows as u64, &[&shown])
                 };
                 ui.label(format!("· {tag}"));
+            } else if self.scanning {
+                // Files show once their folder is read; the count runs ahead.
+                let files = view_node.file_count;
+                let so_far = trn("COUNT_FILES", files, &[&format_count(files)]);
+                ui.label(format!("· {}", trf("TABLE_TAG_SO_FAR", &[&so_far])));
+                if self.table.flat {
+                    ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
+                }
             } else {
                 // The folder's own contents, as listed.
                 let files = (n_rows as u64).saturating_sub(order.folders);

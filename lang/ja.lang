@@ -341,3 +341,4 @@ STATUS_NOT_ALL_MOVED=%s 件は完全には移動できませんでした。移�
 FILTER_CASE_NAME=大文字と小文字を区別
 A11Y_PATH_BAR=フォルダーのパス
 ERR_CLIPBOARD_NO_ANSWER=クリップボードが応答しませんでした。何も貼り付けていません
+TABLE_TAG_SO_FAR=これまでに %s
