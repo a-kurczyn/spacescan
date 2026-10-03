@@ -5,7 +5,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 
 [dependencies]
-arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
+x11rb = "0.13"
 chrono = "0.4.45"
 eframe = "0.36.2"
 egui = "0.36.2"

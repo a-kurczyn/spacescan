@@ -24,6 +24,7 @@ mod table;
 mod theme;
 mod transfer;
 mod widgets;
+mod x11clip;
 use category::*;
 use chart::*;
 use config::Config;

@@ -566,89 +566,119 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
-/// True on a Wayland desktop, where clipboard formats can be chosen freely.
+/// True on a Wayland desktop (else the clipboard is X11's).
 fn on_wayland() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
+    std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty())
 }
 
-/// Puts `paths` on the system clipboard as files (as file managers copy
-/// them, marked as cut after Ctrl+X, the way KDE and GNOME mark it) and as
-/// text. False if that failed.
-fn offer_on_clipboard(paths: &[PathBuf], mode: ClipMode) -> bool {
+/// `paths` in the formats file managers and other programs read: a list of
+/// file links, the same marked as copied or cut the way GNOME and KDE mark
+/// it, and the paths as text.
+fn clipboard_formats(paths: &[PathBuf], mode: ClipMode) -> Vec<(&'static str, Vec<u8>)> {
     let uris: Vec<String> = paths.iter().map(|p| file_uri(p)).collect();
+    let cut = mode == ClipMode::Move;
+    let text = paths
+        .iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\n");
+    vec![
+        ("text/uri-list", (uris.join("\r\n") + "\r\n").into_bytes()),
+        (
+            "x-special/gnome-copied-files",
+            format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n")).into_bytes(),
+        ),
+        (
+            "application/x-kde-cutselection",
+            (if cut { "1" } else { "0" }).into(),
+        ),
+        ("text/plain;charset=utf-8", text.clone().into_bytes()),
+        ("UTF8_STRING", text.into_bytes()),
+    ]
+}
+
+/// Puts `paths` on the system clipboard as files (marked as cut after
+/// Ctrl+X) and as text. False if that failed.
+fn offer_on_clipboard(paths: &[PathBuf], mode: ClipMode) -> bool {
+    let formats = clipboard_formats(paths, mode);
     if !on_wayland() {
-        // Elsewhere, the files only.
-        return arboard::Clipboard::new()
-            .and_then(|mut c| c.set().file_list(paths))
-            .is_ok();
+        return crate::x11clip::offer(formats);
     }
     use wl_clipboard_rs::copy::{MimeSource, MimeType, Options, Source};
-    let cut = mode == ClipMode::Move;
-    let text: Vec<String> = paths
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+    let sources = formats
+        .into_iter()
+        // Wayland names the text formats itself.
+        .filter(|(name, _)| *name != "UTF8_STRING")
+        .map(|(name, data)| MimeSource {
+            source: Source::Bytes(data.into_boxed_slice()),
+            mime_type: if name.starts_with("text/plain") {
+                MimeType::Text
+            } else {
+                MimeType::Specific(name.to_string())
+            },
+        })
         .collect();
-    let offer = |data: String, mime_type: MimeType| MimeSource {
-        source: Source::Bytes(data.into_bytes().into_boxed_slice()),
-        mime_type,
-    };
-    let specific = |m: &str| MimeType::Specific(m.to_string());
-    let sources = vec![
-        offer(uris.join("\r\n") + "\r\n", specific("text/uri-list")),
-        offer(
-            format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n")),
-            specific("x-special/gnome-copied-files"),
-        ),
-        offer(
-            (if cut { "1" } else { "0" }).to_string(),
-            specific("application/x-kde-cutselection"),
-        ),
-        offer(text.join("\n"), MimeType::Text),
-    ];
     Options::new().copy_multi(sources).is_ok()
+}
+
+/// The system clipboard's contents in format `format`, if it has them.
+fn clipboard_read(format: &str) -> Option<Vec<u8>> {
+    if !on_wayland() {
+        return crate::x11clip::read(format);
+    }
+    use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents};
+    let (mut pipe, _) = get_contents(
+        ClipboardType::Regular,
+        Seat::Unspecified,
+        MimeType::Specific(format),
+    )
+    .ok()?;
+    let mut data = Vec::new();
+    std::io::Read::read_to_end(&mut pipe, &mut data).ok()?;
+    Some(data)
 }
 
 /// True if the files on the system clipboard were cut (to be moved), going
 /// by KDE's or GNOME's mark.
 fn clipboard_cut() -> bool {
-    if !on_wayland() {
-        return false;
-    }
-    use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents};
-    let read = |mime: &str| -> Option<String> {
-        let (mut pipe, _) = get_contents(
-            ClipboardType::Regular,
-            Seat::Unspecified,
-            MimeType::Specific(mime),
-        )
-        .ok()?;
-        let mut data = String::new();
-        std::io::Read::read_to_string(&mut pipe, &mut data).ok()?;
-        Some(data)
-    };
-    read("application/x-kde-cutselection").is_some_and(|d| d.trim() == "1")
-        || read("x-special/gnome-copied-files").is_some_and(|d| d.lines().next() == Some("cut"))
+    clipboard_read("application/x-kde-cutselection").is_some_and(|d| d.trim_ascii() == b"1")
+        || clipboard_read("x-special/gnome-copied-files")
+            .is_some_and(|d| d.split(|&b| b == b'\n').next() == Some(b"cut"))
 }
 
 /// The files on the system clipboard as a file list (what file managers
 /// copy), if any.
 fn clipboard_files() -> Option<Vec<PathBuf>> {
-    use std::os::unix::ffi::OsStrExt;
-    let files: Vec<PathBuf> = arboard::Clipboard::new()
-        .ok()?
-        .get()
-        .file_list()
-        .ok()?
-        .into_iter()
-        // File lists end their lines with "\r\n"; a "\r" may be left on.
-        .map(|p| {
-            let bytes = p.as_os_str().as_bytes();
-            PathBuf::from(std::ffi::OsStr::from_bytes(
-                bytes.strip_suffix(b"\r").unwrap_or(bytes),
-            ))
-        })
-        .collect();
+    let files = parse_uri_list(&clipboard_read("text/uri-list")?);
     (!files.is_empty()).then_some(files)
+}
+
+/// The local files in a list of links (one per line, "\r\n" or "\n";
+/// "#" lines are comments), byte for byte: a name that isn't UTF-8 comes
+/// through as it is on disk.
+fn parse_uri_list(data: &[u8]) -> Vec<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    data.split(|&b| b == b'\n')
+        .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+        .filter(|line| !line.is_empty() && !line.starts_with(b"#"))
+        .filter_map(|line| {
+            let rest = line.strip_prefix(b"file:")?;
+            // "file:///p" and "file://localhost/p"; also "file:/p".
+            let path = match rest.strip_prefix(b"//") {
+                Some(host_and_path) => {
+                    let slash = host_and_path.iter().position(|&b| b == b'/')?;
+                    let host = &host_and_path[..slash];
+                    if !host.is_empty() && host != b"localhost" {
+                        return None;
+                    }
+                    &host_and_path[slash..]
+                }
+                None => rest,
+            };
+            path.starts_with(b"/")
+                .then(|| PathBuf::from(std::ffi::OsString::from_vec(percent_decode(path))))
+        })
+        .collect()
 }
 
 /// How to paste files copied in another program: a move if they were cut.
@@ -670,7 +700,9 @@ fn paths_in_text(text: &str) -> Option<Vec<PathBuf>> {
         .map(|l| match l.strip_prefix("file://") {
             Some(rest) => {
                 use std::os::unix::ffi::OsStringExt;
-                PathBuf::from(std::ffi::OsString::from_vec(percent_decode(rest)))
+                PathBuf::from(std::ffi::OsString::from_vec(percent_decode(
+                    rest.as_bytes(),
+                )))
             }
             None => PathBuf::from(l),
         })
@@ -682,9 +714,8 @@ fn paths_in_text(text: &str) -> Option<Vec<PathBuf>> {
     .then_some(paths)
 }
 
-/// `s` with %XX escapes turned back into bytes.
-fn percent_decode(s: &str) -> Vec<u8> {
-    let b = s.as_bytes();
+/// `b` with %XX escapes turned back into bytes.
+fn percent_decode(b: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
@@ -1370,6 +1401,87 @@ mod tests {
         );
         assert!(listing(&target).is_empty());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// File lists as programs write them: either line ending, comments,
+    /// "localhost" or no host, another host (skipped), bytes that aren't
+    /// UTF-8, an escaped newline, a literal "%", web links (skipped), blank
+    /// and broken lines.
+    #[test]
+    fn uri_lists_keep_every_byte() {
+        use std::os::unix::ffi::OsStrExt;
+        let list = b"# a comment\r\n\
+            file:///tmp/plain\r\n\
+            file://localhost/tmp/with%20space\n\
+            file:/tmp/one%2Fslash\n\
+            file:///tmp/bad%FF%FEname\r\n\
+            file:///tmp/line%0Abreak\n\
+            file:///tmp/100%\n\
+            file://otherhost/tmp/remote\n\
+            https://example.com/x\n\
+            \r\n\
+            file://\n\
+            file:///tmp/last";
+        let got: Vec<Vec<u8>> = parse_uri_list(list)
+            .iter()
+            .map(|p| p.as_os_str().as_bytes().to_vec())
+            .collect();
+        let want: Vec<&[u8]> = vec![
+            b"/tmp/plain",
+            b"/tmp/with space",
+            b"/tmp/one/slash",
+            b"/tmp/bad\xff\xfename",
+            b"/tmp/line\nbreak",
+            b"/tmp/100%",
+            b"/tmp/last",
+        ];
+        assert_eq!(got, want);
+        // What spacemap offers reads back as the same paths.
+        let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/a b\n\xff%c\\d"));
+        let formats = clipboard_formats(std::slice::from_ref(&odd), ClipMode::Move);
+        let uris = &formats.iter().find(|f| f.0 == "text/uri-list").unwrap().1;
+        assert!(uris.ends_with(b"\r\n"));
+        assert_eq!(parse_uri_list(uris), vec![odd]);
+        let gnome = &formats
+            .iter()
+            .find(|f| f.0 == "x-special/gnome-copied-files")
+            .unwrap()
+            .1;
+        assert!(gnome.starts_with(b"cut\n"));
+    }
+
+    /// Needs an X11 display (run under Xvfb): files offered on the X11
+    /// clipboard read back exactly in every format.
+    #[test]
+    #[ignore]
+    fn x11_clipboard_round_trip() {
+        use std::os::unix::ffi::OsStrExt;
+        let paths = vec![
+            PathBuf::from("/tmp/x y"),
+            PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/\xff")),
+        ];
+        let formats = clipboard_formats(&paths, ClipMode::Move);
+        assert!(crate::x11clip::offer(formats.clone()));
+        for (name, data) in &formats {
+            assert_eq!(crate::x11clip::read(name).as_ref(), Some(data), "{name}");
+        }
+        assert_eq!(
+            parse_uri_list(&crate::x11clip::read("text/uri-list").unwrap()),
+            paths
+        );
+        assert_eq!(crate::x11clip::read("image/png"), None);
+        // A big list (a few MB) comes through whole.
+        let many: Vec<PathBuf> = (0..60_000)
+            .map(|i| PathBuf::from(format!("/tmp/some/longer/folder/name/file-{i:06}.dat")))
+            .collect();
+        assert!(crate::x11clip::offer(clipboard_formats(
+            &many,
+            ClipMode::Copy
+        )));
+        assert_eq!(
+            parse_uri_list(&crate::x11clip::read("text/uri-list").unwrap()),
+            many
+        );
     }
 
     #[test]

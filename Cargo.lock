@@ -216,7 +216,6 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "windows-sys 0.60.2",
- "wl-clipboard-rs",
  "x11rb",
 ]
 
@@ -3127,7 +3126,6 @@ dependencies = [
 name = "spacemap"
 version = "0.1.0"
 dependencies = [
- "arboard",
  "chrono",
  "eframe",
  "egui",
@@ -3143,6 +3141,7 @@ dependencies = [
  "unicode-normalization",
  "uzers",
  "wl-clipboard-rs",
+ "x11rb",
 ]
 
 [[package]]
