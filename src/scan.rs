@@ -751,10 +751,9 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         .fold(own_size, |t, c| t.saturating_add(c.size));
     let file_count: u64 = children.iter().map(|c| c.file_count).sum();
 
-    let totals = match (ctx.live, &counters) {
-        (Some(live), Some(c)) => Some(live.close(path, c)),
-        _ => None,
-    };
+    if let (Some(live), Some(c)) = (ctx.live, &counters) {
+        live.close(path, c);
+    }
     let _ = progress.send(ScanMsg::SliceDone {
         path: path.to_path_buf(),
         size,
@@ -765,7 +764,6 @@ fn scan_dir_in(path: &Path, parent: &DirHandle, ctx: &ScanCtx) -> Node {
         uid: self_uid,
         gid: self_gid,
         exts: file_summary(&children),
-        totals,
     });
 
     Node {
@@ -800,8 +798,6 @@ pub(crate) enum ScanMsg {
         /// (extension, size, file count) of the files directly in it, for
         /// the category bar's live totals (see `ext_key`).
         exts: Vec<(String, u64, u64)>,
-        /// Its final totals for the live chart, with live counters.
-        totals: Option<Totals>,
     },
     Done(Node, f64),
     Error(String),

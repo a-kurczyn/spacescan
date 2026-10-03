@@ -904,7 +904,6 @@ impl DiskScanApp {
                         uid,
                         gid,
                         exts,
-                        totals,
                     }) => {
                         graft_slice(
                             &mut self.partial_root,
@@ -917,11 +916,6 @@ impl DiskScanApp {
                             uid,
                             gid,
                         );
-                        if let (Some(node), Some(totals)) =
-                            (crate::delete::find_node(&self.partial_root, &path), &totals)
-                        {
-                            self.live_looks.folder_done(node, totals);
-                        }
                         for (ext, size, files) in exts {
                             add_ext(&mut self.live_exts, ext, size, files);
                         }
