@@ -21,3 +21,13 @@ trash = "5.2.6"
 unicode-normalization = "0.1.25"
 uzers = "0.12.2"
 wl-clipboard-rs = "0.9"
+
+# Optimized across the whole program: smaller and faster (slower to build).
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+# Tests and benchmarks built with --release stay quick to build.
+[profile.bench]
+lto = false
+codegen-units = 16

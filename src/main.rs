@@ -13,6 +13,7 @@ use std::time::Instant;
 
 mod category;
 mod chart;
+mod cli;
 mod config;
 mod delete;
 mod filter;
@@ -330,6 +331,8 @@ struct DiskScanApp {
     tree_apparent: bool,
     /// Whether the tree's folders are sorted by files (else by bytes).
     tree_by_files: bool,
+    /// A folder to scan as soon as the app starts (from the command line).
+    start_path: Option<PathBuf>,
     /// The contents and extension sorts switched from size to files when
     /// the measure became files (switched back with it).
     sorts_switched: [bool; 2],
@@ -411,6 +414,7 @@ impl Default for DiskScanApp {
             scan_apparent: false,
             tree_apparent: false,
             tree_by_files: false,
+            start_path: None,
             sorts_switched: [false; 2],
             status: String::new(),
             free_space: None,
@@ -1031,6 +1035,9 @@ impl eframe::App for DiskScanApp {
         self.follow_measure();
         self.typing = ctx.text_edit_focused();
         self.note_paste_key(&ctx);
+        if let Some(path) = self.start_path.take() {
+            self.start_scan(path);
+        }
         let scan_backlog = self.poll_scan();
         // The live chart and table: the live tree, read every 100 ms as deep
         // as the chart currently shows.
@@ -1283,6 +1290,12 @@ pub(crate) fn raise_open_file_limit() {
 
 fn main() -> eframe::Result<()> {
     raise_open_file_limit();
+    // A command runs and exits; otherwise the app starts.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let start_path = match cli::run(&args) {
+        cli::Run::App(path) => path,
+        cli::Run::Exit(code) => std::process::exit(code),
+    };
     quiet_accessibility_panic();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
@@ -1294,7 +1307,10 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
             install_fallback_fonts(&cc.egui_ctx, false);
-            Ok(Box::new(DiskScanApp::default()))
+            Ok(Box::new(DiskScanApp {
+                start_path,
+                ..DiskScanApp::default()
+            }))
         }),
     )
 }
