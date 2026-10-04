@@ -93,6 +93,8 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-71 | S3 | After an in-place delete (or move) the chart differs from a fresh scan of the same data: a folder's slice colour and its child slices aren't redone | VERIFIED | | | **QA ✔ (319b5ba) after D, T, cut+paste, copy+paste, D under a category, D under a filter, a delete that makes two folders equal, one that drops a folder below its sibling (category picked) and grow/shrink + r: every folder, the bar, the extensions and the chart pixels equal a fresh scan. Exception: SM-73.** |
 | SM-72 | S4 | Rows of exactly equal size: order after a delete differs from a rescan / fresh scan (and fresh scans order ties by disk order, not by name) | VERIFIED | | | **QA ✔ equal sizes listed by name (byte order) in fresh scans, after a delete and after r ("eqA, eqB"; "alpha, mid, zeta").** |
 | SM-73 | S4 | After deleting/trashing many files from a folder, the folder's own size isn't updated until a rescan (filesystem freed its directory blocks) | VERIFIED | 18fe611 | After a delete, trash or move, each folder that lost entries takes its own size from the disk again (counted the way the scan counted it: disk space, or lengths with apparent sizes on), and the folders above change by the same amount, so the row and chart equal a fresh scan or r. |  **QA ✔ (18fe611) mass trash under a filter on XFS, several folders losing entries in one action (flat-list marks), a folder emptied completely, a folder deleted with its parent in one selection — disk and apparent size: live = fresh scan, chart pixels too.** |
+| SM-74 | S4 | Command line: rows of equal size or equal date are in a different order than in the app | OPEN | | | |
+| SM-75 | S4 | Command line: with stdout closed, list and flat exit 0 with no message (output silently lost) | OPEN | | | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -499,6 +501,16 @@ Expected:
 - Scenario (XFS, like this machine's /var/tmp): a folder with 60 small .log files and 3 × 50 KB .dat files; filter "*.log", mark all 60, T (trash).
 - Actual: the folder row shows 160 KiB; a fresh scan (or r) shows 156 KiB. When that many entries go, the filesystem shrinks the folder's own allocation (4 KiB → 0), and the in-place update keeps the old value. The chart differs from a fresh scan by a sliver (~400 px). All file numbers are right.
 - Expected: after a delete/trash/move, the changed folders' own sizes are re-read so the tree equals a fresh scan (as SM-71's fix intends).
+
+### SM-74 · S4 · Command line: tie order differs from the app
+- Scenario: a folder with files beta, Alpha, _u (8 KiB each), gamma, 10, 9 (4 KiB each), delta (64 KiB); some with equal modification times. Compare `spacemap list DIR --sort size|modified|changed [--reverse]` with the app's Contents table sorted the same way.
+- Actual: size sort — app: delta, Alpha, _u, beta, 10, 9, gamma (ties in byte order of the name); CLI: delta, _u, Alpha, beta, 9, 10, gamma (ties in natural, case-insensitive order). Modified/changed sorts — app breaks ties by size, then name; CLI by name only (e.g. modified: app …Alpha, _u, delta, beta, 9 vs CLI …_u, Alpha, 9, beta, delta). Name sort and --reverse otherwise agree.
+- Expected: the same order as the app for every key and direction (as the brief promises).
+
+### SM-75 · S4 · Command line: closed stdout gives exit 0 and no message
+- Scenario: `spacemap flat DIR >&-` (or `list`), outside any wrapper.
+- Actual: exit 0, nothing on stderr — the report is lost silently. (`| head -1` correctly exits 0 quietly; a full disk correctly gives exit 1 "No space left on device".)
+- Expected: exit 1 with "spacemap: …" as for other write failures (the brief lists a closed stdout among those).
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.
