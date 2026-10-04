@@ -331,30 +331,48 @@ impl Counters {
     }
 }
 
-/// A folder's path as a number, for quick lookups. Two paths giving the
-/// same number is vanishingly unlikely, and would only mix two slices'
-/// live colors.
-pub(crate) fn path_key(path: &Path) -> u64 {
+/// A folder's key in the live looks: its whole path, so no two folders
+/// ever share one.
+pub(crate) fn path_key(path: &Path) -> &[u8] {
     use std::os::unix::ffi::OsStrExt;
-    bytes_key(path.as_os_str().as_bytes())
+    path.as_os_str().as_bytes()
 }
 
-fn bytes_key(bytes: &[u8]) -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    let mut h = FxBuild::default().build_hasher();
-    h.write(bytes);
-    h.finish()
-}
-
-/// `path_key` of `node`'s path, without allocating it.
-pub(crate) fn node_key(node: &Node) -> u64 {
+/// Calls `f` with the `path_key` of `node`'s path, without allocating it.
+pub(crate) fn with_node_key<R>(node: &Node, f: impl FnOnce(&[u8]) -> R) -> R {
     thread_local! {
         static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
     }
     BUF.with_borrow_mut(|buf| {
         node.write_path(buf);
-        bytes_key(buf)
+        f(buf)
     })
+}
+
+/// `path_key` of `node`'s path, as an owned copy.
+#[cfg(test)]
+pub(crate) fn node_key(node: &Node) -> Vec<u8> {
+    with_node_key(node, <[u8]>::to_vec)
+}
+
+/// Live looks by folder: `path_key` to `V`.
+type ByPath<V> = FxHashMap<Box<[u8]>, V>;
+
+/// Sets `key`'s value, copying the key only when it's new.
+fn put<V>(map: &mut ByPath<V>, key: &[u8], value: V) {
+    match map.get_mut(key) {
+        Some(v) => *v = value,
+        None => {
+            map.insert(key.into(), value);
+        }
+    }
+}
+
+/// Sets `key`'s value unless it has one.
+fn put_first<V>(map: &mut ByPath<V>, key: &[u8], value: V) {
+    if !map.contains_key(key) {
+        map.insert(key.into(), value);
+    }
 }
 
 /// A finished folder's exact values.
@@ -736,8 +754,9 @@ impl Grouped {
         let path = parent.join("\u{1}grouped");
         let look = group_look(self.looks.iter().copied(), cats);
         let key = path_key(&path);
-        looks.since.entry(key).or_insert(now);
-        looks.summaries.insert(
+        put_first(&mut looks.since, key, now);
+        put(
+            &mut looks.summaries,
             key,
             // Worked out for the measure in use at each read.
             Summary {
@@ -792,9 +811,9 @@ impl Read {
 /// `LiveTree::snapshot`. Folders are known by `path_key`.
 #[derive(Default)]
 pub(crate) struct LiveLooks {
-    summaries: FxHashMap<u64, Summary>,
+    summaries: ByPath<Summary>,
     /// When each folder first had files classified under it.
-    since: FxHashMap<u64, Instant>,
+    since: ByPath<Instant>,
     /// The scanned folder's totals so far, for the category order.
     root: Option<Totals>,
     /// The scanned folder's size at the last read.
@@ -814,9 +833,9 @@ impl LiveLooks {
     ) -> Node {
         let key = path_key(&f.path);
         if summary.any {
-            self.since.entry(key).or_insert(now);
+            put_first(&mut self.since, key, now);
         }
-        self.summaries.insert(key, summary);
+        put(&mut self.summaries, key, summary);
         let mut node = empty_node();
         node.name = file_name_of(&f.path).into();
         node.size = size;
@@ -836,10 +855,11 @@ impl LiveLooks {
     /// The look of folder `node` from what's classified under it so far
     /// (final once it finished), and since when it has one.
     pub(crate) fn get(&self, node: &Node) -> Option<(Look, Instant)> {
-        let key = node_key(node);
-        let since = *self.since.get(&key)?;
-        let summary = self.summaries.get(&key)?;
-        Some((summary.look(node.size, node.file_count), since))
+        with_node_key(node, |key| {
+            let since = *self.since.get(key)?;
+            let summary = self.summaries.get(key)?;
+            Some((summary.look(node.size, node.file_count), since))
+        })
     }
 
     /// Categories under the scanned folder so far, most bytes first.
@@ -867,7 +887,7 @@ impl LiveLooks {
         if self.since.is_empty() {
             return None;
         }
-        self.since.get(&node_key(node)).copied()
+        with_node_key(node, |key| self.since.get(key).copied())
     }
 }
 
@@ -1319,7 +1339,7 @@ mod live_stress {
         assert_eq!(key(live), key(fin), "{}", fin.path().display());
         let want = expected(fin, cats).summary();
         assert_eq!(
-            looks.summaries.get(&path_key(&fin.path())),
+            looks.summaries.get(path_key(&fin.path())),
             Some(&want),
             "{}",
             fin.path().display()
@@ -1445,6 +1465,41 @@ mod live_stress {
             assert_eq!(scan_and_check(&dir, made_in, &pool), 1 + 1 + 41 + 301 + 4);
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Many folders whose paths differ only in a short ending (as in
+    /// node_modules) each keep their own live look and color time.
+    #[test]
+    fn similar_paths_keep_their_own_looks() {
+        let mut looks = LiveLooks::default();
+        let start = Instant::now();
+        let nodes: Vec<Node> = (0..20_000)
+            .map(|i| {
+                test_node(
+                    &format!("/home/u/proj/node_modules/pkg{i}"),
+                    1,
+                    true,
+                    vec![],
+                )
+            })
+            .collect();
+        for (i, n) in nodes.iter().enumerate() {
+            let at = start + std::time::Duration::from_millis(i as u64);
+            put_first(&mut looks.since, path_key(&n.path()), at);
+            let summary = Summary {
+                cat: Category(0),
+                cat_by_files: Category(0),
+                newest: i as i64,
+                oldest: i as i64,
+                any: true,
+            };
+            put(&mut looks.summaries, path_key(&n.path()), summary);
+        }
+        for (i, n) in nodes.iter().enumerate() {
+            let (look, since) = looks.get(n).unwrap();
+            assert_eq!(look.newest, i as i64, "{}", n.path().display());
+            assert_eq!(since, start + std::time::Duration::from_millis(i as u64));
+        }
     }
 
     /// Thousands of folders right below the scanned one.
@@ -1592,7 +1647,7 @@ mod live_stress {
         let snap = live.snapshot(3, 0.0, &mut looks).unwrap();
         assert_eq!(looks.root.as_ref(), Some(&want));
         assert_eq!(snap.size, u64::MAX, "sizes cap, never wrap");
-        let s = looks.summaries[&path_key(Path::new("/r"))];
+        let s = looks.summaries[path_key(Path::new("/r"))];
         assert_eq!((s.newest, s.oldest), (0, -86_400));
         assert_eq!(cats.label(s.cat), "Video");
     }
