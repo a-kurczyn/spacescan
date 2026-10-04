@@ -1732,7 +1732,13 @@ impl DiskScanApp {
             .as_ref()
             .is_none_or(|(generation, _)| *generation != self.tree_gen)
         {
-            self.looks = Some((self.tree_gen, Looks::build(root, &self.cats)));
+            // The files' stored categories hold if the tree was scanned with
+            // the categories in use now.
+            let stored = self
+                .tree_cats
+                .as_ref()
+                .is_some_and(|c| Arc::ptr_eq(c, &self.cats));
+            self.looks = Some((self.tree_gen, Looks::build(root, &self.cats, stored)));
         }
         let now = now_secs();
         if self.color_fade() < 1.0 {

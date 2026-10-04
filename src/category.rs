@@ -307,7 +307,7 @@ pub(crate) fn ext_key(name: &str) -> String {
 }
 
 /// Extension → (total size, file count).
-pub(crate) type ExtTotals = HashMap<String, (u64, u64)>;
+pub(crate) type ExtTotals = FxHashMap<String, (u64, u64)>;
 
 /// Adds `size` and `files` to extension `ext`'s totals.
 pub(crate) fn add_ext(totals: &mut ExtTotals, ext: String, size: u64, files: u64) {
@@ -319,17 +319,55 @@ pub(crate) fn add_ext(totals: &mut ExtTotals, ext: String, size: u64, files: u64
 /// How the files under `node` split into categories, largest first;
 /// categories with no files are left out.
 pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<CategoryRow> {
-    fn walk(n: &Node, acc: &mut ExtTotals) {
-        if n.is_dir {
-            for c in &n.children {
-                deep(|| walk(c, acc));
+    /// Subtrees with fewer files than this are added up on one thread.
+    const SPLIT: u64 = 2_000;
+    fn walk(n: &Node, acc: &mut ExtTotals, buf: &mut [u8; 16]) {
+        if !n.is_dir {
+            // A new string only for an extension not seen yet.
+            let ext = ext_key_in(&n.name, buf);
+            let (size, files) = (n.size, n.file_count.max(1));
+            match acc.get_mut(ext.as_ref()) {
+                Some(e) => {
+                    e.0 = e.0.saturating_add(size);
+                    e.1 += files;
+                }
+                None => {
+                    acc.insert(ext.into_owned(), (size, files));
+                }
             }
-        } else {
-            add_ext(acc, ext_key(&n.name), n.size, n.file_count.max(1));
+            return;
+        }
+        // Big subfolders at the same time, each into its own totals.
+        let big: Vec<&Node> = n
+            .children
+            .iter()
+            .filter(|c| c.is_dir && c.file_count >= SPLIT)
+            .collect();
+        if !big.is_empty() {
+            let parts: Vec<ExtTotals> = big
+                .par_iter()
+                .map(|c| {
+                    let mut part = ExtTotals::default();
+                    deep(|| walk(c, &mut part, &mut [0; 16]));
+                    part
+                })
+                .collect();
+            for part in parts {
+                for (ext, (size, files)) in part {
+                    add_ext(acc, ext, size, files);
+                }
+            }
+        }
+        for c in n
+            .children
+            .iter()
+            .filter(|c| !c.is_dir || c.file_count < SPLIT)
+        {
+            deep(|| walk(c, acc, buf));
         }
     }
-    let mut acc = ExtTotals::new();
-    walk(node, &mut acc);
+    let mut acc = ExtTotals::default();
+    walk(node, &mut acc, &mut [0; 16]);
     category_rows(&acc, model)
 }
 
@@ -558,5 +596,70 @@ mod tests {
         assert_eq!((only.size, only.file_count), (105, 2));
         let names: Vec<&str> = only.children.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, vec!["a.mkv", "d"]);
+    }
+
+    /// The breakdown equals a plain one-thread count by `ext_key`, on names
+    /// that test the extension rules (no dot, a leading dot, a trailing
+    /// dot, several dots, upper case, non-ASCII, longer than 16 bytes) and
+    /// on subfolders big enough to be added up in parallel.
+    #[test]
+    fn breakdown_matches_a_plain_count() {
+        let names = [
+            "noext",
+            ".hidden",
+            "trail.",
+            "a.b.c.TXT",
+            "x.MKV",
+            "y.mkv",
+            "z.Jpeg",
+            "ñ.ÑOÑO",
+            "émoji.😀",
+            "long.abcdefghijklmnopqrstuvwxyz",
+            "Upper.ABCDEFGHIJKLMNOPQ",
+            "a.tar.gz",
+            "..",
+            "plain.pdf",
+        ];
+        let big = |dir: &str, n: usize| {
+            let children: Vec<Node> = (0..n)
+                .map(|i| {
+                    let name = names[i % names.len()];
+                    test_node(&format!("{dir}/{i}{name}"), (i % 977) as u64, false, vec![])
+                })
+                .collect();
+            let mut d = test_node(dir, 0, true, children);
+            d.size = d.children.iter().map(|c| c.size).sum();
+            d.file_count = n as u64;
+            d
+        };
+        let mut root = test_node(
+            "/r",
+            0,
+            true,
+            vec![
+                big("/r/one", 25_000),
+                big("/r/two", 30_000),
+                big("/r/small", 300),
+            ],
+        );
+        root.file_count = 55_300;
+        let model = CategoryModel::defaults();
+        let mut plain: HashMap<String, (u64, u64)> = HashMap::new();
+        fn count(n: &Node, acc: &mut HashMap<String, (u64, u64)>) {
+            if n.is_dir {
+                n.children.iter().for_each(|c| count(c, acc));
+            } else {
+                let e = acc.entry(ext_key(&n.name)).or_insert((0, 0));
+                e.0 += n.size;
+                e.1 += n.file_count.max(1);
+            }
+        }
+        count(&root, &mut plain);
+        let want = category_rows(&plain.into_iter().collect(), &model);
+        assert_eq!(category_breakdown(&root, &model), want);
+        let mut small: HashMap<String, (u64, u64)> = HashMap::new();
+        count(&root.children[2], &mut small);
+        let want_small = category_rows(&small.into_iter().collect(), &model);
+        assert_eq!(category_breakdown(&root.children[2], &model), want_small);
     }
 }

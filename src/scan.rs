@@ -26,6 +26,9 @@ pub(crate) struct Node {
     pub(crate) size: u64,
     pub(crate) file_count: u64,
     pub(crate) is_dir: bool,
+    /// A file's category (its index in the category model the scan used),
+    /// or `NO_CAT`; see `Looks::build`.
+    pub(crate) cat: u8,
     pub(crate) children: Vec<Node>,
     pub(crate) mode: u32,
     pub(crate) mtime: i64,
@@ -47,6 +50,7 @@ impl Clone for Node {
             size: self.size,
             file_count: self.file_count,
             is_dir: self.is_dir,
+            cat: self.cat,
             children: self.children.clone(),
             mode: self.mode,
             mtime: self.mtime,
@@ -320,6 +324,17 @@ pub(crate) fn format_owner(
     format!("{user}:{group}")
 }
 
+/// No category stored for this node (a folder, or not classified).
+pub(crate) const NO_CAT: u8 = u8::MAX;
+
+/// `c` as stored in `Node::cat` (`NO_CAT` for an index too big to store).
+pub(crate) fn cat_byte(c: Category) -> u8 {
+    u8::try_from(c.0)
+        .ok()
+        .filter(|&b| b != NO_CAT)
+        .unwrap_or(NO_CAT)
+}
+
 pub(crate) fn empty_node() -> Node {
     Node {
         name: String::new(),
@@ -328,6 +343,7 @@ pub(crate) fn empty_node() -> Node {
         size: 0,
         file_count: 0,
         is_dir: true,
+        cat: NO_CAT,
         children: Vec::new(),
         mode: 0,
         mtime: NO_TIME,
@@ -403,6 +419,7 @@ pub(crate) fn flat_copy(n: &Node) -> Node {
         size: c.size,
         file_count: c.file_count,
         is_dir: c.is_dir,
+        cat: c.cat,
         children,
         mode: c.mode,
         mtime: c.mtime,
@@ -802,6 +819,7 @@ pub(crate) fn scan_entry(
                     size: 0,
                     file_count: 0,
                     is_dir: true,
+                    cat: NO_CAT,
                     children: Vec::new(),
                     mode: meta.as_ref().map(|m| m.mode()).unwrap_or(0),
                     mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(NO_TIME),
@@ -847,6 +865,7 @@ pub(crate) fn scan_entry(
                 size: sz,
                 file_count: 1,
                 is_dir: false,
+                cat: NO_CAT,
                 children: Vec::new(),
                 mode,
                 mtime,
@@ -1049,6 +1068,7 @@ fn scan_dir_in(
                 size: 0,
                 file_count: 0,
                 is_dir: true,
+                cat: NO_CAT,
                 children: Vec::new(),
                 mode: 0,
                 mtime: NO_TIME,
@@ -1114,9 +1134,15 @@ fn scan_dir_in(
                 live: folder.as_ref().map(|o| &*o.folder),
                 links: &links_here,
             };
-            let node = scan_entry(entry, &here, &this, ctx);
-            if let (Some(live), Some(f)) = (ctx.live, &folder) {
-                live.count(f, &node);
+            let mut node = scan_entry(entry, &here, &this, ctx);
+            if let Some(live) = ctx.live {
+                // Each file is classified once, here.
+                if !node.is_dir {
+                    node.cat = cat_byte(live.cats().of_name(&node.name));
+                }
+                if let Some(f) = &folder {
+                    live.count(f, &node);
+                }
             }
             node
         })
@@ -1153,6 +1179,7 @@ fn scan_dir_in(
             size,
             file_count,
             is_dir: true,
+            cat: NO_CAT,
             children,
             mode: self_mode,
             mtime: self_mtime,
@@ -1596,7 +1623,7 @@ mod live_category_tests {
         };
         let tree = scan_dir(&dir, &ctx);
         drop(tx);
-        let mut live = ExtTotals::new();
+        let mut live = ExtTotals::default();
         for msg in rx {
             if let ScanMsg::SliceDone { exts, .. } = msg {
                 for (ext, size, files) in exts {
@@ -1619,6 +1646,54 @@ mod live_category_tests {
 #[cfg(test)]
 mod scan_perf {
     use super::*;
+
+    /// Timing of the work done once a scan ends, on the folder in
+    /// $SPACEMAP_BENCH: slice looks, the category breakdown, a filtered
+    /// copy (run with `cargo test --release after_scan -- --ignored
+    /// --nocapture`).
+    #[test]
+    #[ignore]
+    fn after_scan_bench() {
+        let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").expect("set SPACEMAP_BENCH"));
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let cats = Arc::new(CategoryModel::defaults());
+        // As in the app: files get their category during the scan.
+        let live = LiveTree::new(cats.clone());
+        let ctx = ScanCtx {
+            mounts: &HashSet::new(),
+            progress: &tx,
+            cancel: &Default::default(),
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: Some(&live),
+        };
+        let tree = scan_dir(&dir, &ctx);
+        for run in 0..3 {
+            let t = Instant::now();
+            let looks = Looks::build(&tree, &cats, false);
+            let t_looks = t.elapsed();
+            let t = Instant::now();
+            let stored = Looks::build(&tree, &cats, true);
+            let t_stored = t.elapsed();
+            let t = Instant::now();
+            let rows = category_breakdown(&tree, &cats);
+            let t_cat = t.elapsed();
+            let t = Instant::now();
+            let filtered = crate::filter::filter_tree_by(&tree, &|n: &Node| n.size > 4096);
+            let t_filter = t.elapsed();
+            let t = Instant::now();
+            let copy = tree.clone();
+            let t_clone = t.elapsed();
+            eprintln!(
+                "run {run}: {} files; looks {t_looks:?} (stored categories {t_stored:?}), categories {t_cat:?}, filter {t_filter:?}, clone {t_clone:?}",
+                tree.file_count
+            );
+            std::hint::black_box((looks, stored, rows, filtered, copy));
+        }
+    }
 
     /// Scan timing on the folder in $SPACEMAP_BENCH (run with
     /// `SPACEMAP_BENCH=<dir> cargo test --release scan_perf -- --ignored --nocapture`).
@@ -1651,7 +1726,7 @@ mod scan_perf {
                 .then(|| pool.install(|| LiveTree::new(Arc::new(CategoryModel::defaults()))));
             let (tx, rx) = channel();
             let drain = std::thread::spawn(move || {
-                let mut exts = ExtTotals::new();
+                let mut exts = ExtTotals::default();
                 let mut n = 0;
                 for msg in rx {
                     n += 1;

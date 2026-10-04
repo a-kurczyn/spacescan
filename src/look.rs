@@ -23,7 +23,7 @@ pub(crate) struct Look {
 /// The look of every folder in a tree, keyed by the folder node's address
 /// (valid until the tree is rebuilt).
 pub(crate) struct Looks {
-    folders: HashMap<usize, Look>,
+    folders: FxHashMap<usize, Look>,
 }
 
 /// Running totals for one folder: bytes and files per category, and the
@@ -92,24 +92,60 @@ impl Totals {
 }
 
 impl Looks {
-    /// Works out the look of every folder under `root`, in one pass.
-    pub(crate) fn build(root: &Node, cats: &CategoryModel) -> Looks {
-        fn walk(n: &Node, cats: &CategoryModel, out: &mut HashMap<usize, Look>) -> Totals {
+    /// Works out the look of every folder under `root`, in one pass over the
+    /// tree (big subtrees in parallel). `stored`: the files' `cat` bytes
+    /// come from `cats` and can be used instead of classifying each name.
+    pub(crate) fn build(root: &Node, cats: &CategoryModel, stored: bool) -> Looks {
+        /// Subtrees with fewer files than this are walked on one thread.
+        const SPLIT: u64 = 2_000;
+        fn walk(
+            n: &Node,
+            cats: &CategoryModel,
+            stored: bool,
+            out: &mut Vec<(usize, Look)>,
+        ) -> Totals {
             let mut totals = Totals::new(cats.other().0 + 1);
+            let big: Vec<&Node> = n
+                .children
+                .iter()
+                .filter(|c| c.is_dir && c.file_count >= SPLIT)
+                .collect();
+            // Big subfolders at the same time, each into its own list.
+            let parts: Vec<(Totals, Vec<(usize, Look)>)> = big
+                .par_iter()
+                .map(|c| {
+                    let mut part = Vec::new();
+                    let t = deep(|| walk(c, cats, stored, &mut part));
+                    (t, part)
+                })
+                .collect();
+            for (t, part) in parts {
+                totals.add(&t);
+                out.extend(part);
+            }
             for c in &n.children {
                 if c.is_dir {
-                    let sub = deep(|| walk(c, cats, out));
-                    totals.add(&sub);
+                    if c.file_count < SPLIT {
+                        let sub = deep(|| walk(c, cats, stored, out));
+                        totals.add(&sub);
+                    }
                 } else {
-                    totals.add_file(cats.of_name(&c.name), c.size, c.ctime);
+                    let cat = match c.cat {
+                        NO_CAT => cats.of_name(&c.name),
+                        _ if !stored => cats.of_name(&c.name),
+                        b => Category(usize::from(b)),
+                    };
+                    totals.add_file(cat, c.size, c.ctime);
                 }
             }
-            out.insert(n as *const Node as usize, totals.look(n.size));
+            out.push((n as *const Node as usize, totals.look(n.size)));
             totals
         }
-        let mut folders = HashMap::new();
-        walk(root, cats, &mut folders);
-        Looks { folders }
+        let mut looks = Vec::new();
+        walk(root, cats, stored, &mut looks);
+        Looks {
+            folders: looks.into_iter().collect(),
+        }
     }
 
     /// The look of node `n`: a file's own, or its folder's.
@@ -350,6 +386,11 @@ pub(crate) struct LiveTree {
 }
 
 impl LiveTree {
+    /// The category model files are classified with.
+    pub(crate) fn cats(&self) -> &CategoryModel {
+        &self.cats
+    }
+
     /// A tree for a scan run on the current rayon pool.
     pub(crate) fn new(cats: Arc<CategoryModel>) -> Self {
         LiveTree {
@@ -397,7 +438,10 @@ impl LiveTree {
             return;
         }
         let n = self.cats.other().0 + 1;
-        let cat = self.cats.of_name(&node.name).0;
+        let cat = match node.cat {
+            NO_CAT => self.cats.of_name(&node.name).0,
+            stored => usize::from(stored),
+        };
         let i = self.thread_index();
         let s = open.counters.shard(i);
         // Only the shared shard (threads outside the pool) has several
@@ -825,6 +869,74 @@ pub(crate) fn now_secs() -> i64 {
 mod tests {
     use super::*;
 
+    /// Looks built from the files' stored categories equal those built by
+    /// classifying every name, on subfolders big enough to be walked in
+    /// parallel; categories marked as not valid are never used, even when
+    /// every stored byte is wrong.
+    #[test]
+    fn stored_categories_give_the_same_looks() {
+        let cats = CategoryModel::defaults();
+        let names = [
+            "a.mkv", "b.JPG", "c.pdf", "d", ".e", "f.tar.gz", "g.ÑOÑO", "h.mp3",
+        ];
+        let folder = |dir: &str, n: usize, wrong: bool| {
+            let children: Vec<Node> = (0..n)
+                .map(|i| {
+                    let mut f = test_node(
+                        &format!("{dir}/{i}{}", names[i % names.len()]),
+                        i as u64,
+                        false,
+                        vec![],
+                    );
+                    f.ctime = 1_600_000_000 + (i as i64 % 5000) * 3600;
+                    let right = cat_byte(cats.of_name(&f.name));
+                    f.cat = if wrong { (right + 1) % 3 } else { right };
+                    f
+                })
+                .collect();
+            let mut d = test_node(dir, 0, true, children);
+            d.size = d.children.iter().map(|c| c.size).sum();
+            d.file_count = n as u64;
+            d
+        };
+        for wrong in [false, true] {
+            let mut root = test_node(
+                "/r",
+                0,
+                true,
+                vec![
+                    folder("/r/a", 24_000, wrong),
+                    folder("/r/b", 21_000, wrong),
+                    folder("/r/c", 50, wrong),
+                ],
+            );
+            root.size = root.children.iter().map(|c| c.size).sum();
+            root.file_count = 45_050;
+            // The reference: the same tree with nothing stored at all.
+            let mut clean = root.clone();
+            let mut stack = vec![&mut clean];
+            while let Some(n) = stack.pop() {
+                n.cat = NO_CAT;
+                stack.extend(n.children.iter_mut());
+            }
+            let classified = Looks::build(&clean, &cats, false);
+            let built = Looks::build(&root, &cats, !wrong);
+            let (mut a, mut b) = (vec![&root], vec![&clean]);
+            while let (Some(n), Some(m)) = (a.pop(), b.pop()) {
+                if n.is_dir {
+                    assert_eq!(
+                        built.of(n, &cats),
+                        classified.of(m, &cats),
+                        "{}",
+                        n.path().display()
+                    );
+                    a.extend(n.children.iter());
+                    b.extend(m.children.iter());
+                }
+            }
+        }
+    }
+
     const DAY: i64 = 24 * 3600;
 
     #[test]
@@ -861,7 +973,7 @@ mod tests {
         docs.push(video);
         let folder = test_node("/r/d", 10000, true, docs);
         let root = test_node("/r", 10000, true, vec![folder]);
-        let looks = Looks::build(&root, &cats);
+        let looks = Looks::build(&root, &cats, false);
         let look = looks.of(&root.children[0], &cats);
         // 9000 bytes of video beat 1000 bytes of documents.
         assert_eq!(cats.label(look.cat), "Video");
@@ -1233,7 +1345,7 @@ mod perf {
         let root = test_node("/r", 0, true, folders);
         for _ in 0..3 {
             let t = Instant::now();
-            let looks = Looks::build(&root, &cats);
+            let looks = Looks::build(&root, &cats, false);
             eprintln!("{:?} for {} folders", t.elapsed(), looks.folders.len());
         }
     }

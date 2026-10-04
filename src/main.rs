@@ -314,6 +314,10 @@ struct DiskScanApp {
     link_owners: FxHashMap<(u64, u64), PathBuf>,
     /// The next scan only renews a folder of the scanned tree.
     rescanning_part: bool,
+    /// The categories the running scan classifies files with, and those
+    /// the scanned tree's files were classified with (None: mixed).
+    scan_cats: Option<Arc<CategoryModel>>,
+    tree_cats: Option<Arc<CategoryModel>>,
     status: String,
     /// (capacity, free bytes) of the drive when the scanned folder is a mount
     /// point, for the chart's free-space slice.
@@ -387,6 +391,8 @@ impl Default for DiskScanApp {
             graft: None,
             link_owners: Default::default(),
             rescanning_part: false,
+            scan_cats: None,
+            tree_cats: None,
             status: String::new(),
             free_space: None,
             log: Vec::new(),
@@ -406,7 +412,7 @@ impl Default for DiskScanApp {
             live_read_at: None,
             pick: None,
             pick_pending: None,
-            live_exts: ExtTotals::new(),
+            live_exts: ExtTotals::default(),
             cat_base: None,
             cat_breakdown: Vec::new(),
             cat_breakdown_for: None,
@@ -540,6 +546,7 @@ impl DiskScanApp {
         self.scan_rx = Some(rx);
         // Every folder and file counts in the live tree as it's read.
         let live = Arc::new(LiveTree::new(self.cats.clone()));
+        self.scan_cats = Some(self.cats.clone());
         self.live_tree = Some(live.clone());
         self.live_read_at = None;
         std::thread::spawn(move || {
@@ -882,12 +889,25 @@ impl DiskScanApp {
                     Ok(ScanMsg::Done(node, secs, counted_at)) => {
                         self.live_tree = None;
                         self.colored_at = Some(Instant::now());
+                        let scan_cats = self.scan_cats.take();
                         match &self.graft {
                             Some(g) => {
                                 let target = g.target.clone();
                                 self.link_owners.retain(|_, at| !at.starts_with(&target));
+                                // A folder classified with other categories than
+                                // the rest leaves the tree mixed.
+                                let same = match (&self.tree_cats, &scan_cats) {
+                                    (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                                    _ => false,
+                                };
+                                if !same {
+                                    self.tree_cats = None;
+                                }
                             }
-                            None => self.link_owners.clear(),
+                            None => {
+                                self.link_owners.clear();
+                                self.tree_cats = scan_cats;
+                            }
                         }
                         self.link_owners.extend(counted_at);
                         if self.graft.is_some() {

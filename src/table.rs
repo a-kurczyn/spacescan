@@ -343,13 +343,9 @@ fn flat_files(
         by.then((a.folder, a.child).cmp(&(b.folder, b.child)))
     };
     let mut files = w.files;
-    if files.len() > limit {
-        files.select_nth_unstable_by(limit, cmp);
-        files.truncate(limit);
-    }
     let files: Vec<(u32, u32)> = if sort.column == SortColumn::Name {
-        // Name keys are built once per file, then sorted (much faster on
-        // long lists than building them at every comparison).
+        // Name keys are built once per file, then used to pick and sort
+        // (much faster on long lists than building them at every comparison).
         let mut keyed: Vec<(Vec<u8>, &str, u32, u32)> = files
             .par_iter()
             .map(|f| {
@@ -361,13 +357,22 @@ fn flat_files(
                 )
             })
             .collect();
-        keyed.par_sort_unstable_by(|a, b| {
+        let by_key = |a: &(Vec<u8>, &str, u32, u32), b: &(Vec<u8>, &str, u32, u32)| {
             let by = a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1));
             let by = if sort.ascending { by } else { by.reverse() };
             by.then((a.2, a.3).cmp(&(b.2, b.3)))
-        });
+        };
+        if keyed.len() > limit {
+            keyed.select_nth_unstable_by(limit, by_key);
+            keyed.truncate(limit);
+        }
+        keyed.par_sort_unstable_by(by_key);
         keyed.into_iter().map(|k| (k.2, k.3)).collect()
     } else {
+        if files.len() > limit {
+            files.select_nth_unstable_by(limit, cmp);
+            files.truncate(limit);
+        }
         files.par_sort_unstable_by(cmp);
         files.iter().map(|f| (f.folder, f.child)).collect()
     };
@@ -1800,7 +1805,9 @@ impl DiskScanApp {
         let Some(g) = self.graft.take() else {
             return false;
         };
+        // Nothing else holds the tree, so it's changed in place, not copied.
         self.root = None;
+        self.cat_base = None;
         let Some(mut full) = self.full_root.take() else {
             return false;
         };
@@ -1957,6 +1964,59 @@ mod flat_tests {
         column: SortColumn::Size,
         ascending: false,
     };
+
+    /// A row limit gives exactly the first rows of the full sorted list,
+    /// for every column and both directions, with many equal names, sizes
+    /// and times (ties settle by where the files were found), names that
+    /// differ only in case or digits, and a limit of 1 and of all but one.
+    #[test]
+    fn limited_lists_are_the_start_of_the_full_list() {
+        let names = [
+            "a", "A", "a1", "a01", "a10", "a2", "b", "B", "é", "Z", "z10", "z9",
+        ];
+        let folders: Vec<Node> = (0..7)
+            .map(|d| {
+                let files = (0..300)
+                    .map(|i| {
+                        let mut f = file(
+                            &format!("/w/d{d}/{}", names[i % names.len()]),
+                            (i % 4) as u64,
+                        );
+                        f.mtime = (i % 3) as i64;
+                        f.ctime = (i % 5) as i64;
+                        f.mode = 0o600 + (i % 2) as u32;
+                        f
+                    })
+                    .collect();
+                test_node(&format!("/w/d{d}"), 0, true, files)
+            })
+            .collect();
+        let v = test_node("/w", 0, true, folders);
+        let none = HashSet::new();
+        let columns = [
+            SortColumn::Size,
+            SortColumn::Files,
+            SortColumn::Modified,
+            SortColumn::Changed,
+            SortColumn::Perms,
+            SortColumn::Name,
+        ];
+        for column in columns {
+            for ascending in [true, false] {
+                let sort = SortState { column, ascending };
+                let (all, total, ..) = flat_files(&v, sort, true, &none, usize::MAX);
+                assert_eq!(total, 2100);
+                for limit in [1, 7, 500, 2099] {
+                    let (some, ..) = flat_files(&v, sort, true, &none, limit);
+                    assert_eq!(
+                        some.files,
+                        all.files[..limit],
+                        "{column:?} {ascending} {limit}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn lists_files_from_all_subfolders_in_sort_order() {
@@ -2185,6 +2245,82 @@ mod flat_tests {
 #[cfg(test)]
 mod cursor_tests {
     use super::*;
+
+    /// A small scanned-looking tree: /t with folders a (2 files) and b
+    /// (1 file).
+    fn small_tree() -> Node {
+        let mut a = test_node(
+            "/t/a",
+            0,
+            true,
+            vec![
+                test_node("/t/a/x.mkv", 1000, false, vec![]),
+                test_node("/t/a/y.txt", 10, false, vec![]),
+            ],
+        );
+        a.size = 1010;
+        a.file_count = 2;
+        let mut b = test_node(
+            "/t/b",
+            0,
+            true,
+            vec![test_node("/t/b/z.pdf", 500, false, vec![])],
+        );
+        b.size = 500;
+        b.file_count = 1;
+        let mut t = test_node("/t", 0, true, vec![a, b]);
+        t.size = 1510;
+        t.file_count = 3;
+        t
+    }
+
+    /// Deleting and splicing in a rescanned folder change the tree in place
+    /// (never a copy of all of it), with no filter and with a category
+    /// picked, and the totals come out right.
+    #[test]
+    fn tree_changes_happen_in_place() {
+        for picked in [false, true] {
+            let mut app = DiskScanApp {
+                full_root: Some(Arc::new(small_tree())),
+                ..DiskScanApp::default()
+            };
+            if picked {
+                app.pick = Some(Pick::Category(app.cats.of_name("x.mkv")));
+            }
+            app.rebuild_view_tree();
+            let before = Arc::as_ptr(app.full_root.as_ref().unwrap());
+            app.drop_from_tree(&[PathBuf::from("/t/a/y.txt")]);
+            let full = app.full_root.as_ref().unwrap();
+            assert_eq!(
+                Arc::as_ptr(full),
+                before,
+                "picked {picked}: copied on delete"
+            );
+            assert_eq!((full.size, full.file_count), (1500, 2));
+            app.graft = Some(Graft {
+                target: PathBuf::from("/t/b"),
+                view_paths: vec![PathBuf::from("/t")],
+                cursor: None,
+                free_space: None,
+            });
+            let mut b = test_node(
+                "/t/b",
+                0,
+                true,
+                vec![test_node("/t/b/w.pdf", 70, false, vec![])],
+            );
+            b.size = 70;
+            b.file_count = 1;
+            assert!(app.finish_graft(b));
+            let full = app.full_root.as_ref().unwrap();
+            assert_eq!(
+                Arc::as_ptr(full),
+                before,
+                "picked {picked}: copied on rescan"
+            );
+            assert_eq!((full.size, full.file_count), (1070, 2));
+        }
+    }
 
     /// Rows not laid out yet report endless or undefined positions; none of
     /// them may become scroll geometry, while real ones do, even far down a

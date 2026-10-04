@@ -568,6 +568,9 @@ impl DiskScanApp {
         let Some(root) = self.root.take() else { return };
         let view_paths = self.view_paths(&root);
         drop(root);
+        // The last other hold on the tree, so it's changed in place, not
+        // copied first (rebuild_view_tree sets it again).
+        self.cat_base = None;
         if let Some(full) = &mut self.full_root {
             let full = Arc::make_mut(full);
             for p in gone {
