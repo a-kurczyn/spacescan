@@ -480,6 +480,8 @@ impl DiskScanApp {
             self.cats = Arc::new(model);
             self.pick = None;
             self.cat_breakdown_for = None;
+            // Colors worked out with the old categories are redone.
+            self.tree_gen += 1;
         }
         if let Some(p) = problem {
             self.log_issue(p);

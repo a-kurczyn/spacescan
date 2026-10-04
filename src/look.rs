@@ -130,10 +130,10 @@ impl Looks {
                         totals.add(&sub);
                     }
                 } else {
-                    let cat = match c.cat {
-                        NO_CAT => cats.of_name(&c.name),
-                        _ if !stored => cats.of_name(&c.name),
-                        b => Category(usize::from(b)),
+                    // A stored category only if it can be one of `cats`.
+                    let cat = match usize::from(c.cat) {
+                        b if stored && b <= cats.other().0 => Category(b),
+                        _ => cats.of_name(&c.name),
                     };
                     totals.add_file(cat, c.size, c.ctime);
                 }
@@ -438,9 +438,9 @@ impl LiveTree {
             return;
         }
         let n = self.cats.other().0 + 1;
-        let cat = match node.cat {
-            NO_CAT => self.cats.of_name(&node.name).0,
-            stored => usize::from(stored),
+        let cat = match usize::from(node.cat) {
+            stored if stored < n => stored,
+            _ => self.cats.of_name(&node.name).0,
         };
         let i = self.thread_index();
         let s = open.counters.shard(i);
@@ -869,6 +869,66 @@ pub(crate) fn now_secs() -> i64 {
 mod tests {
     use super::*;
 
+    /// A category is stored as its index, or as `NO_CAT` when the index
+    /// doesn't fit in a byte or is `NO_CAT` itself.
+    #[test]
+    fn categories_fit_in_a_byte_or_are_not_stored() {
+        assert_eq!(cat_byte(Category(0)), 0);
+        assert_eq!(cat_byte(Category(254)), 254);
+        assert_eq!(cat_byte(Category(255)), NO_CAT);
+        assert_eq!(cat_byte(Category(256)), NO_CAT);
+        assert_eq!(cat_byte(Category(usize::MAX)), NO_CAT);
+    }
+
+    /// A scan with the live tree stores every file's category, the same as
+    /// classifying its name, and none for folders.
+    #[test]
+    fn scans_store_each_files_category() {
+        let dir = std::env::temp_dir().join(format!("spacemap-cats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for name in [
+            "a.mkv",
+            "b.JPG",
+            "c",
+            ".d",
+            "e.tar.gz",
+            "f.ÑOÑO",
+            "sub/g.pdf",
+            "sub/h.mp3",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let cats = Arc::new(CategoryModel::defaults());
+        let live = LiveTree::new(cats.clone());
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let ctx = ScanCtx {
+            mounts: &HashSet::new(),
+            progress: &tx,
+            cancel: &Default::default(),
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: Some(&live),
+        };
+        let root = scan_dir(&dir, &ctx);
+        let mut stack = vec![&root];
+        let mut files = 0;
+        while let Some(n) = stack.pop() {
+            if n.is_dir {
+                assert_eq!(n.cat, NO_CAT);
+                stack.extend(n.children.iter());
+            } else {
+                assert_eq!(n.cat, cat_byte(cats.of_name(&n.name)), "{}", n.name);
+                files += 1;
+            }
+        }
+        assert_eq!(files, 8);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Looks built from the files' stored categories equal those built by
     /// classifying every name, on subfolders big enough to be walked in
     /// parallel; categories marked as not valid are never used, even when
@@ -879,7 +939,15 @@ mod tests {
         let names = [
             "a.mkv", "b.JPG", "c.pdf", "d", ".e", "f.tar.gz", "g.ÑOÑO", "h.mp3",
         ];
-        let folder = |dir: &str, n: usize, wrong: bool| {
+        // How the stored bytes are: right, all wrong, or right mixed with
+        // unclassified files and bytes no category has.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Bytes {
+            Right,
+            Wrong,
+            Mixed,
+        }
+        let folder = |dir: &str, n: usize, bytes: Bytes| {
             let children: Vec<Node> = (0..n)
                 .map(|i| {
                     let mut f = test_node(
@@ -890,7 +958,12 @@ mod tests {
                     );
                     f.ctime = 1_600_000_000 + (i as i64 % 5000) * 3600;
                     let right = cat_byte(cats.of_name(&f.name));
-                    f.cat = if wrong { (right + 1) % 3 } else { right };
+                    f.cat = match (bytes, i % 3) {
+                        (Bytes::Wrong, _) => (right + 1) % 3,
+                        (Bytes::Mixed, 1) => NO_CAT,
+                        (Bytes::Mixed, 2) => 200,
+                        _ => right,
+                    };
                     f
                 })
                 .collect();
@@ -899,15 +972,15 @@ mod tests {
             d.file_count = n as u64;
             d
         };
-        for wrong in [false, true] {
+        for bytes in [Bytes::Right, Bytes::Wrong, Bytes::Mixed] {
             let mut root = test_node(
                 "/r",
                 0,
                 true,
                 vec![
-                    folder("/r/a", 24_000, wrong),
-                    folder("/r/b", 21_000, wrong),
-                    folder("/r/c", 50, wrong),
+                    folder("/r/a", 24_000, bytes),
+                    folder("/r/b", 21_000, bytes),
+                    folder("/r/c", 50, bytes),
                 ],
             );
             root.size = root.children.iter().map(|c| c.size).sum();
@@ -920,7 +993,7 @@ mod tests {
                 stack.extend(n.children.iter_mut());
             }
             let classified = Looks::build(&clean, &cats, false);
-            let built = Looks::build(&root, &cats, !wrong);
+            let built = Looks::build(&root, &cats, bytes != Bytes::Wrong);
             let (mut a, mut b) = (vec![&root], vec![&clean]);
             while let (Some(n), Some(m)) = (a.pop(), b.pop()) {
                 if n.is_dir {
