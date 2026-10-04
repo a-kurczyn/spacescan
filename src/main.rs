@@ -330,6 +330,9 @@ struct DiskScanApp {
     tree_apparent: bool,
     /// Whether the tree's folders are sorted by files (else by bytes).
     tree_by_files: bool,
+    /// The contents and extension sorts switched from size to files when
+    /// the measure became files (switched back with it).
+    sorts_switched: [bool; 2],
     status: String,
     /// (capacity, free bytes) of the drive when the scanned folder is a mount
     /// point, for the chart's free-space slice.
@@ -408,6 +411,7 @@ impl Default for DiskScanApp {
             scan_apparent: false,
             tree_apparent: false,
             tree_by_files: false,
+            sorts_switched: [false; 2],
             status: String::new(),
             free_space: None,
             log: Vec::new(),
@@ -609,19 +613,27 @@ impl DiskScanApp {
         let files = self.settings.measure_files;
         if files != scan::measure_files() {
             scan::set_measure_files(files);
-            let by = if files {
-                SortColumn::Files
-            } else {
-                SortColumn::Size
-            };
-            for sort in [&mut self.contents_sort, &mut self.ext_sort] {
-                if matches!(sort.column, SortColumn::Size | SortColumn::Files) {
-                    sort.column = by;
+            // A sort by size follows to files and back; one chosen by files
+            // stays.
+            let sorts = [&mut self.contents_sort, &mut self.ext_sort];
+            for (sort, switched) in sorts.into_iter().zip(&mut self.sorts_switched) {
+                if files && sort.column == SortColumn::Size {
+                    sort.column = SortColumn::Files;
+                    *switched = true;
+                } else if !files && *switched && sort.column == SortColumn::Files {
+                    sort.column = SortColumn::Size;
+                }
+                if !files {
+                    *switched = false;
                 }
             }
             self.tree_gen += 1;
+            // The live chart's last total was in the other measure.
+            self.live_looks.reset_total();
         }
-        if self.tree_by_files == files || self.scanning {
+        // A full scan replaces the tree (sorted when it ends); a folder
+        // rescan keeps the tree shown meanwhile, so that's sorted now.
+        if self.tree_by_files == files || (self.scanning && self.graft.is_none()) {
             return;
         }
         // Sorted in place: nothing else may hold the tree meanwhile.
@@ -941,7 +953,7 @@ impl DiskScanApp {
                             add_ext(&mut self.live_exts, ext, size, files);
                         }
                     }
-                    Ok(ScanMsg::Done(node, secs, counted_at)) => {
+                    Ok(ScanMsg::Done(mut node, secs, counted_at)) => {
                         self.live_tree = None;
                         self.colored_at = Some(Instant::now());
                         let scan_cats = self.scan_cats.take();
@@ -963,8 +975,12 @@ impl DiskScanApp {
                                 self.link_owners.clear();
                                 self.tree_cats = scan_cats;
                                 self.tree_apparent = self.scan_apparent;
-                                // Scans sort by bytes.
-                                self.tree_by_files = false;
+                                // Scans sort by bytes; shown sorted by files
+                                // at once when that's the measure.
+                                self.tree_by_files = self.settings.measure_files;
+                                if self.tree_by_files {
+                                    scan::sort_tree_by_measure(&mut node, true);
+                                }
                             }
                         }
                         self.link_owners.extend(counted_at);

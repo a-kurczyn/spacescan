@@ -80,11 +80,11 @@ impl Totals {
     }
 
     /// The category with the most bytes (most files if all are empty), or
-    /// with the most files when measuring files; for something of `size`
-    /// bytes and `files` files.
-    fn look(&self, size: u64, files: u64) -> Look {
+    /// with the most files `by_files`; for something of `size` bytes and
+    /// `files` files.
+    fn look(&self, size: u64, files: u64, by_files: bool) -> Look {
         let most = |v: &[u64]| (0..v.len()).max_by_key(|&i| (v[i], std::cmp::Reverse(i)));
-        let cat = if measure_files() {
+        let cat = if by_files {
             most(&self.files).filter(|&i| self.files[i] > 0)
         } else {
             most(&self.bytes).filter(|&i| self.bytes[i] > 0)
@@ -105,12 +105,14 @@ impl Looks {
     /// tree (big subtrees in parallel). `stored`: the files' `cat` bytes
     /// come from `cats` and can be used instead of classifying each name.
     pub(crate) fn build(root: &Node, cats: &CategoryModel, stored: bool) -> Looks {
+        // Read once: the walk runs on several threads.
+        let by_files = measure_files();
         /// Subtrees with fewer files than this are walked on one thread.
         const SPLIT: u64 = 2_000;
         fn walk(
             n: &Node,
             cats: &CategoryModel,
-            stored: bool,
+            (stored, by_files): (bool, bool),
             out: &mut Vec<(usize, Look)>,
         ) -> Totals {
             let mut totals = Totals::new(cats.other().0 + 1);
@@ -124,7 +126,7 @@ impl Looks {
                 .par_iter()
                 .map(|c| {
                     let mut part = Vec::new();
-                    let t = deep(|| walk(c, cats, stored, &mut part));
+                    let t = deep(|| walk(c, cats, (stored, by_files), &mut part));
                     (t, part)
                 })
                 .collect();
@@ -135,7 +137,7 @@ impl Looks {
             for c in &n.children {
                 if c.is_dir {
                     if c.file_count < SPLIT {
-                        let sub = deep(|| walk(c, cats, stored, out));
+                        let sub = deep(|| walk(c, cats, (stored, by_files), out));
                         totals.add(&sub);
                     }
                 } else {
@@ -147,11 +149,14 @@ impl Looks {
                     totals.add_file(cat, c.size, c.ctime);
                 }
             }
-            out.push((n as *const Node as usize, totals.look(n.size, n.file_count)));
+            out.push((
+                n as *const Node as usize,
+                totals.look(n.size, n.file_count, by_files),
+            ));
             totals
         }
         let mut looks = Vec::new();
-        walk(root, cats, stored, &mut looks);
+        walk(root, cats, (stored, by_files), &mut looks);
         Looks {
             folders: looks.into_iter().collect(),
         }
@@ -166,7 +171,7 @@ impl Looks {
         }
         let mut totals = Totals::new(cats.other().0 + 1);
         totals.add_file(cats.of_name(&n.name), n.size, n.ctime);
-        totals.look(n.size, n.file_count)
+        totals.look(n.size, n.file_count, measure_files())
     }
 
     /// The look of several nodes together (an "other" slice): the category
@@ -194,7 +199,7 @@ pub(crate) fn group_look(looks: impl Iterator<Item = Look>, cats: &CategoryModel
         size = size.saturating_add(look.size);
         files = files.saturating_add(look.files);
     }
-    totals.look(size, files)
+    totals.look(size, files, measure_files())
 }
 
 /// One scan thread's share of a folder's counters, in one block: bytes
@@ -256,7 +261,10 @@ pub(crate) struct Counters {
 /// Changed time, and whether any file was counted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Summary {
+    /// The category with the most bytes, and the one with the most files
+    /// (the measure in use picks when it's shown).
     cat: Category,
+    cat_by_files: Category,
     newest: i64,
     oldest: i64,
     any: bool,
@@ -265,7 +273,11 @@ pub(crate) struct Summary {
 impl Summary {
     fn look(&self, size: u64, files: u64) -> Look {
         Look {
-            cat: self.cat,
+            cat: if measure_files() {
+                self.cat_by_files
+            } else {
+                self.cat
+            },
             newest: self.newest,
             oldest: self.oldest,
             size,
@@ -276,9 +288,10 @@ impl Summary {
 
 impl Totals {
     fn summary(&self) -> Summary {
-        let look = self.look(0, 0);
+        let look = self.look(0, 0, false);
         Summary {
             cat: look.cat,
+            cat_by_files: self.look(0, 0, true).cat,
             newest: look.newest,
             oldest: look.oldest,
             any: self.files.iter().any(|&f| f > 0),
@@ -665,10 +678,12 @@ impl LiveTree {
             };
             let mut n = looks.node(f, size, file_count, summary, finished, now);
             if below.is_some() {
-                if let Some(other) = grouped.node(&f.path, looks, &self.cats, now) {
-                    kids.push(other);
-                }
                 sort_by_measure(&mut kids, measure_files());
+                // "Other" goes after everything at least as big.
+                if let Some(other) = grouped.node(&f.path, looks, &self.cats, now) {
+                    let at = kids.partition_point(|k| weight(k) >= weight(&other));
+                    kids.insert(at, other);
+                }
                 n.children = kids.into();
             }
             n
@@ -724,8 +739,10 @@ impl Grouped {
         looks.since.entry(key).or_insert(now);
         looks.summaries.insert(
             key,
+            // Worked out for the measure in use at each read.
             Summary {
                 cat: look.cat,
+                cat_by_files: look.cat,
                 newest: look.newest,
                 oldest: look.oldest,
                 any: true,
@@ -835,6 +852,12 @@ impl LiveLooks {
         cats.into_iter().map(Category).collect()
     }
 
+    /// Forgets the scanned folder's last total (the measure changed), so
+    /// the next read works it out again.
+    pub(crate) fn reset_total(&mut self) {
+        self.last_total = 0;
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.since.is_empty()
     }
@@ -913,6 +936,53 @@ pub(crate) fn now_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Measuring files on a tree big enough to be walked (and filtered) on
+    /// several threads: every folder takes the category with the most files
+    /// and the filtered copy is sorted by files, as on one thread.
+    #[test]
+    fn measuring_files_holds_on_every_thread() {
+        let cats = CategoryModel::defaults();
+        let folder = |dir: &str, videos: usize, texts: usize| {
+            let mut kids: Vec<Node> = (0..videos)
+                .map(|i| test_node(&format!("{dir}/v{i}.mkv"), 1 << 20, false, vec![]))
+                .collect();
+            kids.extend(
+                (0..texts).map(|i| test_node(&format!("{dir}/t{i}.txt"), 10, false, vec![])),
+            );
+            let mut d = test_node(dir, 0, true, kids);
+            d.size = d.children.iter().map(|c| c.size).sum();
+            d.file_count = (videos + texts) as u64;
+            d
+        };
+        let mut root = test_node(
+            "/r",
+            0,
+            true,
+            vec![
+                folder("/r/a", 100, 2500),
+                folder("/r/b", 2600, 10),
+                folder("/r/c", 5, 40),
+            ],
+        );
+        root.size = root.children.iter().map(|c| c.size).sum();
+        root.file_count = root.children.iter().map(|c| c.file_count).sum();
+        set_measure_files(true);
+        let looks = Looks::build(&root, &cats, false);
+        let filtered =
+            crate::filter::filter_tree_by(&root, &|n: &Node| !n.name.starts_with("t1")).unwrap();
+        set_measure_files(false);
+        let (video, text) = (cats.of_name("x.mkv"), cats.of_name("x.txt"));
+        set_measure_files(true);
+        let cat = |n: &Node| looks.of(n, &cats).cat;
+        let got = (cat(&root.children[0]), cat(&root.children[1]), cat(&root));
+        set_measure_files(false);
+        // "a": 2,500 texts beat 100 big videos; overall 2,705 videos win.
+        assert_eq!(got, (text, video, video));
+        let counts: Vec<u64> = filtered.children.iter().map(|c| c.file_count).collect();
+        assert!(counts.is_sorted_by(|a, b| a >= b), "{counts:?}");
+        assert_eq!(&*filtered.children[0].name, "b");
+    }
 
     /// During a scan, the live chart orders folders by the measure in use:
     /// measuring files, a folder with many small files leads one with one

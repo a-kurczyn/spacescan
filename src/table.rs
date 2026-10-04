@@ -2368,6 +2368,69 @@ mod cursor_tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A scan that ends while measuring files is shown sorted by files at
+    /// once; switching the measure during a folder rescan sorts the tree
+    /// shown meanwhile, and the rescanned folder joins in the same order,
+    /// equal to a fresh scan sorted by files.
+    #[test]
+    fn measure_holds_across_scan_ends_and_rescans() {
+        let dir = std::env::temp_dir().join(format!("spacemap-measure2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["heavy", "crowd", "sub/a", "sub/b"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        std::fs::write(dir.join("heavy/one"), vec![1u8; 900_000]).unwrap();
+        std::fs::write(dir.join("sub/a/one"), vec![1u8; 500_000]).unwrap();
+        for i in 0..30 {
+            std::fs::write(dir.join(format!("crowd/f{i}")), b"x").unwrap();
+            std::fs::write(dir.join(format!("sub/b/f{i}")), b"x").unwrap();
+        }
+        let sorted = |p: &Path| {
+            let mut t = scan(p);
+            sort_tree_by_measure(&mut t, true);
+            let mut out = Vec::new();
+            shape(&t, &mut out);
+            out
+        };
+        let mut app = DiskScanApp::default();
+        app.settings.measure_files = true;
+        app.follow_measure();
+        // The scan ends: its message arrives.
+        let (tx, rx) = channel();
+        app.scan_rx = Some(rx);
+        app.scanning = true;
+        tx.send(ScanMsg::Done(scan(&dir), 0.0, Vec::new())).unwrap();
+        app.poll_scan();
+        let mut got = Vec::new();
+        shape(app.full_root.as_ref().unwrap(), &mut got);
+        assert_eq!(
+            got,
+            sorted(&dir),
+            "shown sorted by files when the scan ends"
+        );
+        // Back to bytes, then files again while "sub" is rescanned.
+        app.settings.measure_files = false;
+        app.follow_measure();
+        app.graft = Some(Graft {
+            target: dir.join("sub"),
+            view_paths: vec![dir.clone()],
+            cursor: None,
+            free_space: None,
+        });
+        app.scanning = true;
+        app.settings.measure_files = true;
+        app.follow_measure();
+        let mut during = Vec::new();
+        shape(app.full_root.as_ref().unwrap(), &mut during);
+        assert_eq!(during, sorted(&dir), "sorted by files during the rescan");
+        std::fs::write(dir.join("sub/a/two"), b"y").unwrap();
+        assert!(app.finish_graft(scan(&dir.join("sub"))));
+        let mut after = Vec::new();
+        shape(app.full_root.as_ref().unwrap(), &mut after);
+        assert_eq!(after, sorted(&dir), "after the rescan");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// A folder's own size is read from the disk again when entries leave
     /// it (filesystems can free a folder's own blocks), in both ways of
     /// counting sizes, with several deletes from the same folder at once:

@@ -165,31 +165,6 @@ fn hidden_warning(ui: &mut egui::Ui, key: &str, (files, size): (u64, u64)) {
     );
 }
 
-/// Removes the node at `target` from the tree, subtracting its size and
-/// file count from every folder above it. Returns what was removed, or
-/// None if `target` isn't in the tree.
-fn remove_from_tree(node: &mut Node, target: &Path) -> Option<(u64, u64)> {
-    let node_path = node.path();
-    let parts = rel_parts(&node_path, target)?;
-    remove_at(node, &parts)
-}
-
-fn remove_at(node: &mut Node, parts: &[&std::ffi::OsStr]) -> Option<(u64, u64)> {
-    let (first, rest) = parts.split_first()?;
-    let i = child_named(node, first)?;
-    let removed = if rest.is_empty() {
-        let mut kids = std::mem::take(&mut node.children).into_vec();
-        let c = kids.remove(i);
-        node.children = kids.into_boxed_slice();
-        (c.size, c.file_count)
-    } else {
-        deep(|| remove_at(&mut node.children[i], rest))?
-    };
-    node.size = node.size.saturating_sub(removed.0);
-    node.file_count = node.file_count.saturating_sub(removed.1);
-    Some(removed)
-}
-
 /// Each of `folders` (in the tree under `root`) takes its own size from the
 /// disk again, counted as the scan counted it (`apparent`: lengths, else
 /// disk space), and the folders above change by as much.
@@ -220,6 +195,52 @@ pub(crate) fn refresh_own_sizes(root: &mut Node, folders: &[&Path], apparent: bo
         let now = if apparent { m.len() } else { m.blocks() * 512 };
         if let Some(parts) = rel_parts(&root_path, dir) {
             adjust(root, &parts, now);
+        }
+    }
+}
+
+/// Removes every one of `gone` found in the tree under `root`, a folder's
+/// entries in one pass (removing thousands from one folder stays quick),
+/// and subtracts their sizes and file counts from the folders above.
+pub(crate) fn remove_all_from_tree(root: &mut Node, gone: &[PathBuf]) {
+    fn remove_in(
+        node: &mut Node,
+        parts: &[&std::ffi::OsStr],
+        names: &HashSet<&std::ffi::OsStr>,
+    ) -> (u64, u64) {
+        let removed = match parts.split_first() {
+            None => {
+                let mut kids = std::mem::take(&mut node.children).into_vec();
+                let mut removed = (0u64, 0u64);
+                kids.retain(|c| {
+                    let go = names.contains(c.disk_name());
+                    if go {
+                        removed = (removed.0.saturating_add(c.size), removed.1 + c.file_count);
+                    }
+                    !go
+                });
+                node.children = kids.into_boxed_slice();
+                removed
+            }
+            Some((first, rest)) => match child_named(node, first) {
+                Some(i) => deep(|| remove_in(&mut node.children[i], rest, names)),
+                None => return (0, 0),
+            },
+        };
+        node.size = node.size.saturating_sub(removed.0);
+        node.file_count = node.file_count.saturating_sub(removed.1);
+        removed
+    }
+    let mut by_folder: HashMap<&Path, HashSet<&std::ffi::OsStr>> = HashMap::new();
+    for p in gone {
+        if let (Some(dir), Some(name)) = (p.parent(), p.file_name()) {
+            by_folder.entry(dir).or_default().insert(name);
+        }
+    }
+    let root_path = root.path();
+    for (dir, names) in by_folder {
+        if let Some(parts) = rel_parts(&root_path, dir) {
+            remove_in(root, &parts, &names);
         }
     }
 }
@@ -609,9 +630,7 @@ impl DiskScanApp {
         self.cat_base = None;
         if let Some(full) = &mut self.full_root {
             let full = Arc::make_mut(full);
-            for p in gone {
-                remove_from_tree(full, p);
-            }
+            remove_all_from_tree(full, gone);
             // A folder's own blocks can shrink when many entries leave it.
             let mut parents: Vec<&Path> = gone.iter().filter_map(|p| p.parent()).collect();
             parents.sort_unstable();
@@ -867,11 +886,9 @@ mod tests {
         // Replace (a folder rescan) and remove (a delete) at the bottom.
         let fresh = find_node(&tree, &bottom).unwrap().clone();
         assert!(table::replace_in_tree(&mut copy, &bottom, fresh).is_some());
-        assert_eq!(
-            remove_from_tree(&mut copy, &bottom.join("f.bin")),
-            Some((10, 1))
-        );
-        assert_eq!(copy.file_count, files - 1);
+        let size = copy.size;
+        remove_all_from_tree(&mut copy, &[bottom.join("f.bin")]);
+        assert_eq!((copy.size, copy.file_count), (size - 10, files - 1));
         drop(copy);
         drop(partial);
         drop(live);

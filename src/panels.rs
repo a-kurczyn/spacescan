@@ -1405,7 +1405,7 @@ impl DiskScanApp {
             };
             let room = (rect.height() / label_h).floor() as usize;
             let mut by_size: Vec<usize> = (0..n).collect();
-            by_size.sort_by_key(|&i| std::cmp::Reverse(rows[i].size));
+            by_size.sort_by_key(|&i| std::cmp::Reverse(rows[i].weight()));
             let mut labelled = vec![false; n];
             if !compact {
                 for &i in by_size.iter().take(room) {

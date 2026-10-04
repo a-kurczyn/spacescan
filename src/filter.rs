@@ -265,18 +265,23 @@ pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter) -> Option<Node> {
 /// Copy of `n` keeping only the files `keep` accepts, and the folders that
 /// still contain one; folder sizes and counts cover what's kept.
 pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) -> Option<Node> {
+    filter_by_measure(n, keep, measure_files())
+}
+
+/// `filter_tree_by`, with folders sorted by `files` (file counts) or bytes.
+fn filter_by_measure(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync), files: bool) -> Option<Node> {
     if !n.is_dir {
         return keep(n).then(|| n.clone());
     }
     let mut children: Vec<Node> = n
         .children
         .par_iter()
-        .filter_map(|c| deep(|| filter_tree_by(c, keep)))
+        .filter_map(|c| deep(|| filter_by_measure(c, keep, files)))
         .collect();
     if children.is_empty() {
         return None;
     }
-    sort_by_measure(&mut children, measure_files());
+    sort_by_measure(&mut children, files);
     let mut kept = empty_node();
     kept.name = n.name.clone();
     kept.copy_place(n);
