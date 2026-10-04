@@ -5,7 +5,7 @@ or folder and shows where the space went, as an interactive sunburst chart
 or as an ncdu-style table you can drive from the keyboard. It also writes
 plain-text, CSV or JSON reports from the command line.
 
-<!-- ![spacemap chart view](docs/screenshot.png) -->
+![spacemap chart view: a drive as a sunburst chart, coloured by file category](docs/screenshot.png)
 
 ## Features
 
@@ -27,6 +27,9 @@ plain-text, CSV or JSON reports from the command line.
 - **Breakdown by category and file extension** for the folder you're viewing:
   click a category or extension to show only those files (Ctrl+click picks
   several extensions).
+
+  ![spacemap table view: category bar on the left, folder contents on the right](docs/table.png)
+
 - **Measure by bytes or by number of files.** Switch the whole app (chart,
   table, shares and colours) to count files instead of space, to find the
   folders full of tiny files.
@@ -78,7 +81,7 @@ chmod +x SpaceMap-*-x86_64.AppImage
 It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
 release is built from the tagged source in this repository.
 
-<!-- TODO before release: AUR and Fedora COPR sections, once the packages exist. -->
+<!-- TODO before release: sections for the AUR (Arch), Fedora COPR (rpm) and a .deb (Debian, Ubuntu), once the packages exist. -->
 
 ### From source
 
