@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in spacemap doesn't work as it should.
+description: Something in SpaceScan doesn't work as it should.
 labels: [bug]
 body:
   - type: textarea
@@ -22,8 +22,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: spacemap version
-      description: The output of `spacemap --version`.
+      label: SpaceScan version
+      description: The output of `spacescan --version`.
     validations:
       required: true
   - type: input

@@ -6,7 +6,7 @@ body:
     id: idea
     attributes:
       label: The idea
-      description: What you'd like spacemap to do, and what you'd use it for.
+      description: What you'd like SpaceScan to do, and what you'd use it for.
     validations:
       required: true
   - type: textarea

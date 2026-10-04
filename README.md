@@ -1,11 +1,11 @@
-# spacemap
+# SpaceScan
 
-A fast disk-usage explorer for Linux. spacemap scans any drive, mount point
+A fast disk-usage explorer for Linux. SpaceScan scans any drive, mount point
 or folder and shows where the space went, as an interactive sunburst chart
 or as an ncdu-style table you can drive from the keyboard. It also writes
 plain-text, CSV or JSON reports from the command line.
 
-![spacemap chart view: a drive as a sunburst chart, coloured by file category](docs/screenshot.png)
+![SpaceScan chart view: a drive as a sunburst chart, coloured by file category](docs/screenshot.png)
 
 ## Features
 
@@ -28,7 +28,7 @@ plain-text, CSV or JSON reports from the command line.
   click a category or extension to show only those files (Ctrl+click picks
   several extensions).
 
-  ![spacemap table view: category bar on the left, folder contents on the right](docs/table.png)
+  ![SpaceScan table view: category bar on the left, folder contents on the right](docs/table.png)
 
 - **Measure by bytes or by number of files.** Switch the whole app (chart,
   table, shares and colours) to count files instead of space, to find the
@@ -41,7 +41,7 @@ plain-text, CSV or JSON reports from the command line.
 - **Filters** by name pattern (`*.iso`, `*.[mkv,mp4]`), size range and
   created or modified dates.
 - **Safe cleanup.** Move to the trash or delete permanently, always with a
-  confirmation. spacemap refuses to delete anything that is or contains a
+  confirmation. SpaceScan refuses to delete anything that is or contains a
   mounted filesystem.
 - **Copy and move.** Ctrl+C / Ctrl+X and Ctrl+V between folders, or to and
   from your file manager through the system clipboard.
@@ -58,7 +58,7 @@ plain-text, CSV or JSON reports from the command line.
 
 ## Requirements
 
-- Linux (spacemap uses Linux-specific filesystem interfaces), x86-64.
+- Linux (SpaceScan uses Linux-specific filesystem interfaces), x86-64.
 - A desktop session (Wayland or X11) for the app; the command-line reports
   need no display.
 - `xdg-desktop-portal` for the folder picker. Without it you can still type
@@ -69,13 +69,13 @@ plain-text, CSV or JSON reports from the command line.
 
 ### AppImage
 
-Download `SpaceMap-<version>-x86_64.AppImage` from the
-[Releases](https://github.com/a-kurczyn/spacemap/releases) page, make it
+Download `SpaceScan-<version>-x86_64.AppImage` from the
+[Releases](https://github.com/a-kurczyn/spacescan/releases) page, make it
 executable and run it:
 
 ```sh
-chmod +x SpaceMap-*-x86_64.AppImage
-./SpaceMap-*-x86_64.AppImage
+chmod +x SpaceScan-*-x86_64.AppImage
+./SpaceScan-*-x86_64.AppImage
 ```
 
 It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
@@ -86,18 +86,18 @@ release is built from the tagged source in this repository.
 ### From source
 
 ```sh
-git clone https://github.com/a-kurczyn/spacemap.git
-cd spacemap
+git clone https://github.com/a-kurczyn/spacescan.git
+cd spacescan
 cargo install --path .
 ```
 
-This builds an optimized binary and installs it to `~/.cargo/bin/spacemap`.
+This builds an optimized binary and installs it to `~/.cargo/bin/spacescan`.
 To build without installing, run `cargo build --release`; the binary is
-`target/release/spacemap`.
+`target/release/spacescan`.
 
 ## Usage
 
-Start `spacemap`, or `spacemap PATH` to scan a folder right away. Then pick
+Start `spacescan`, or `spacescan PATH` to scan a folder right away. Then pick
 where to scan:
 
 - 🔍 opens a folder picker for any drive, mount point or folder,
@@ -127,7 +127,7 @@ trash or delete it. In the table, the main keys are:
 ### Command line
 
 ```text
-spacemap COMMAND PATH [OPTIONS]
+spacescan COMMAND PATH [OPTIONS]
 
 Commands:
   list   the folders and files directly in PATH, with their totals
@@ -150,8 +150,8 @@ For example, the 20 biggest files in your Downloads folder, or a
 spreadsheet of what's in your home folder:
 
 ```sh
-spacemap flat ~/Downloads --limit 20
-spacemap list ~ --format csv > home.csv
+spacescan flat ~/Downloads --limit 20
+spacescan list ~ --format csv > home.csv
 ```
 
 Reports go to standard output and problems to standard error. Sizes in CSV
@@ -162,7 +162,7 @@ never open a window and never change your settings.
 
 ## Configuration
 
-Settings are saved to `~/.config/spacemap/settings.json` and can be changed
+Settings are saved to `~/.config/spacescan/settings.json` and can be changed
 in the ⚙ panel: chart depth, minimum slice angle, slices per ring, colours
 and age shades, line rendering, table columns and sort order, measuring by
 bytes or files, apparent-size mode and language.
@@ -170,13 +170,13 @@ bytes or files, apparent-size mode and language.
 ### File categories
 
 The categories and their extensions are in
-`~/.config/spacemap/categories.json`, written with the defaults on first
+`~/.config/spacescan/categories.json`, written with the defaults on first
 start. Edit it to move an extension to another category or add your own;
 it's read again at every scan. Extensions in no category count as "Other".
 
 ### Adding a language
 
-Copy `lang/en.lang` to `~/.config/spacemap/lang/<code>.lang` (for example
+Copy `lang/en.lang` to `~/.config/spacescan/lang/<code>.lang` (for example
 `nl.lang`), set the first line to `# name: <language name>`, and translate
 the right-hand side of each line. It appears in Settings › Language. Any
 line you leave out shows in English. A file there with the code of a
@@ -190,13 +190,13 @@ Ideas, suggestions and bug reports are welcome: please open an issue.
 Code contributions are by invitation only; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
-spacemap is developed with the help of AI coding tools; every change is
+SpaceScan is developed with the help of AI coding tools; every change is
 reviewed by the maintainer.
 
 ## License
 
 Copyright (C) 2026 Alejandro Kurczyn
 
-spacemap is free software: you can redistribute it and/or modify it under
+SpaceScan is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
 Software Foundation, version 3 of the License only. See [LICENSE](LICENSE).
