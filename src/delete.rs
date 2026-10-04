@@ -188,6 +188,40 @@ fn remove_at(node: &mut Node, parts: &[&std::ffi::OsStr]) -> Option<(u64, u64)> 
     Some(removed)
 }
 
+/// Each of `folders` (in the tree under `root`) takes its own size from the
+/// disk again, counted as the scan counted it (`apparent`: lengths, else
+/// disk space), and the folders above change by as much.
+pub(crate) fn refresh_own_sizes(root: &mut Node, folders: &[&Path], apparent: bool) {
+    use std::os::unix::fs::MetadataExt;
+    fn adjust(n: &mut Node, parts: &[&std::ffi::OsStr], now: u64) -> i128 {
+        let delta = match parts.split_first() {
+            None => {
+                let held = n
+                    .children
+                    .iter()
+                    .fold(0u64, |t, c| t.saturating_add(c.size));
+                i128::from(now) - i128::from(n.size.saturating_sub(held))
+            }
+            Some((first, rest)) => match child_named(n, first) {
+                Some(i) => deep(|| adjust(&mut n.children[i], rest, now)),
+                None => return 0,
+            },
+        };
+        n.size = u64::try_from((i128::from(n.size) + delta).max(0)).unwrap_or(u64::MAX);
+        delta
+    }
+    let root_path = root.path();
+    for dir in folders {
+        let Ok(m) = std::fs::symlink_metadata(dir) else {
+            continue;
+        };
+        let now = if apparent { m.len() } else { m.blocks() * 512 };
+        if let Some(parts) = rel_parts(&root_path, dir) {
+            adjust(root, &parts, now);
+        }
+    }
+}
+
 /// The node at `path`, if it's in the tree.
 pub(crate) fn find_node<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
     let mut n = root;
@@ -576,6 +610,11 @@ impl DiskScanApp {
             for p in gone {
                 remove_from_tree(full, p);
             }
+            // A folder's own blocks can shrink when many entries leave it.
+            let mut parents: Vec<&Path> = gone.iter().filter_map(|p| p.parent()).collect();
+            parents.sort_unstable();
+            parents.dedup();
+            refresh_own_sizes(full, &parents, self.tree_apparent);
             // The folders above keep their order rule (largest first).
             resort_above(full, gone);
         }

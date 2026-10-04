@@ -318,6 +318,10 @@ struct DiskScanApp {
     /// the scanned tree's files were classified with (None: mixed).
     scan_cats: Option<Arc<CategoryModel>>,
     tree_cats: Option<Arc<CategoryModel>>,
+    /// Whether the running scan, and the one that made the tree, count
+    /// apparent sizes.
+    scan_apparent: bool,
+    tree_apparent: bool,
     status: String,
     /// (capacity, free bytes) of the drive when the scanned folder is a mount
     /// point, for the chart's free-space slice.
@@ -393,6 +397,8 @@ impl Default for DiskScanApp {
             rescanning_part: false,
             scan_cats: None,
             tree_cats: None,
+            scan_apparent: false,
+            tree_apparent: false,
             status: String::new(),
             free_space: None,
             log: Vec::new(),
@@ -531,6 +537,7 @@ impl DiskScanApp {
         self.cancel_flag = Some(cancel.clone());
 
         let apparent_size = self.settings.apparent_size;
+        self.scan_apparent = apparent_size;
         // A folder scanned again inside the tree: files counted under a name
         // outside it count nothing in it, as in the full scan.
         let elsewhere: FxHashSet<(u64, u64)> = if std::mem::take(&mut self.rescanning_part) {
@@ -909,6 +916,7 @@ impl DiskScanApp {
                             None => {
                                 self.link_owners.clear();
                                 self.tree_cats = scan_cats;
+                                self.tree_apparent = self.scan_apparent;
                             }
                         }
                         self.link_owners.extend(counted_at);

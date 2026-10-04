@@ -2277,13 +2277,17 @@ mod cursor_tests {
     }
 
     fn scan(p: &Path) -> Node {
+        scan_as(p, false)
+    }
+
+    fn scan_as(p: &Path, apparent: bool) -> Node {
         let (tx, rx) = channel();
         std::thread::spawn(move || for _ in rx {});
         let ctx = ScanCtx {
             mounts: &HashSet::new(),
             progress: &tx,
             cancel: &Default::default(),
-            apparent_size: false,
+            apparent_size: apparent,
             hard_links: Default::default(),
             saw_hangul: &Default::default(),
             in_file_order: false,
@@ -2298,6 +2302,51 @@ mod cursor_tests {
         for c in &n.children {
             shape(c, out);
         }
+    }
+
+    /// A folder's own size is read from the disk again when entries leave
+    /// it (filesystems can free a folder's own blocks), in both ways of
+    /// counting sizes, with several deletes from the same folder at once:
+    /// a stale own size (here made up) is replaced, and the folders above
+    /// follow, so the tree equals a fresh scan.
+    #[test]
+    fn folders_take_their_own_size_again_after_deletes() {
+        let dir = std::env::temp_dir().join(format!("spacemap-ownsize-{}", std::process::id()));
+        for apparent in [false, true] {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("logs/deeper")).unwrap();
+            for i in 0..60 {
+                std::fs::write(dir.join(format!("logs/f{i}.log")), vec![1u8; 100]).unwrap();
+            }
+            std::fs::write(dir.join("logs/deeper/keep"), vec![1u8; 5000]).unwrap();
+            let mut tree = scan_as(&dir, apparent);
+            // As if the folder's own blocks were 4 KiB bigger when scanned.
+            let logs = tree
+                .children
+                .iter_mut()
+                .find(|c| c.disk_name() == "logs")
+                .unwrap();
+            logs.size += 4096;
+            tree.size += 4096;
+            let mut app = DiskScanApp {
+                full_root: Some(Arc::new(tree)),
+                tree_apparent: apparent,
+                ..DiskScanApp::default()
+            };
+            app.rebuild_view_tree();
+            let gone: Vec<PathBuf> = (0..60)
+                .map(|i| dir.join(format!("logs/f{i}.log")))
+                .collect();
+            for g in &gone {
+                std::fs::remove_file(g).unwrap();
+            }
+            app.drop_from_tree(&gone);
+            let (mut got, mut want) = (Vec::new(), Vec::new());
+            shape(app.full_root.as_ref().unwrap(), &mut got);
+            shape(&scan_as(&dir, apparent), &mut want);
+            assert_eq!(got, want, "apparent {apparent}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// After a delete (with and without a category picked) and after a
