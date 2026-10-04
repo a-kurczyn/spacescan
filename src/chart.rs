@@ -235,7 +235,7 @@ fn layout_ring(
             start_angle: a0,
             end_angle: a1,
             ring,
-            name: child.name.clone(),
+            name: child.name.to_string(),
             size: child.size,
             file_count: child.file_count,
             is_dir: child.is_dir,

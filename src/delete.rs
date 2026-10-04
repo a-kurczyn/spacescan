@@ -178,7 +178,9 @@ fn remove_at(node: &mut Node, parts: &[&std::ffi::OsStr]) -> Option<(u64, u64)> 
     let (first, rest) = parts.split_first()?;
     let i = child_named(node, first)?;
     let removed = if rest.is_empty() {
-        let c = node.children.remove(i);
+        let mut kids = std::mem::take(&mut node.children).into_vec();
+        let c = kids.remove(i);
+        node.children = kids.into_boxed_slice();
         (c.size, c.file_count)
     } else {
         deep(|| remove_at(&mut node.children[i], rest))?

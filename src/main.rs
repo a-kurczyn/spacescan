@@ -521,7 +521,7 @@ impl DiskScanApp {
         // After clearing the log, so problems in the file stay listed.
         self.reload_categories();
         self.partial_root = empty_node();
-        self.partial_root.name = file_name_of(&path);
+        self.partial_root.name = file_name_of(&path).into();
         self.partial_root.set_path(&path);
         self.free_space = if is_real_mount_point(&path) {
             fs_space(&path)

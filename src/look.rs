@@ -643,7 +643,7 @@ impl LiveTree {
                     kids.push(other);
                 }
                 kids.sort_by_key(|c| std::cmp::Reverse(c.size));
-                n.children = kids;
+                n.children = kids.into();
             }
             n
         });
@@ -704,7 +704,8 @@ impl Grouped {
             "SEG_OTHER_ITEMS",
             self.count as u64,
             &[&self.count.to_string()],
-        );
+        )
+        .into();
         node.size = self.size;
         node.file_count = self.file_count;
         node.set_path(&path);
@@ -756,7 +757,7 @@ impl LiveLooks {
         }
         self.summaries.insert(key, summary);
         let mut node = empty_node();
-        node.name = file_name_of(&f.path);
+        node.name = file_name_of(&f.path).into();
         node.size = size;
         node.file_count = file_count;
         node.set_path(&f.path);
@@ -1298,13 +1299,13 @@ mod live_stress {
         assert_eq!((snap.size, snap.file_count), (tree.size, tree.file_count));
         // All 52 children of the scanned folder, however small.
         assert_eq!(snap.children.len(), 52);
-        let many = snap.children.iter().find(|c| c.name == "many").unwrap();
-        let fin = tree.children.iter().find(|c| c.name == "many").unwrap();
+        let many = snap.children.iter().find(|c| &*c.name == "many").unwrap();
+        let fin = tree.children.iter().find(|c| &*c.name == "many").unwrap();
         assert_eq!((many.size, many.file_count), (fin.size, fin.file_count));
         // Its 3,000 tiny folders as one entry, adding up exactly.
         assert_eq!(many.children.len(), 1);
         let grouped = &many.children[0];
-        assert_eq!(grouped.name, trf("SEG_OTHER_ITEMS", &["3000"]));
+        assert_eq!(&*grouped.name, trf("SEG_OTHER_ITEMS", &["3000"]));
         let subs: u64 = fin.children.iter().map(|c| c.size).sum();
         assert_eq!((grouped.size, grouped.file_count), (subs, 3000));
         assert!(looks.get(grouped).is_some(), "the entry has a color");
@@ -1341,7 +1342,7 @@ mod live_stress {
         }
         let mut looks = LiveLooks::default();
         let snap = live.snapshot(5, 0.1, &mut looks).unwrap();
-        let p_node = snap.children.iter().find(|c| c.name == "p").unwrap();
+        let p_node = snap.children.iter().find(|c| &*c.name == "p").unwrap();
         assert_eq!((p_node.size, p_node.file_count), (600, 60));
         assert_eq!(p_node.children.len(), 1, "all 20 grouped");
         let g = &p_node.children[0];

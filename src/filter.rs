@@ -104,7 +104,7 @@ impl CompiledFilter {
         }
         if !self.names.is_empty() {
             let name = if self.case_sensitive {
-                n.name.clone()
+                n.name.to_string()
             } else {
                 n.name.to_lowercase()
             };
@@ -286,7 +286,7 @@ pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) ->
         .fold(0u64, u64::saturating_add);
     kept.file_count = children.iter().map(|c| c.file_count).sum();
     kept.is_dir = true;
-    kept.children = children;
+    kept.children = children.into();
     kept.mode = n.mode;
     kept.mtime = n.mtime;
     kept.ctime = n.ctime;

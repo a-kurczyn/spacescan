@@ -208,7 +208,7 @@ fn row_text(node: &Node, flat: bool) -> std::borrow::Cow<'_, str> {
     if flat {
         show_path(&node.path()).into()
     } else {
-        node.name.as_str().into()
+        node.name.as_ref().into()
     }
 }
 
@@ -348,14 +348,7 @@ fn flat_files(
         // (much faster on long lists than building them at every comparison).
         let mut keyed: Vec<(Vec<u8>, &str, u32, u32)> = files
             .par_iter()
-            .map(|f| {
-                (
-                    natural_key(&f.node.name),
-                    f.node.name.as_str(),
-                    f.folder,
-                    f.child,
-                )
-            })
+            .map(|f| (natural_key(&f.node.name), &*f.node.name, f.folder, f.child))
             .collect();
         let by_key = |a: &(Vec<u8>, &str, u32, u32), b: &(Vec<u8>, &str, u32, u32)| {
             let by = a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1));
@@ -1218,7 +1211,7 @@ impl DiskScanApp {
                     (
                         group(&children[i]),
                         natural_key(&children[i].name),
-                        children[i].name.as_str(),
+                        &*children[i].name,
                         i as u32,
                     )
                 })
@@ -1958,7 +1951,7 @@ mod flat_tests {
 
     fn names(view: &Node, rows: &FlatRows) -> Vec<String> {
         (0..rows.files.len())
-            .map(|i| rows.node(view, i).name.clone())
+            .map(|i| rows.node(view, i).name.to_string())
             .collect()
     }
 
@@ -2062,7 +2055,7 @@ mod flat_tests {
         });
         let (view, rows) = app.listed().unwrap();
         (0..rows.len())
-            .map(|i| rows.node(view, i).name.clone())
+            .map(|i| rows.node(view, i).name.to_string())
             .collect()
     }
 
@@ -2582,7 +2575,7 @@ mod live_tests {
     fn names(app: &DiskScanApp) -> Vec<String> {
         let (view, rows) = app.listed().unwrap();
         (0..rows.len())
-            .map(|i| rows.node(view, i).name.clone())
+            .map(|i| rows.node(view, i).name.to_string())
             .collect()
     }
 
@@ -2603,7 +2596,9 @@ mod live_tests {
 
         // More data arrives: b grows past a, c appears.
         app.partial_root.children[1].size = 50;
-        app.partial_root.children.push(folder("c", 40));
+        app.partial_root.children = [app.partial_root.children.to_vec(), vec![folder("c", 40)]]
+            .concat()
+            .into();
         refresh(&mut app);
         assert_eq!(names(&app), ["b", "c", "a"]);
         assert_eq!(
@@ -2613,7 +2608,9 @@ mod live_tests {
         // The preview tree re-sorts itself as data arrives; until the next
         // refresh the table keeps showing its snapshot, row for row.
         app.partial_root.children.reverse();
-        app.partial_root.children.push(folder("d", 99));
+        app.partial_root.children = [app.partial_root.children.to_vec(), vec![folder("d", 99)]]
+            .concat()
+            .into();
         assert_eq!(names(&app), ["b", "c", "a"]);
         app.move_cursor(1);
         assert_eq!(app.table.cursor, Some(PathBuf::from("/scan/c")));

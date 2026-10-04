@@ -16,7 +16,7 @@ pub(crate) struct Node {
     /// Its name as shown (see `show_os`); also its name on disk when
     /// `raw` is None, so it's set before the node is placed and not changed
     /// after.
-    pub(crate) name: String,
+    pub(crate) name: Box<str>,
     /// The folder it's in, shared by everything in that folder; empty for
     /// a tree's top, whose `raw` is then its whole path.
     dir: Arc<Path>,
@@ -29,7 +29,7 @@ pub(crate) struct Node {
     /// A file's category (its index in the category model the scan used),
     /// or `NO_CAT`; see `Looks::build`.
     pub(crate) cat: u8,
-    pub(crate) children: Vec<Node>,
+    pub(crate) children: Box<[Node]>,
     pub(crate) mode: u32,
     pub(crate) mtime: i64,
     pub(crate) ctime: i64,
@@ -71,7 +71,7 @@ impl Node {
                 Path::new(raw).file_name().unwrap_or(raw)
             }
             Some(raw) => raw,
-            None => std::ffi::OsStr::new(&self.name),
+            None => std::ffi::OsStr::new(&*self.name),
         }
     }
 
@@ -84,7 +84,7 @@ impl Node {
     fn stored_name(&self) -> &std::ffi::OsStr {
         self.raw
             .as_deref()
-            .unwrap_or_else(|| std::ffi::OsStr::new(&self.name))
+            .unwrap_or_else(|| std::ffi::OsStr::new(&*self.name))
     }
 
     /// True if its full path is `p`, without building it (the same as
@@ -112,7 +112,7 @@ impl Node {
     /// Puts it in folder `dir` (shared with its siblings), named `disk` on
     /// disk. Set `name` first.
     pub(crate) fn place(&mut self, dir: Arc<Path>, disk: &std::ffi::OsStr) {
-        self.raw = (disk != std::ffi::OsStr::new(&self.name)).then(|| disk.into());
+        self.raw = (disk != std::ffi::OsStr::new(&*self.name)).then(|| disk.into());
         self.dir = dir;
     }
 
@@ -181,9 +181,9 @@ impl Drop for Node {
     /// Frees the subtree without recursing: descendants are moved onto a
     /// work list and each is dropped once it has no children left.
     fn drop(&mut self) {
-        let mut pending = std::mem::take(&mut self.children);
+        let mut pending = std::mem::take(&mut self.children).into_vec();
         while let Some(mut n) = pending.pop() {
-            pending.append(&mut n.children);
+            pending.extend(std::mem::take(&mut n.children));
         }
     }
 }
@@ -194,12 +194,12 @@ impl Drop for Node {
 #[cfg(test)]
 pub(crate) fn test_node(path: &str, size: u64, is_dir: bool, children: Vec<Node>) -> Node {
     let mut n = empty_node();
-    n.name = file_name_of(Path::new(path));
+    n.name = file_name_of(Path::new(path)).into();
     n.set_path(Path::new(path));
     n.size = size;
     n.file_count = u64::from(!is_dir);
     n.is_dir = is_dir;
-    n.children = children;
+    n.children = children.into();
     n
 }
 
@@ -337,14 +337,14 @@ pub(crate) fn cat_byte(c: Category) -> u8 {
 
 pub(crate) fn empty_node() -> Node {
     Node {
-        name: String::new(),
+        name: Box::default(),
         dir: Path::new("").into(),
         raw: None,
         size: 0,
         file_count: 0,
         is_dir: true,
         cat: NO_CAT,
-        children: Vec::new(),
+        children: Box::default(),
         mode: 0,
         mtime: NO_TIME,
         ctime: NO_TIME,
@@ -420,7 +420,7 @@ pub(crate) fn flat_copy(n: &Node) -> Node {
         file_count: c.file_count,
         is_dir: c.is_dir,
         cat: c.cat,
-        children,
+        children: children.into(),
         mode: c.mode,
         mtime: c.mtime,
         ctime: c.ctime,
@@ -812,13 +812,13 @@ pub(crate) fn scan_entry(
                 let label = trf("SEG_OTHER_FS", &[&name]);
                 Node {
                     raw: raw_name(&os_name, &label),
-                    name: label,
+                    name: label.into(),
                     dir: here.clone(),
                     size: 0,
                     file_count: 0,
                     is_dir: true,
                     cat: NO_CAT,
-                    children: Vec::new(),
+                    children: Box::default(),
                     mode: meta.as_ref().map(|m| m.mode()).unwrap_or(0),
                     mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(NO_TIME),
                     ctime: meta.as_ref().map(|m| m.ctime()).unwrap_or(NO_TIME),
@@ -850,14 +850,14 @@ pub(crate) fn scan_entry(
                 }
             };
             Node {
-                name,
+                name: name.into(),
                 dir: here.clone(),
                 raw,
                 size: sz,
                 file_count: 1,
                 is_dir: false,
                 cat: NO_CAT,
-                children: Vec::new(),
+                children: Box::default(),
                 mode,
                 mtime,
                 ctime,
@@ -1075,14 +1075,14 @@ fn scan_dir_in(
         // Cancelled: stop at once; the result is discarded.
         return placed(
             Node {
-                name,
+                name: name.into(),
                 dir: Path::new("").into(),
                 raw: None,
                 size: 0,
                 file_count: 0,
                 is_dir: true,
                 cat: NO_CAT,
-                children: Vec::new(),
+                children: Box::default(),
                 mode: 0,
                 mtime: NO_TIME,
                 ctime: NO_TIME,
@@ -1176,14 +1176,14 @@ fn scan_dir_in(
 
     placed(
         Node {
-            name,
+            name: name.into(),
             dir: Path::new("").into(),
             raw: None,
             size,
             file_count,
             is_dir: true,
             cat: NO_CAT,
-            children,
+            children: children.into(),
             mode: self_mode,
             mtime: self_mtime,
             ctime: self_ctime,
@@ -2036,12 +2036,12 @@ mod path_tests {
             ] {
                 let disk = OsStr::from_bytes(disk);
                 let mut n = empty_node();
-                n.name = show_os(disk);
+                n.name = show_os(disk).into();
                 n.place(shared.clone(), disk);
                 check(&n, &Path::new(dir).join(disk));
                 // The shown name never matches when it differs from disk.
                 if n.name.as_bytes() != disk.as_bytes() {
-                    assert!(!n.path_is(&Path::new(dir).join(&n.name)));
+                    assert!(!n.path_is(&Path::new(dir).join(&*n.name)));
                 }
                 let mut copy = empty_node();
                 copy.name = n.name.clone();
@@ -2145,7 +2145,7 @@ mod path_tests {
         let i = child_named(&root, odd.file_name().unwrap()).unwrap();
         let m = &root.children[i];
         check(m, &odd);
-        assert!(!m.path_is(&base.join(&m.name)));
+        assert!(!m.path_is(&base.join(&*m.name)));
         std::fs::remove_dir_all(&base).unwrap();
     }
 
@@ -2181,7 +2181,7 @@ mod path_tests {
     fn is_in_small_and_big_sets() {
         let shared: Arc<Path> = Path::new("/a/b").into();
         let mut n = empty_node();
-        n.name = show_os(OsStr::from_bytes(b"c\xff"));
+        n.name = show_os(OsStr::from_bytes(b"c\xff")).into();
         n.place(shared, OsStr::from_bytes(b"c\xff"));
         let me = n.path();
         let near = |k: usize| PathBuf::from(format!("/a/b/c{k}"));
@@ -2208,7 +2208,7 @@ mod path_tests {
         }
         for dir in ["/", "/a", "/a/", "", "rel"] {
             let mut n = empty_node();
-            n.name = show_os(OsStr::from_bytes(b"x\xff"));
+            n.name = show_os(OsStr::from_bytes(b"x\xff")).into();
             n.place(Path::new(dir).into(), OsStr::from_bytes(b"x\xff"));
             assert_eq!(node_key(&n), path_key(&n.path()), "{dir}");
         }

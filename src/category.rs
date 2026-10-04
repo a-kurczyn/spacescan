@@ -594,7 +594,7 @@ mod tests {
         );
         let only = filter_tree_by(&tree, &|n: &Node| m.of_name(&n.name) == video).unwrap();
         assert_eq!((only.size, only.file_count), (105, 2));
-        let names: Vec<&str> = only.children.iter().map(|c| c.name.as_str()).collect();
+        let names: Vec<&str> = only.children.iter().map(|c| &*c.name).collect();
         assert_eq!(names, vec!["a.mkv", "d"]);
     }
 
