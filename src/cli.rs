@@ -319,31 +319,11 @@ fn write_report(
 ) -> std::io::Result<()> {
     match req.command {
         Command::List => {
-            let mut rows: Vec<&Node> = tree.children.iter().collect();
-            sort_rows(&mut rows, req.sort, req.reverse);
+            let rows = rows_in_order(tree, false, req.sort, req.reverse);
             write_entries(out, req.format, tree, &rows, false)
         }
         Command::Flat => {
-            let mut files = Vec::new();
-            collect_files(tree, &mut files);
-            if req.sort == SortColumn::Name {
-                // By the path below the folder, built once per file.
-                let top = tree.path();
-                let mut keyed: Vec<(String, &Node)> = files
-                    .par_iter()
-                    .map(|n| {
-                        let p = n.path();
-                        (show_path(p.strip_prefix(&top).unwrap_or(&p)), *n)
-                    })
-                    .collect();
-                keyed.par_sort_by(|a, b| natural_cmp(&a.0, &b.0).then_with(|| a.0.cmp(&b.0)));
-                files = keyed.into_iter().map(|(_, n)| n).collect();
-                if req.reverse {
-                    files.reverse();
-                }
-            } else {
-                sort_rows(&mut files, req.sort, req.reverse);
-            }
+            let mut files = rows_in_order(tree, true, req.sort, req.reverse);
             files.truncate(req.limit.unwrap_or(usize::MAX));
             write_entries(out, req.format, tree, &files, true)
         }
@@ -351,36 +331,84 @@ fn write_report(
     }
 }
 
-fn collect_files<'a>(n: &'a Node, out: &mut Vec<&'a Node>) {
-    for c in n.children.iter() {
-        if c.is_dir {
-            deep(|| collect_files(c, out));
-        } else {
-            out.push(c);
-        }
+/// The rows of `list` (the folder's own entries) or `flat` (every file
+/// under it) in `sort` order, `reverse`d if asked. Equal ones come as in
+/// the app's table; flat by name goes by the path below the folder.
+pub(crate) fn rows_in_order(
+    tree: &Node,
+    flat: bool,
+    sort: SortColumn,
+    reverse: bool,
+) -> Vec<&Node> {
+    if !flat {
+        let mut rows: Vec<&Node> = tree.children.iter().collect();
+        sort_rows(&mut rows, sort, reverse);
+        return rows;
     }
+    let mut files = files_in_app_order(tree);
+    if sort == SortColumn::Name {
+        // By the path below the folder, built once per file.
+        let top = tree.path();
+        let mut keyed: Vec<(String, &Node)> = files
+            .par_iter()
+            .map(|n| {
+                let p = n.path();
+                (show_path(p.strip_prefix(&top).unwrap_or(&p)), *n)
+            })
+            .collect();
+        keyed.par_sort_by(|a, b| {
+            let by = natural_cmp(&a.0, &b.0).then_with(|| a.0.cmp(&b.0));
+            if reverse { by.reverse() } else { by }
+        });
+        files = keyed.into_iter().map(|(_, n)| n).collect();
+    } else {
+        sort_rows(&mut files, sort, reverse);
+    }
+    files
 }
 
-/// Sorts by `column` (sizes, counts and dates largest/newest first, names
-/// A–Z), equal ones by name, then `reverse`d if asked.
-fn sort_rows(rows: &mut [&Node], column: SortColumn, reverse: bool) {
-    use std::cmp::Reverse;
-    let by_name = |a: &&Node, b: &&Node| natural_cmp(&a.name, &b.name);
-    rows.par_sort_by(|a, b| {
-        let first = match column {
-            SortColumn::Size => Reverse(a.size).cmp(&Reverse(b.size)),
-            SortColumn::Files => Reverse(a.file_count).cmp(&Reverse(b.file_count)),
-            SortColumn::Modified => Reverse(a.mtime).cmp(&Reverse(b.mtime)),
-            SortColumn::Changed => Reverse(a.ctime).cmp(&Reverse(b.ctime)),
-            _ => std::cmp::Ordering::Equal,
-        };
-        first
-            .then_with(|| by_name(a, b))
-            .then_with(|| a.disk_name().cmp(b.disk_name()))
-    });
-    if reverse {
-        rows.reverse();
+/// Every file under `top`, in the order the app's flat list takes equal
+/// ones: folder by folder, a folder coming when its first file is met, and
+/// each folder's files in the folder's order.
+/// `n` and the word for it, singular for one.
+fn counted(n: u64, one: &str, many: &str) -> String {
+    format!("{} {}", format_count(n), if n == 1 { one } else { many })
+}
+
+fn files_in_app_order(top: &Node) -> Vec<&Node> {
+    fn walk<'a>(dir: &'a Node, folders: &mut Vec<Vec<&'a Node>>) {
+        let mut mine = None;
+        for c in dir.children.iter() {
+            if c.is_dir {
+                deep(|| walk(c, folders));
+            } else {
+                let at = *mine.get_or_insert_with(|| {
+                    folders.push(Vec::new());
+                    folders.len() - 1
+                });
+                folders[at].push(c);
+            }
+        }
     }
+    let mut folders = Vec::new();
+    walk(top, &mut folders);
+    folders.into_iter().flatten().collect()
+}
+
+/// Sorts by `column` as the app's table does: sizes, counts and dates
+/// largest/newest first, names A–Z, the other way if `reverse`; equal ones
+/// keep the order they come in.
+fn sort_rows(rows: &mut [&Node], column: SortColumn, reverse: bool) {
+    rows.par_sort_by(|a, b| {
+        let by = match column {
+            SortColumn::Size => b.size.cmp(&a.size),
+            SortColumn::Files => b.file_count.cmp(&a.file_count),
+            SortColumn::Modified => b.mtime.cmp(&a.mtime),
+            SortColumn::Changed => b.ctime.cmp(&a.ctime),
+            _ => natural_cmp(&a.name, &b.name).then_with(|| a.name.cmp(&b.name)),
+        };
+        if reverse { by.reverse() } else { by }
+    });
 }
 
 /// A time for CSV and JSON ("" when unknown).
@@ -439,20 +467,20 @@ fn write_entries(
             let folders = rows.iter().filter(|n| n.is_dir).count() as u64;
             writeln!(
                 out,
-                "{}: {} in {} files",
+                "{}: {} in {}",
                 show_path(&top),
                 human_size(tree.size),
-                format_count(tree.file_count)
+                counted(tree.file_count, "file", "files")
             )?;
             if flat {
-                writeln!(out, "{} files shown", format_count(rows.len() as u64))?;
+                writeln!(out, "{} shown", counted(rows.len() as u64, "file", "files"))?;
             } else {
                 let files = rows.len() as u64 - folders;
                 writeln!(
                     out,
-                    "{} folders, {} files directly in it",
-                    format_count(folders),
-                    format_count(files)
+                    "{}, {} directly in it",
+                    counted(folders, "folder", "folders"),
+                    counted(files, "file", "files")
                 )?;
             }
             writeln!(out)?;
@@ -611,10 +639,10 @@ fn write_extensions(
         Format::Txt => {
             writeln!(
                 out,
-                "{}: {} in {} files, by {}",
+                "{}: {} in {}, by {}",
                 show_path(&tree.path()),
                 human_size(tree.size),
-                format_count(tree.file_count),
+                counted(tree.file_count, "file", "files"),
                 if req.by_files { "files" } else { "bytes" }
             )?;
             writeln!(out)?;
@@ -897,10 +925,10 @@ mod tests {
         rev.reverse = true;
         let back: Vec<Vec<String>> = read_csv(&report(&rev));
         let fwd = read_csv(&report(&request(Command::List, &dir, Format::Csv)));
-        assert_eq!(
-            back[1..].iter().rev().cloned().collect::<Vec<_>>(),
-            fwd[1..].to_vec()
-        );
+        // Smallest first; equal sizes keep their order, as in the app.
+        let mut smallest_first = fwd[1..].to_vec();
+        smallest_first.sort_by_key(|r| r[2].parse::<u64>().unwrap());
+        assert_eq!(back[1..], smallest_first);
         let mut flat = request(Command::Flat, &dir, Format::Csv);
         flat.limit = Some(3);
         let rows = read_csv(&report(&flat));

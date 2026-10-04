@@ -2641,6 +2641,73 @@ mod cursor_tests {
         file_name_of(app.table.cursor.as_ref().unwrap())
     }
 
+    /// The command line's list and flat reports come in the table's order
+    /// for every sort, both ways, equal ones included: equal sizes by byte
+    /// order of the name, equal dates by size, and a folder's files
+    /// together in the flat list even with a subfolder between them.
+    #[test]
+    fn command_line_orders_like_the_table() {
+        let file = |name: &str, size: u64, mtime: i64, ctime: i64| {
+            let mut n = test_node(&format!("/t/{name}"), size, false, vec![]);
+            (n.mtime, n.ctime) = (mtime, ctime);
+            n
+        };
+        let in_sub = |path: &str| test_node(&format!("/t/sub/{path}"), 4096, false, vec![]);
+        let inner = test_node("/t/sub/inner", 4096, true, vec![in_sub("inner/x")]);
+        let mut sub_files = vec![in_sub("zz"), inner, in_sub("10")];
+        sort_largest_first(&mut sub_files);
+        let mut sub = test_node("/t/sub", 3 * 4096, true, sub_files);
+        sub.file_count = 3;
+        let mut children = vec![
+            file("beta", 4096, 50, 7),
+            file("10", 4096, 60, 7),
+            file("Alpha", 4096, 50, 9),
+            file("_u", 4096, 50, 7),
+            file("9", 4096, 60, 9),
+            file("big", 8192, 50, 7),
+            sub,
+        ];
+        sort_largest_first(&mut children);
+        let root = Arc::new(test_node("/t", 0, true, children));
+        let mut app = DiskScanApp::default();
+        for flat in [false, true] {
+            for column in [
+                SortColumn::Size,
+                SortColumn::Files,
+                SortColumn::Modified,
+                SortColumn::Changed,
+                SortColumn::Name,
+            ] {
+                // The flat report sorts names by path, not by file name.
+                if flat && column == SortColumn::Name {
+                    continue;
+                }
+                for ascending in [false, true] {
+                    let key = OrderKey {
+                        tree_gen: 0,
+                        view: vec![],
+                        sort: SortState { column, ascending },
+                        dirs_first: false,
+                        show_dotfiles: true,
+                        hidden: 0,
+                        live: false,
+                        flat: flat.then_some(usize::MAX),
+                    };
+                    let order = app.row_order(&root, key);
+                    let table: Vec<PathBuf> = (0..order.rows.len())
+                        .map(|i| order.rows.node(&root, i).path())
+                        .collect();
+                    let reverse = ascending != (column == SortColumn::Name);
+                    let cli: Vec<PathBuf> = crate::cli::rows_in_order(&root, flat, column, reverse)
+                        .iter()
+                        .map(|n| n.path())
+                        .collect();
+                    assert_eq!(cli, table, "flat {flat}, {column:?}, ascending {ascending}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn cursor_moves_and_clamps() {
         let mut app = app_with(&["a", "b", "c", "d"]);
