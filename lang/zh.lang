@@ -342,3 +342,6 @@ FILTER_CASE_NAME=区分大小写
 A11Y_PATH_BAR=文件夹路径
 ERR_CLIPBOARD_NO_ANSWER=剪贴板没有响应：未粘贴任何内容
 TABLE_TAG_SO_FAR=目前 %s
+HOVER_NEWEST=最新的文件：
+HOVER_OLDEST=最旧的文件：
+HOVER_AGE_RANGE_HINT=按更改时间：文件数据到达此磁盘的时间（颜色所表示的新旧）。

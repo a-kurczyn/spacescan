@@ -342,3 +342,6 @@ FILTER_CASE_NAME=大文字と小文字を区別
 A11Y_PATH_BAR=フォルダーのパス
 ERR_CLIPBOARD_NO_ANSWER=クリップボードが応答しませんでした。何も貼り付けていません
 TABLE_TAG_SO_FAR=これまでに %s
+HOVER_NEWEST=最新のファイル:
+HOVER_OLDEST=最古のファイル:
+HOVER_AGE_RANGE_HINT=変更日時による: ファイルのデータがこのディスクに来た時点 (色が示す古さ)。

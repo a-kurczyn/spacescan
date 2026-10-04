@@ -354,3 +354,6 @@ FILTER_CASE_NAME=Maiuscole/minuscole
 A11Y_PATH_BAR=Percorso della cartella
 ERR_CLIPBOARD_NO_ANSWER=Gli appunti non hanno risposto: non è stato incollato nulla
 TABLE_TAG_SO_FAR=%s finora
+HOVER_NEWEST=File più recente:
+HOVER_OLDEST=File più vecchio:
+HOVER_AGE_RANGE_HINT=In base all'ora di modifica: quando i dati del file sono arrivati su questo disco (l'età che mostrano i colori).

@@ -361,3 +361,6 @@ FILTER_CASE_NAME=Distinguir mayúsculas
 A11Y_PATH_BAR=Ruta de la carpeta
 ERR_CLIPBOARD_NO_ANSWER=El portapapeles no respondió: no se pegó nada
 TABLE_TAG_SO_FAR=%s hasta ahora
+HOVER_NEWEST=Archivo más reciente:
+HOVER_OLDEST=Archivo más antiguo:
+HOVER_AGE_RANGE_HINT=Según la fecha de cambio: cuándo llegaron los datos del archivo a este disco (la antigüedad que muestran los colores).

@@ -515,14 +515,16 @@ pub(crate) fn details_grid(
                 ui.label(format_epoch(ct));
                 ui.end_row();
             }
-            // Debug rows, not translated.
+            // Folders and "other": the newest and oldest file inside, by the
+            // Changed time the slice colors use.
             if let Some((newest, oldest)) = h.age_range {
-                ui.label("Newest:");
-                ui.label(format_epoch(newest));
-                ui.end_row();
-                ui.label("Oldest:");
-                ui.label(format_epoch(oldest));
-                ui.end_row();
+                for (key, t) in [("HOVER_NEWEST", newest), ("HOVER_OLDEST", oldest)] {
+                    if t != NO_TIME {
+                        ui.label(tr(key)).on_hover_text(tr("HOVER_AGE_RANGE_HINT"));
+                        ui.label(format_epoch(t));
+                        ui.end_row();
+                    }
+                }
             }
             if let Some(m) = h.mode {
                 ui.label(tr("HOVER_PERMS"));

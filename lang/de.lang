@@ -355,3 +355,6 @@ FILTER_CASE_NAME=Groß-/Kleinschreibung beachten
 A11Y_PATH_BAR=Ordnerpfad
 ERR_CLIPBOARD_NO_ANSWER=Die Zwischenablage hat nicht geantwortet: nichts eingefügt
 TABLE_TAG_SO_FAR=bisher %s
+HOVER_NEWEST=Neueste Datei:
+HOVER_OLDEST=Älteste Datei:
+HOVER_AGE_RANGE_HINT=Nach Änderungszeit: wann die Daten der Datei auf dieses Laufwerk kamen (das Alter, das die Farben zeigen).

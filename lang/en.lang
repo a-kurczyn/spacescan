@@ -373,3 +373,6 @@ FILTER_CASE_NAME=Match case
 A11Y_PATH_BAR=Folder path
 ERR_CLIPBOARD_NO_ANSWER=The clipboard didn't answer: nothing was pasted
 TABLE_TAG_SO_FAR=%s so far
+HOVER_NEWEST=Newest file:
+HOVER_OLDEST=Oldest file:
+HOVER_AGE_RANGE_HINT=By Changed time: when the file's data arrived on this disk (the age the slice colours show).

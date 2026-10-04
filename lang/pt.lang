@@ -356,3 +356,6 @@ FILTER_CASE_NAME=Diferenciar maiúsculas
 A11Y_PATH_BAR=Caminho da pasta
 ERR_CLIPBOARD_NO_ANSWER=A área de transferência não respondeu: nada foi colado
 TABLE_TAG_SO_FAR=%s até agora
+HOVER_NEWEST=Arquivo mais recente:
+HOVER_OLDEST=Arquivo mais antigo:
+HOVER_AGE_RANGE_HINT=Pela data de alteração: quando os dados do arquivo chegaram a este disco (a idade que as cores mostram).
