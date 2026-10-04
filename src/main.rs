@@ -116,6 +116,8 @@ struct Settings {
     paths_to_clipboard: bool,
     /// Category colors told apart with any kind of color blindness.
     color_blind_safe: bool,
+    /// Sizes measured in files instead of bytes (see `scan::weight`).
+    measure_files: bool,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -207,6 +209,7 @@ impl Default for Settings {
             flat_all: false,
             paths_to_clipboard: true,
             color_blind_safe: false,
+            measure_files: false,
         }
     }
 }
@@ -325,6 +328,8 @@ struct DiskScanApp {
     /// apparent sizes.
     scan_apparent: bool,
     tree_apparent: bool,
+    /// Whether the tree's folders are sorted by files (else by bytes).
+    tree_by_files: bool,
     status: String,
     /// (capacity, free bytes) of the drive when the scanned folder is a mount
     /// point, for the chart's free-space slice.
@@ -402,6 +407,7 @@ impl Default for DiskScanApp {
             tree_cats: None,
             scan_apparent: false,
             tree_apparent: false,
+            tree_by_files: false,
             status: String::new(),
             free_space: None,
             log: Vec::new(),
@@ -595,6 +601,43 @@ impl DiskScanApp {
                 let _ = tx.send(ScanMsg::Done(root, secs, counted_at));
             }
         });
+    }
+
+    /// Puts the measure from the settings in use: folders sorted by it, and
+    /// a table sorted by size or files switched to it.
+    fn follow_measure(&mut self) {
+        let files = self.settings.measure_files;
+        if files != scan::measure_files() {
+            scan::set_measure_files(files);
+            let by = if files {
+                SortColumn::Files
+            } else {
+                SortColumn::Size
+            };
+            for sort in [&mut self.contents_sort, &mut self.ext_sort] {
+                if matches!(sort.column, SortColumn::Size | SortColumn::Files) {
+                    sort.column = by;
+                }
+            }
+            self.tree_gen += 1;
+        }
+        if self.tree_by_files == files || self.scanning {
+            return;
+        }
+        // Sorted in place: nothing else may hold the tree meanwhile.
+        let Some(root) = self.root.take() else {
+            self.tree_by_files = files;
+            return;
+        };
+        let view_paths = self.view_paths(&root);
+        drop(root);
+        self.cat_base = None;
+        if let Some(full) = &mut self.full_root {
+            scan::sort_tree_by_measure(Arc::make_mut(full), files);
+        }
+        self.tree_by_files = files;
+        self.rebuild_view_tree();
+        self.restore_view(&view_paths);
     }
 
     /// Rebuilds the displayed tree from the last scan, the filter and the
@@ -920,6 +963,8 @@ impl DiskScanApp {
                                 self.link_owners.clear();
                                 self.tree_cats = scan_cats;
                                 self.tree_apparent = self.scan_apparent;
+                                // Scans sort by bytes.
+                                self.tree_by_files = false;
                             }
                         }
                         self.link_owners.extend(counted_at);
@@ -967,6 +1012,7 @@ impl eframe::App for DiskScanApp {
             self.settings.color_blind_safe,
             std::sync::atomic::Ordering::Relaxed,
         );
+        self.follow_measure();
         self.typing = ctx.text_edit_focused();
         self.note_paste_key(&ctx);
         let scan_backlog = self.poll_scan();

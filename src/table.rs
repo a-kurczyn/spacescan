@@ -193,6 +193,8 @@ struct RowOrder {
     /// Total size of everything listed (the flat list: of all its files,
     /// shown or past the limit).
     shown_size: u64,
+    /// Files in everything listed, as `shown_size` counts.
+    shown_files: u64,
     dotfile_size: u64,
     /// The flat list: how many files it has, shown or past the limit.
     flat_files: u64,
@@ -634,7 +636,11 @@ impl DiskScanApp {
         let row = |i: usize| order.rows.node(view_node, i);
         let n_rows = order.rows.len();
         let flat = order.key.flat.is_some();
-        let shown_size = order.shown_size;
+        let shown_weight = if measure_files() {
+            order.shown_files
+        } else {
+            order.shown_size
+        };
         // The cursor goes to the first row when it isn't in this folder.
         let found = self
             .table
@@ -820,7 +826,7 @@ impl DiskScanApp {
 
         // Percentages and bars are shares of the listed rows, so they add up
         // to 100% even with dotfiles hidden.
-        let total = shown_size.max(1);
+        let total = shown_weight.max(1);
         let bar_fill = ui.visuals().selection.bg_fill;
         let bar_frame = ui.visuals().weak_text_color();
         let dir_color = ui.visuals().hyperlink_color;
@@ -1010,7 +1016,7 @@ impl DiskScanApp {
                                         Vec2::new(86.0, row_h * 0.55),
                                         egui::Sense::hover(),
                                     );
-                                    let frac = c.size as f32 / total as f32;
+                                    let frac = weight(c) as f32 / total as f32;
                                     if selected {
                                         // A dark track under the fill.
                                         ui.painter().rect_filled(
@@ -1043,7 +1049,7 @@ impl DiskScanApp {
                                 Cell::Opt(TableCol::Percent) => {
                                     ui.label(format!(
                                         "{:.1}%",
-                                        c.size as f64 * 100.0 / total as f64
+                                        weight(c) as f64 * 100.0 / total as f64
                                     ));
                                 }
                                 Cell::Opt(TableCol::Size) => {
@@ -1183,6 +1189,7 @@ impl DiskScanApp {
             return RowOrder {
                 rows: Rows::Files(rows),
                 shown_size: size,
+                shown_files: count,
                 dotfile_size: dot_size,
                 flat_files: count,
                 folders: 0,
@@ -1263,6 +1270,7 @@ impl DiskScanApp {
                 .iter()
                 .map(|&i| children[i].size)
                 .fold(0u64, u64::saturating_add),
+            shown_files: idx.iter().map(|&i| children[i].file_count).sum(),
             dotfile_size: children
                 .iter()
                 .filter(|c| c.name.starts_with('.'))
@@ -1794,10 +1802,14 @@ impl DiskScanApp {
     /// A folder rescan finished: splices `node` into the full tree in place
     /// of the folder's old contents and returns to where the user was.
     /// False if no folder rescan was in progress.
-    pub(crate) fn finish_graft(&mut self, node: Node) -> bool {
+    pub(crate) fn finish_graft(&mut self, mut node: Node) -> bool {
         let Some(g) = self.graft.take() else {
             return false;
         };
+        // Scans sort by bytes; the tree may be sorted by files.
+        if self.tree_by_files {
+            sort_tree_by_measure(&mut node, true);
+        }
         // Nothing else holds the tree, so it's changed in place, not copied.
         self.root = None;
         self.cat_base = None;
@@ -2295,6 +2307,65 @@ mod cursor_tests {
         for c in &n.children {
             shape(c, out);
         }
+    }
+
+    /// Switching to files re-sorts every folder by file count (ties by
+    /// name) and the table's size sort to files; a delete then keeps that
+    /// order, as a fresh scan sorted by files would; switching back gives
+    /// exactly the order a scan gives.
+    #[test]
+    fn switching_the_measure_resorts_everything() {
+        let dir = std::env::temp_dir().join(format!("spacemap-measure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["heavy", "crowd/inner", "tie_b", "tie_a"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        std::fs::write(dir.join("heavy/one"), vec![1u8; 900_000]).unwrap();
+        for i in 0..40 {
+            std::fs::write(dir.join(format!("crowd/f{i}")), b"x").unwrap();
+            std::fs::write(dir.join(format!("crowd/inner/g{i}")), b"x").unwrap();
+        }
+        for t in ["tie_a", "tie_b"] {
+            for i in 0..3 {
+                std::fs::write(dir.join(t).join(format!("{i}")), vec![2u8; 5000 * (i + 1)])
+                    .unwrap();
+            }
+        }
+        let mut app = DiskScanApp {
+            full_root: Some(Arc::new(scan(&dir))),
+            ..DiskScanApp::default()
+        };
+        app.rebuild_view_tree();
+        let names = |n: &Node| {
+            n.children
+                .iter()
+                .map(|c| c.name.to_string())
+                .collect::<Vec<_>>()
+        };
+        let (mut before, mut fresh) = (Vec::new(), Vec::new());
+        shape(app.full_root.as_ref().unwrap(), &mut before);
+        app.settings.measure_files = true;
+        app.follow_measure();
+        let full = app.full_root.as_ref().unwrap();
+        assert_eq!(names(full), ["crowd", "tie_a", "tie_b", "heavy"]);
+        assert_eq!(app.contents_sort.column, SortColumn::Files);
+        std::fs::remove_file(dir.join("crowd/inner/g0")).unwrap();
+        app.drop_from_tree(&[dir.join("crowd/inner/g0")]);
+        let mut want = scan(&dir);
+        sort_tree_by_measure(&mut want, true);
+        let mut got = Vec::new();
+        shape(app.full_root.as_ref().unwrap(), &mut got);
+        shape(&want, &mut fresh);
+        assert_eq!(got, fresh, "after a delete, measuring files");
+        app.settings.measure_files = false;
+        app.follow_measure();
+        let (mut back, mut scanned) = (Vec::new(), Vec::new());
+        shape(app.full_root.as_ref().unwrap(), &mut back);
+        shape(&scan(&dir), &mut scanned);
+        assert_eq!(back, scanned, "back to bytes: the order a scan gives");
+        assert_eq!(app.contents_sort.column, SortColumn::Size);
+        assert!(!before.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A folder's own size is read from the disk again when entries leave

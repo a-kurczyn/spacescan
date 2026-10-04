@@ -347,3 +347,7 @@ HOVER_OLDEST=가장 오래된 파일:
 HOVER_AGE_RANGE_HINT=변경 시간 기준: 파일 데이터가 이 디스크에 들어온 때 (색이 나타내는 오래됨).
 SETTINGS_COLOR_BLIND=색각 이상 친화 색상
 SETTINGS_COLOR_BLIND_HOVER=흔한 색각 이상에서도 구분되는 카테고리 색상 (Paul Tol 팔레트). 카테고리가 8개를 넘으면 나머지는 확실히 구분되지 않을 수 있습니다.
+SETTINGS_MEASURE=크기 측정 기준
+SETTINGS_MEASURE_BYTES=바이트
+SETTINGS_MEASURE_FILES=파일 수
+SETTINGS_MEASURE_HOVER=차트 조각, 비율과 막대, 색상, 폴더 순서가 따르는 기준: 파일이 차지하는 공간 또는 파일 개수 (폴더는 파일로 세지 않음).

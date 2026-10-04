@@ -634,6 +634,23 @@ impl DiskScanApp {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         let s = &mut self.settings;
 
+                        ui.label(tr("SETTINGS_MEASURE"));
+                        ui.horizontal(|ui| {
+                            ui.radio_value(
+                                &mut s.measure_files,
+                                false,
+                                tr("SETTINGS_MEASURE_BYTES"),
+                            );
+                            ui.radio_value(
+                                &mut s.measure_files,
+                                true,
+                                tr("SETTINGS_MEASURE_FILES"),
+                            );
+                        })
+                        .response
+                        .on_hover_text(tr("SETTINGS_MEASURE_HOVER"));
+                        ui.separator();
+
                         ui.label(tr("SETTINGS_DEPTH_GROUPING"));
                         ui.add(
                             egui::Slider::new(&mut s.max_render_depth, Settings::DEPTH)
@@ -1073,7 +1090,10 @@ impl DiskScanApp {
     /// drawn, so thousands of extensions are fine.
     fn extension_table_ui(&mut self, ui: &mut egui::Ui, height: f32) {
         let rows = self.extension_rows();
-        let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);
+        let total: u64 = rows
+            .iter()
+            .map(|r| r.weight())
+            .fold(0u64, u64::saturating_add);
         let dark = ui.visuals().dark_mode;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
         // The extension clicked, and whether Ctrl was held.
@@ -1186,7 +1206,7 @@ impl DiskScanApp {
                     });
                     let hit = table_row.response();
                     // The name screen readers announce, as for the category bar.
-                    let pct = row.size as f64 * 100.0 / total.max(1) as f64;
+                    let pct = row.weight() as f64 * 100.0 / total.max(1) as f64;
                     let spoken = trf(
                         "A11Y_CATEGORY",
                         &[
@@ -1332,7 +1352,10 @@ impl DiskScanApp {
         }
 
         let rows = &self.cat_breakdown;
-        let total: u64 = rows.iter().map(|r| r.size).fold(0u64, u64::saturating_add);
+        let total: u64 = rows
+            .iter()
+            .map(|r| r.weight())
+            .fold(0u64, u64::saturating_add);
         let (rect, _) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), height.max(80.0)),
             egui::Sense::hover(),
@@ -1352,7 +1375,7 @@ impl DiskScanApp {
             let usable = rect.height() - gap * (rows.len() - 1) as f32;
             let raw: Vec<f32> = rows
                 .iter()
-                .map(|r| r.size as f32 / total as f32 * usable)
+                .map(|r| r.weight() as f32 / total as f32 * usable)
                 .collect();
             let thin = raw.iter().filter(|h| **h < min_h).count() as f32;
             let big_sum: f32 = raw.iter().filter(|h| **h >= min_h).sum();
@@ -1521,7 +1544,7 @@ impl DiskScanApp {
                         ink,
                     );
                 }
-                let pct = row.size as f64 * 100.0 / total as f64;
+                let pct = row.weight() as f64 * 100.0 / total as f64;
                 // The name screen readers announce.
                 let spoken = trf(
                     "A11Y_CATEGORY",
@@ -1543,7 +1566,7 @@ impl DiskScanApp {
                     painter.text(
                         Pos2::new(label_x, label_y[i] + pad + line_h),
                         egui::Align2::LEFT_TOP,
-                        format!("{pct:.1}% · {}", human_size(row.size)),
+                        format!("{pct:.1}% · {}", measure_text(row.size, row.files)),
                         font.clone(),
                         ui.visuals().weak_text_color(),
                     );
@@ -2118,6 +2141,26 @@ struct ExtRow {
     size: u64,
     files: u64,
     cat: Category,
+}
+
+impl ExtRow {
+    /// Its weight in the measure in use: bytes, or files.
+    fn weight(&self) -> u64 {
+        if measure_files() {
+            self.files
+        } else {
+            self.size
+        }
+    }
+}
+
+/// `size` bytes in `files` files, as the measure in use counts them.
+fn measure_text(size: u64, files: u64) -> String {
+    if measure_files() {
+        trn("COUNT_FILES", files, &[&format_count(files)])
+    } else {
+        human_size(size)
+    }
 }
 
 /// How far a color known since `since` has faded in from grey: 0 to 1

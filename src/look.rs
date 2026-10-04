@@ -18,6 +18,8 @@ pub(crate) struct Look {
     pub(crate) newest: i64,
     pub(crate) oldest: i64,
     pub(crate) size: u64,
+    /// Files it stands for (weighs a group's color when measuring files).
+    pub(crate) files: u64,
 }
 
 /// The look of every folder in a tree, keyed by the folder node's address
@@ -77,16 +79,23 @@ impl Totals {
         self.add_times(ctime, ctime);
     }
 
-    /// The category with the most bytes (most files if all are empty).
-    fn look(&self, size: u64) -> Look {
+    /// The category with the most bytes (most files if all are empty), or
+    /// with the most files when measuring files; for something of `size`
+    /// bytes and `files` files.
+    fn look(&self, size: u64, files: u64) -> Look {
         let most = |v: &[u64]| (0..v.len()).max_by_key(|&i| (v[i], std::cmp::Reverse(i)));
-        let by_bytes = most(&self.bytes).filter(|&i| self.bytes[i] > 0);
-        let cat = by_bytes.or_else(|| most(&self.files)).unwrap_or(0);
+        let cat = if measure_files() {
+            most(&self.files).filter(|&i| self.files[i] > 0)
+        } else {
+            most(&self.bytes).filter(|&i| self.bytes[i] > 0)
+        };
+        let cat = cat.or_else(|| most(&self.files)).unwrap_or(0);
         Look {
             cat: Category(cat),
             newest: self.newest.unwrap_or(NO_TIME),
             oldest: self.oldest.unwrap_or(NO_TIME),
             size,
+            files,
         }
     }
 }
@@ -138,7 +147,7 @@ impl Looks {
                     totals.add_file(cat, c.size, c.ctime);
                 }
             }
-            out.push((n as *const Node as usize, totals.look(n.size)));
+            out.push((n as *const Node as usize, totals.look(n.size, n.file_count)));
             totals
         }
         let mut looks = Vec::new();
@@ -157,7 +166,7 @@ impl Looks {
         }
         let mut totals = Totals::new(cats.other().0 + 1);
         totals.add_file(cats.of_name(&n.name), n.size, n.ctime);
-        totals.look(n.size)
+        totals.look(n.size, n.file_count)
     }
 
     /// The look of several nodes together (an "other" slice): the category
@@ -176,14 +185,16 @@ impl Looks {
 /// and the newest and oldest of their files.
 pub(crate) fn group_look(looks: impl Iterator<Item = Look>, cats: &CategoryModel) -> Look {
     let mut totals = Totals::new(cats.other().0 + 1);
-    let mut size = 0u64;
+    let (mut size, mut files) = (0u64, 0u64);
     for look in looks {
         totals.bytes[look.cat.0] = totals.bytes[look.cat.0].saturating_add(look.size);
-        totals.files[look.cat.0] += 1;
+        // Measuring files, each counts its files; else each counts once.
+        totals.files[look.cat.0] += if measure_files() { look.files } else { 1 };
         totals.add_times(look.newest, look.oldest);
         size = size.saturating_add(look.size);
+        files = files.saturating_add(look.files);
     }
-    totals.look(size)
+    totals.look(size, files)
 }
 
 /// One scan thread's share of a folder's counters, in one block: bytes
@@ -252,19 +263,20 @@ pub(crate) struct Summary {
 }
 
 impl Summary {
-    fn look(&self, size: u64) -> Look {
+    fn look(&self, size: u64, files: u64) -> Look {
         Look {
             cat: self.cat,
             newest: self.newest,
             oldest: self.oldest,
             size,
+            files,
         }
     }
 }
 
 impl Totals {
     fn summary(&self) -> Summary {
-        let look = self.look(0);
+        let look = self.look(0, 0);
         Summary {
             cat: look.cat,
             newest: look.newest,
@@ -538,15 +550,17 @@ impl LiveTree {
         // The smallest slice, from the scanned folder's size at the last read
         // (which only grows); the first read works it out.
         let total = match looks.last_total {
-            0 => self.read(root, None, 0, false, looks, Instant::now()).size,
+            0 => self
+                .read(root, None, 0, false, looks, Instant::now())
+                .weight(),
             known => known,
         };
         let min_size = (total as f64 * min_share) as u64;
         // The scanned folder's own children are all kept: the table lists
         // them.
         let read = self.read(root, Some(depth), min_size, true, looks, Instant::now());
+        looks.last_total = read.weight();
         looks.root = read.totals;
-        looks.last_total = read.size;
         read.node
     }
 
@@ -582,10 +596,15 @@ impl LiveTree {
                 t.bytes.iter().fold(f.own_size, |a, b| a.saturating_add(*b))
             }),
         };
+        let mut files = match finished {
+            Some(d) => d.file_count,
+            None => totals.as_ref().map_or(0, |t| t.files.iter().sum()),
+        };
         // Below what's shown, a finished folder is done: its stored values.
         if finished.is_some() && depth.is_none() {
             return Read {
                 size,
+                files,
                 totals,
                 node: None,
             };
@@ -593,11 +612,17 @@ impl LiveTree {
         let mut kids = Vec::new();
         let mut grouped = Grouped::default();
         for c in &children {
-            let small = |size: u64| !keep_all && size < min_size;
+            let measure = if measure_files() {
+                |d: &Finished| d.file_count
+            } else {
+                |d: &Finished| d.size
+            };
+            let small = |weight: u64| !keep_all && weight < min_size;
             let r = match c.done.get() {
                 // Small and finished: its stored values, no node.
-                Some(d) if small(d.size) => Read {
+                Some(d) if small(measure(d)) => Read {
                     size: d.size,
+                    files: d.file_count,
                     // Only an unfinished folder still adds them up.
                     totals: match finished {
                         None => c.totals.lock().unwrap().clone(),
@@ -622,11 +647,12 @@ impl LiveTree {
                     None => debug_assert!(false, "a subfolder's totals went missing"),
                 }
                 size = size.saturating_add(r.size);
+                files = files.saturating_add(r.files);
             }
             // Subfolders only where they're shown.
             if below.is_some() {
                 match r.node {
-                    Some(n) if !small(r.size) => kids.push(n),
+                    Some(n) if !small(r.weight()) => kids.push(n),
                     _ => grouped.add(c, &r),
                 }
             }
@@ -642,12 +668,17 @@ impl LiveTree {
                 if let Some(other) = grouped.node(&f.path, looks, &self.cats, now) {
                     kids.push(other);
                 }
-                kids.sort_by_key(|c| std::cmp::Reverse(c.size));
+                sort_by_measure(&mut kids, measure_files());
                 n.children = kids.into();
             }
             n
         });
-        Read { size, totals, node }
+        Read {
+            size,
+            files,
+            totals,
+            node,
+        }
     }
 }
 
@@ -667,10 +698,11 @@ impl Grouped {
         self.size = self.size.saturating_add(r.size);
         if let Some(d) = c.done.get() {
             self.file_count += d.file_count;
-            self.looks.push(d.summary.look(r.size));
+            self.looks.push(d.summary.look(r.size, d.file_count));
         } else if let Some(t) = &r.totals {
-            self.file_count += t.files.iter().sum::<u64>();
-            self.looks.push(t.summary().look(r.size));
+            let files = t.files.iter().sum::<u64>();
+            self.file_count += files;
+            self.looks.push(t.summary().look(r.size, files));
         }
     }
 
@@ -723,8 +755,20 @@ pub(crate) struct LiveOpen {
 /// What `LiveTree::read` gives for one folder.
 struct Read {
     size: u64,
+    files: u64,
     totals: Option<Totals>,
     node: Option<Node>,
+}
+
+impl Read {
+    /// Its weight in the measure in use: bytes, or files.
+    fn weight(&self) -> u64 {
+        if measure_files() {
+            self.files
+        } else {
+            self.size
+        }
+    }
 }
 
 /// Slice looks during a scan, for the live chart, from the latest
@@ -778,7 +822,7 @@ impl LiveLooks {
         let key = node_key(node);
         let since = *self.since.get(&key)?;
         let summary = self.summaries.get(&key)?;
-        Some((summary.look(node.size), since))
+        Some((summary.look(node.size, node.file_count), since))
     }
 
     /// Categories under the scanned folder so far, most bytes first.
@@ -869,6 +913,100 @@ pub(crate) fn now_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// During a scan, the live chart orders folders by the measure in use:
+    /// measuring files, a folder with many small files leads one with one
+    /// big file, and equal counts go by name.
+    #[test]
+    fn live_chart_follows_the_measure() {
+        let dir = std::env::temp_dir().join(format!("spacemap-livemeasure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("big")).unwrap();
+        std::fs::create_dir_all(dir.join("crowd")).unwrap();
+        std::fs::write(dir.join("big/one"), vec![1u8; 4 << 20]).unwrap();
+        for i in 0..200 {
+            std::fs::write(dir.join(format!("crowd/{i}")), b"x").unwrap();
+        }
+        for i in 0..30 {
+            std::fs::create_dir_all(dir.join(format!("s{i}"))).unwrap();
+            std::fs::write(dir.join(format!("s{i}/f")), b"x").unwrap();
+        }
+        let read = |files: bool| {
+            set_measure_files(files);
+            let live = LiveTree::new(Arc::new(CategoryModel::defaults()));
+            let (tx, rx) = channel();
+            std::thread::spawn(move || for _ in rx {});
+            let ctx = ScanCtx {
+                mounts: &HashSet::new(),
+                progress: &tx,
+                cancel: &Default::default(),
+                apparent_size: false,
+                hard_links: Default::default(),
+                saw_hangul: &Default::default(),
+                in_file_order: false,
+                live: Some(&live),
+            };
+            scan_dir(&dir, &ctx);
+            let mut looks = LiveLooks::default();
+            let snap = live.snapshot(2, 0.02, &mut looks).unwrap();
+            set_measure_files(false);
+            let names: Vec<String> = snap.children.iter().map(|c| c.name.to_string()).collect();
+            names
+        };
+        let (bytes, files) = (read(false), read(true));
+        assert_eq!(bytes[0], "big");
+        // Measuring files: the crowded folder first, then the one-file
+        // folders, equal counts by name.
+        assert_eq!(files[..3], ["crowd", "big", "s0"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A folder holding one big video and ten small text files takes the
+    /// video's category measuring bytes and the text's measuring files; the
+    /// category bar orders its rows the same way; groups ("other") weigh
+    /// their members by files too.
+    #[test]
+    fn measure_decides_categories() {
+        let cats = CategoryModel::defaults();
+        let mut kids = vec![test_node("/f/movie.mkv", 5 << 30, false, vec![])];
+        kids.extend((0..10).map(|i| test_node(&format!("/f/n{i}.txt"), 100, false, vec![])));
+        let mut f = test_node("/f", 0, true, kids);
+        f.size = f.children.iter().map(|c| c.size).sum();
+        f.file_count = 11;
+        let video = cats.of_name("a.mkv");
+        let text = cats.of_name("a.txt");
+        let by_bytes = Looks::build(&f, &cats, false).of(&f, &cats).cat;
+        let rows_bytes: Vec<Category> = category_breakdown(&f, &cats)
+            .iter()
+            .map(|r| r.cat)
+            .collect();
+        set_measure_files(true);
+        let by_files = Looks::build(&f, &cats, false).of(&f, &cats).cat;
+        let rows_files: Vec<Category> = category_breakdown(&f, &cats)
+            .iter()
+            .map(|r| r.cat)
+            .collect();
+        let a = Looks::build(&f, &cats, false).of(&f, &cats);
+        let one = Look {
+            files: 1,
+            size: 5 << 30,
+            cat: video,
+            ..a
+        };
+        let lots = Look {
+            files: 10,
+            size: 1000,
+            cat: text,
+            ..a
+        };
+        let group = group_look([one, lots].into_iter(), &cats).cat;
+        set_measure_files(false);
+        let group_bytes = group_look([one, lots].into_iter(), &cats).cat;
+        assert_eq!((by_bytes, by_files), (video, text));
+        assert_eq!(rows_bytes, [video, text]);
+        assert_eq!(rows_files, [text, video]);
+        assert_eq!((group_bytes, group), (video, text));
+    }
 
     /// A category is stored as its index, or as `NO_CAT` when the index
     /// doesn't fit in a byte or is `NO_CAT` itself.

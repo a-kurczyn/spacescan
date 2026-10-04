@@ -887,6 +887,65 @@ fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
     exts
 }
 
+/// Whether sizes are measured in files instead of bytes (a setting): what
+/// slices, shares, bars and the folders' order follow.
+pub(crate) static MEASURE_FILES: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// True while sizes are measured in files.
+pub(crate) fn measure_files() -> bool {
+    #[cfg(test)]
+    return TEST_MEASURE_FILES.with(|m| m.get());
+    #[cfg(not(test))]
+    MEASURE_FILES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Sets the measure in use (`files`, else bytes).
+pub(crate) fn set_measure_files(files: bool) {
+    #[cfg(test)]
+    TEST_MEASURE_FILES.with(|m| m.set(files));
+    MEASURE_FILES.store(files, std::sync::atomic::Ordering::Relaxed);
+}
+
+// Tests run side by side: each test thread has its own measure.
+#[cfg(test)]
+thread_local! {
+    static TEST_MEASURE_FILES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// What `n` weighs in the measure in use: its bytes, or its files.
+pub(crate) fn weight(n: &Node) -> u64 {
+    if measure_files() {
+        n.file_count
+    } else {
+        n.size
+    }
+}
+
+/// Sorts a folder's entries by `files` (file counts) or by bytes, largest
+/// first, equal ones by name.
+pub(crate) fn sort_by_measure(children: &mut [Node], files: bool) {
+    if !files {
+        return sort_largest_first(children);
+    }
+    children.sort_by_key(|c| std::cmp::Reverse(c.file_count));
+    for same in children.chunk_by_mut(|a, b| a.file_count == b.file_count) {
+        if same.len() > 1 {
+            same.sort_unstable_by(|a, b| a.disk_name().cmp(b.disk_name()));
+        }
+    }
+}
+
+/// Sorts every folder under `root` by `files` or by bytes (in parallel),
+/// as when the measure in use changes.
+pub(crate) fn sort_tree_by_measure(root: &mut Node, files: bool) {
+    root.children
+        .par_iter_mut()
+        .filter(|c| c.is_dir)
+        .for_each(|c| deep(|| sort_tree_by_measure(c, files)));
+    sort_by_measure(&mut root.children, files);
+}
+
 /// Sorts a folder's entries: largest first, equal sizes by name, so the same
 /// contents always come in the same order (whatever order the disk lists
 /// them in, whichever name of a hard-linked file was counted, and after
@@ -901,25 +960,27 @@ pub(crate) fn sort_largest_first(children: &mut [Node]) {
 }
 
 /// Re-sorts, in the tree under `root`, every folder holding one of `changed`
-/// or a folder above it, after their sizes changed in place: each once.
+/// or a folder above it, after their sizes changed in place: each once, by
+/// the measure in use.
 pub(crate) fn resort_above(root: &mut Node, changed: &[PathBuf]) {
+    let files = measure_files();
     let mut folders: HashSet<&Path> = HashSet::new();
     for p in changed {
         folders.extend(p.ancestors().skip(1));
     }
-    fn walk(n: &mut Node, at: &mut PathBuf, folders: &HashSet<&Path>) {
+    fn walk(n: &mut Node, at: &mut PathBuf, folders: &HashSet<&Path>, files: bool) {
         for c in n.children.iter_mut().filter(|c| c.is_dir) {
             at.push(c.disk_name());
             if folders.contains(at.as_path()) {
-                deep(|| walk(c, at, folders));
+                deep(|| walk(c, at, folders, files));
             }
             at.pop();
         }
-        sort_largest_first(&mut n.children);
+        sort_by_measure(&mut n.children, files);
     }
     let mut at = root.path();
     if folders.contains(at.as_path()) {
-        walk(root, &mut at, &folders);
+        walk(root, &mut at, &folders, files);
     }
 }
 

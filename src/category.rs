@@ -307,6 +307,17 @@ pub(crate) struct CategoryRow {
     pub(crate) exts: Vec<(String, u64, u64)>,
 }
 
+impl CategoryRow {
+    /// Its weight in the measure in use: bytes, or files.
+    pub(crate) fn weight(&self) -> u64 {
+        if measure_files() {
+            self.files
+        } else {
+            self.size
+        }
+    }
+}
+
 /// `ext_key`, without heap memory when the extension is ASCII and fits
 /// in `buf` (nearly always).
 pub(crate) fn ext_key_in<'a>(name: &'a str, buf: &'a mut [u8; 16]) -> std::borrow::Cow<'a, str> {
@@ -419,12 +430,19 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
         row.files += files;
         row.exts.push((ext.clone(), size, files));
     }
+    // By the measure in use (bytes or files), ties by extension; rows ties
+    // in list order (Other last among equals).
+    let files = measure_files();
     for r in &mut rows {
-        r.exts
-            .sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        r.exts.sort_by(|a, b| {
+            let (x, y) = if files { (a.2, b.2) } else { (a.1, b.1) };
+            y.cmp(&x).then_with(|| a.0.cmp(&b.0))
+        });
     }
-    // By size, ties in list order (Other last among equals).
-    rows.sort_by_key(|r| (std::cmp::Reverse(r.size), r.cat.0));
+    rows.sort_by_key(|r| {
+        let w = if files { r.files } else { r.size };
+        (std::cmp::Reverse(w), r.cat.0)
+    });
     rows
 }
 

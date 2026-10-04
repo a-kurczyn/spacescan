@@ -361,3 +361,7 @@ HOVER_OLDEST=Arquivo mais antigo:
 HOVER_AGE_RANGE_HINT=Pela data de alteração: quando os dados do arquivo chegaram a este disco (a idade que as cores mostram).
 SETTINGS_COLOR_BLIND=Cores seguras para daltonismo
 SETTINGS_COLOR_BLIND_HOVER=Cores de categoria que se distinguem com qualquer tipo comum de daltonismo (paletas de Paul Tol). Com mais de oito categorias, as demais podem não se distinguir.
+SETTINGS_MEASURE=Medir tamanhos por
+SETTINGS_MEASURE_BYTES=Bytes
+SETTINGS_MEASURE_FILES=Número de arquivos
+SETTINGS_MEASURE_HOVER=O que as fatias do gráfico, as proporções e barras, as cores e a ordem das pastas seguem: o espaço que os arquivos ocupam ou quantos arquivos há (pastas não contam como arquivos).

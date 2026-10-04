@@ -150,6 +150,8 @@ fn layout_ring(
     // Free space takes its share of the drive's capacity; the content found
     // so far fills the rest of the ring (also while a scan is running).
     let full_span = end_angle - start_angle;
+    // Free space has no files: it only shows when measuring bytes.
+    let extra_free_bytes = if measure_files() { 0 } else { extra_free_bytes };
     let content_end_angle = if extra_free_bytes > 0 && total_capacity > 0 {
         let free_frac = extra_free_bytes as f32 / total_capacity as f32;
         start_angle + full_span * (1.0 - free_frac)
@@ -185,13 +187,13 @@ fn layout_ring(
             .take(n)
             .enumerate()
             .take_while(|(k, (_, c))| {
-                shown_sum = shown_sum.saturating_add(c.size);
+                shown_sum = shown_sum.saturating_add(weight(c));
                 let room = if k + 1 < visible_children.len() {
                     1.0 - min_frac.min(0.5)
                 } else {
                     1.0
                 };
-                c.size > 0 && (c.size as f32 / shown_sum as f32) * room >= min_frac * 0.999
+                weight(c) > 0 && (weight(c) as f32 / shown_sum as f32) * room >= min_frac * 0.999
             })
             .count()
     };
@@ -205,10 +207,14 @@ fn layout_ring(
         .iter()
         .map(|(_, c)| c.size)
         .fold(0u64, u64::saturating_add);
+    let rest_weight: u64 = rest
+        .iter()
+        .map(|(_, c)| weight(c))
+        .fold(0u64, u64::saturating_add);
 
     // "Other" is one min-angle slot; the shown slices split the rest in
-    // proportion to their sizes.
-    let other_frac = if rest_size > 0 {
+    // proportion to their sizes (or files).
+    let other_frac = if rest_weight > 0 {
         min_frac.min(0.5)
     } else {
         0.0
@@ -216,7 +222,7 @@ fn layout_ring(
     let available_frac = (1.0 - other_frac).max(0.0);
     let shown_total = shown
         .iter()
-        .map(|(_, c)| c.size as f32)
+        .map(|(_, c)| weight(c) as f32)
         .sum::<f32>()
         .max(1.0);
 
@@ -224,7 +230,7 @@ fn layout_ring(
     let mut cursor = start_angle;
 
     for (i, child) in &shown {
-        let frac = (child.size as f32 / shown_total) * available_frac;
+        let frac = (weight(child) as f32 / shown_total) * available_frac;
         let a0 = cursor;
         let a1 = cursor + span * frac;
         cursor = a1;
@@ -248,7 +254,7 @@ fn layout_ring(
             layout_ring(child, cp, (a0, a1), ring + 1, (0, 0), opts, out);
         }
     }
-    if rest_size > 0 {
+    if rest_weight > 0 {
         // Ends exactly at content_end_angle, so rounding leaves no gap.
         let a0 = cursor;
         let a1 = content_end_angle;
@@ -507,6 +513,72 @@ mod tests {
         };
         layout_ring(root, vec![], (0.0, span), 0, (0, 0), opts, &mut segs);
         segs
+    }
+
+    /// Measuring files: slices follow file counts, not bytes (one 10-GB
+    /// file against a hundred tiny ones), a folder with no files gets no
+    /// slice and makes no "other", and free space (which has no files) is
+    /// left out; measuring bytes again, the same tree is drawn as before.
+    #[test]
+    fn measuring_files_sizes_slices_by_file_count() {
+        let mut few = test_node(
+            "/m/few",
+            0,
+            true,
+            vec![test_node("/m/few/big", 10 << 30, false, vec![])],
+        );
+        few.size = 10 << 30;
+        few.file_count = 1;
+        let tiny: Vec<Node> = (0..100)
+            .map(|i| test_node(&format!("/m/many/{i}"), 1024, false, vec![]))
+            .collect();
+        let mut many = test_node("/m/many", 100 * 1024, true, tiny);
+        many.file_count = 100;
+        let mut empty = test_node("/m/empty", 4096, true, vec![]);
+        empty.file_count = 0;
+        let mut root = test_node("/m", 0, true, vec![few, many, empty]);
+        root.size = root.children.iter().map(|c| c.size).sum();
+        root.file_count = 101;
+        let draw = |root: &Node| {
+            let mut segs = Vec::new();
+            let opts = LayoutOpts {
+                hidden: &HashSet::new(),
+                settings: &Settings::default(),
+                order: ChartOrder::Size,
+            };
+            layout_ring(
+                root,
+                vec![],
+                (0.0, 6.0),
+                0,
+                (1 << 30, 40 << 30),
+                opts,
+                &mut segs,
+            );
+            // The first ring: the folder's own children.
+            segs.retain(|s| s.ring == 0);
+            segs
+        };
+        let bytes = draw(&root);
+        set_measure_files(true);
+        sort_by_measure(&mut root.children, true);
+        let files = draw(&root);
+        set_measure_files(false);
+        assert!(
+            bytes.iter().any(|s| s.is_free),
+            "free space shows when measuring bytes"
+        );
+        assert!(!files.iter().any(|s| s.is_free || s.is_other));
+        let w = |s: &Segment| s.end_angle - s.start_angle;
+        let shown: Vec<&Segment> = files.iter().collect();
+        assert_eq!(
+            shown.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["many", "few"]
+        );
+        assert!((w(shown[0]) / w(shown[1]) - 100.0).abs() < 0.1);
+        assert!((shown.iter().map(|s| w(s)).sum::<f32>() - 6.0).abs() < 1e-3);
+        let biggest = bytes.iter().find(|s| !s.is_free).unwrap();
+        assert_eq!(biggest.name, "few", "measuring bytes, the 10-GB file leads");
     }
 
     /// Similar-sized items (movies of 171, 158, 156, … GB among 1199) get

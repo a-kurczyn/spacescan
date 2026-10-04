@@ -276,7 +276,7 @@ pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) ->
     if children.is_empty() {
         return None;
     }
-    children.sort_by_key(|c| std::cmp::Reverse(c.size));
+    sort_by_measure(&mut children, measure_files());
     let mut kept = empty_node();
     kept.name = n.name.clone();
     kept.copy_place(n);
