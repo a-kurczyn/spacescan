@@ -345,3 +345,5 @@ TABLE_TAG_SO_FAR=これまでに %s
 HOVER_NEWEST=最新のファイル:
 HOVER_OLDEST=最古のファイル:
 HOVER_AGE_RANGE_HINT=変更日時による: ファイルのデータがこのディスクに来た時点 (色が示す古さ)。
+SETTINGS_COLOR_BLIND=色覚多様性に配慮した色
+SETTINGS_COLOR_BLIND_HOVER=一般的な色覚の違いがあっても区別できるカテゴリの色 (Paul Tol のパレット)。カテゴリが 8 つを超えると、それ以降は確実には区別できません。

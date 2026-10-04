@@ -658,6 +658,8 @@ impl DiskScanApp {
 
                         ui.separator();
                         ui.label(tr("SETTINGS_COLORS"));
+                        ui.checkbox(&mut s.color_blind_safe, tr("SETTINGS_COLOR_BLIND"))
+                            .on_hover_text(tr("SETTINGS_COLOR_BLIND_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.age_days, Settings::AGE_DAYS)
                                 .logarithmic(true)

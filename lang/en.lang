@@ -376,3 +376,5 @@ TABLE_TAG_SO_FAR=%s so far
 HOVER_NEWEST=Newest file:
 HOVER_OLDEST=Oldest file:
 HOVER_AGE_RANGE_HINT=By Changed time: when the file's data arrived on this disk (the age the slice colours show).
+SETTINGS_COLOR_BLIND=Colour-blind-safe colours
+SETTINGS_COLOR_BLIND_HOVER=Category colours that stay distinct with any common kind of colour blindness (Paul Tol's palettes). With more than eight categories, the extra ones can't be told apart reliably.

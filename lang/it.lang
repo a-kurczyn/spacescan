@@ -357,3 +357,5 @@ TABLE_TAG_SO_FAR=%s finora
 HOVER_NEWEST=File più recente:
 HOVER_OLDEST=File più vecchio:
 HOVER_AGE_RANGE_HINT=In base all'ora di modifica: quando i dati del file sono arrivati su questo disco (l'età che mostrano i colori).
+SETTINGS_COLOR_BLIND=Colori adatti al daltonismo
+SETTINGS_COLOR_BLIND_HOVER=Colori di categoria distinguibili con ogni tipo comune di daltonismo (palette di Paul Tol). Oltre otto categorie, le altre non si distinguono con certezza.

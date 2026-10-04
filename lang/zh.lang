@@ -345,3 +345,5 @@ TABLE_TAG_SO_FAR=目前 %s
 HOVER_NEWEST=最新的文件：
 HOVER_OLDEST=最旧的文件：
 HOVER_AGE_RANGE_HINT=按更改时间：文件数据到达此磁盘的时间（颜色所表示的新旧）。
+SETTINGS_COLOR_BLIND=色盲友好配色
+SETTINGS_COLOR_BLIND_HOVER=在常见色觉障碍下仍可区分的类别颜色（Paul Tol 配色）。类别超过八个时，多出的类别可能无法可靠区分。

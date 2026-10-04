@@ -114,6 +114,8 @@ struct Settings {
     flat_all: bool,
     /// Ctrl+C / Ctrl+X also put the picked paths on the clipboard as text.
     paths_to_clipboard: bool,
+    /// Category colors told apart with any kind of color blindness.
+    color_blind_safe: bool,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -204,6 +206,7 @@ impl Default for Settings {
             flat_rows: 1000,
             flat_all: false,
             paths_to_clipboard: true,
+            color_blind_safe: false,
         }
     }
 }
@@ -960,6 +963,10 @@ impl DiskScanApp {
 impl eframe::App for DiskScanApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        category::COLOR_BLIND_SAFE.store(
+            self.settings.color_blind_safe,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         self.typing = ctx.text_edit_focused();
         self.note_paste_key(&ctx);
         let scan_backlog = self.poll_scan();

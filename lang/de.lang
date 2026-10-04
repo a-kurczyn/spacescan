@@ -358,3 +358,5 @@ TABLE_TAG_SO_FAR=bisher %s
 HOVER_NEWEST=Neueste Datei:
 HOVER_OLDEST=Älteste Datei:
 HOVER_AGE_RANGE_HINT=Nach Änderungszeit: wann die Daten der Datei auf dieses Laufwerk kamen (das Alter, das die Farben zeigen).
+SETTINGS_COLOR_BLIND=Farbenblind-sichere Farben
+SETTINGS_COLOR_BLIND_HOVER=Kategoriefarben, die bei allen üblichen Formen von Farbenblindheit unterscheidbar bleiben (Paletten von Paul Tol). Bei mehr als acht Kategorien sind die weiteren nicht sicher unterscheidbar.

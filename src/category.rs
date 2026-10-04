@@ -32,6 +32,23 @@ const PALETTE: [(u32, u32); 8] = [
 ];
 const OTHER_COLOR: (u32, u32) = (0x6f6e69, 0xa8a7a2);
 
+/// The color-blind-safe palette (Paul Tol's): his "light" colors on a dark
+/// background, his "muted" ones on a light background, as (dark, light).
+const SAFE_PALETTE: [(u32, u32); 8] = [
+    (0x77aadd, 0x332288),
+    (0xee8866, 0xcc6677),
+    (0x44bb99, 0x117733),
+    (0xeedd88, 0xddcc77),
+    (0xffaabb, 0xaa4499),
+    (0x99ddff, 0x88ccee),
+    (0xbbcc33, 0x882255),
+    (0xaaaa00, 0x999933),
+];
+
+/// Whether categories use the color-blind-safe palette (a setting).
+pub(crate) static COLOR_BLIND_SAFE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
@@ -70,13 +87,22 @@ impl CategoryModel {
         tr(self.names.get(c.0).map_or("CAT_OTHER", String::as_str))
     }
 
-    /// The category's color on a dark or light background: palette colors
-    /// in list order, then evenly spread hues; Other is gray.
+    /// The category's color on a dark or light background, in the palette
+    /// chosen in the settings (see `color_in`).
     pub(crate) fn color(&self, c: Category, dark: bool) -> Color32 {
+        let safe = COLOR_BLIND_SAFE.load(std::sync::atomic::Ordering::Relaxed);
+        self.color_in(c, dark, safe)
+    }
+
+    /// The category's color on a dark or light background: palette colors
+    /// (`safe`: the color-blind-safe ones) in list order, then evenly spread
+    /// hues; Other is gray.
+    pub(crate) fn color_in(&self, c: Category, dark: bool, safe: bool) -> Color32 {
         if c == self.other() {
             return rgb(if dark { OTHER_COLOR.0 } else { OTHER_COLOR.1 });
         }
-        match PALETTE.get(c.0) {
+        let palette = if safe { &SAFE_PALETTE } else { &PALETTE };
+        match palette.get(c.0) {
             Some(&(d, l)) => rgb(if dark { d } else { l }),
             None => hsv_to_rgb(hue_for_branch(c.0), 0.6, if dark { 0.8 } else { 0.7 }),
         }
@@ -496,8 +522,14 @@ mod tests {
         // Not listed any more: falls to Other.
         assert_eq!(m.of_name("a.pdf"), m.other());
         // Colors follow the list order.
-        assert_eq!(m.color(m.of_name("a.eml"), true), rgb(PALETTE[0].0));
-        assert_eq!(m.color(m.of_name("a.mkv"), true), rgb(PALETTE[1].0));
+        assert_eq!(
+            m.color_in(m.of_name("a.eml"), true, false),
+            rgb(PALETTE[0].0)
+        );
+        assert_eq!(
+            m.color_in(m.of_name("a.mkv"), true, false),
+            rgb(PALETTE[1].0)
+        );
         // .eml twice, a nameless entry, a non-string extension.
         assert_eq!(problems.len(), 3, "{problems:?}");
     }
@@ -661,5 +693,115 @@ mod tests {
         count(&root.children[2], &mut small);
         let want_small = category_rows(&small.into_iter().collect(), &model);
         assert_eq!(category_breakdown(&root.children[2], &model), want_small);
+    }
+
+    /// Every pair of colors in the color-blind-safe palette, and each color
+    /// against Other's gray, stays clearly apart for normal vision and as
+    /// seen with protanopia, deuteranopia and tritanopia (full strength,
+    /// Machado 2009), on both backgrounds. Prints the closest pair.
+    #[test]
+    fn color_blind_palette_stays_apart() {
+        type Matrix = [[f64; 3]; 3];
+        const SEEN: [(&str, Matrix); 4] = [
+            (
+                "normal",
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            ),
+            (
+                "protanopia",
+                [
+                    [0.152286, 1.052583, -0.204868],
+                    [0.114503, 0.786281, 0.099216],
+                    [-0.003882, -0.048116, 1.051998],
+                ],
+            ),
+            (
+                "deuteranopia",
+                [
+                    [0.367322, 0.860646, -0.227968],
+                    [0.280085, 0.672501, 0.047413],
+                    [-0.011820, 0.042940, 0.968881],
+                ],
+            ),
+            (
+                "tritanopia",
+                [
+                    [1.255528, -0.076749, -0.178779],
+                    [-0.078411, 0.930809, 0.147602],
+                    [0.004733, 0.691367, 0.303900],
+                ],
+            ),
+        ];
+        let linear = |c: u8| {
+            let v = f64::from(c) / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        // CIELAB of a color as seen through `m`.
+        let lab = |c: Color32, m: &Matrix| {
+            let rgb = [linear(c.r()), linear(c.g()), linear(c.b())];
+            let s: Vec<f64> = (0..3)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| m[i][j] * rgb[j])
+                        .sum::<f64>()
+                        .clamp(0.0, 1.0)
+                })
+                .collect();
+            let xyz = [
+                0.4124 * s[0] + 0.3576 * s[1] + 0.1805 * s[2],
+                0.2126 * s[0] + 0.7152 * s[1] + 0.0722 * s[2],
+                0.0193 * s[0] + 0.1192 * s[1] + 0.9505 * s[2],
+            ];
+            let white = [0.95047, 1.0, 1.08883];
+            let f = |t: f64| {
+                if t > 0.008856 {
+                    t.cbrt()
+                } else {
+                    7.787 * t + 16.0 / 116.0
+                }
+            };
+            let (x, y, z) = (
+                f(xyz[0] / white[0]),
+                f(xyz[1] / white[1]),
+                f(xyz[2] / white[2]),
+            );
+            [116.0 * y - 16.0, 500.0 * (x - y), 200.0 * (y - z)]
+        };
+        let m = CategoryModel::defaults();
+        let n = m.other().0;
+        assert!(
+            n <= SAFE_PALETTE.len(),
+            "every built-in category has a safe color"
+        );
+        for dark in [true, false] {
+            let colors: Vec<Color32> = (0..=n)
+                .map(|i| m.color_in(Category(i), dark, true))
+                .collect();
+            let mut closest = (f64::MAX, String::new());
+            for (name, matrix) in &SEEN {
+                for a in 0..colors.len() {
+                    for b in a + 1..colors.len() {
+                        let (p, q) = (lab(colors[a], matrix), lab(colors[b], matrix));
+                        let d =
+                            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2))
+                                .sqrt();
+                        if d < closest.0 {
+                            closest = (d, format!("{name}: {a} vs {b}"));
+                        }
+                    }
+                }
+            }
+            eprintln!("dark {dark}: closest pair {:.1} ({})", closest.0, closest.1);
+            assert!(
+                closest.0 >= 8.0,
+                "dark {dark}: {} only {:.1} apart",
+                closest.1,
+                closest.0
+            );
+        }
     }
 }
