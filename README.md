@@ -185,8 +185,8 @@ issue.
 ## Contributing
 
 Ideas, suggestions and bug reports are welcome: please open an issue.
-Code contributions are by invitation only; see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Pull requests are welcome too; for anything bigger than a small fix,
+please open an issue first. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 SpaceScan is developed with the help of AI coding tools; every change is
 reviewed by the maintainer.

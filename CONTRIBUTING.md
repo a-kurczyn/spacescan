@@ -14,10 +14,10 @@ to happen.
 
 ## Code contributions
 
-SpaceScan doesn't accept unsolicited pull requests. If you'd like to work
-on something, open an issue first and ask; code is accepted only when the
-maintainer has invited it. Pull requests that weren't agreed on in an
-issue may be closed without review.
+Pull requests are welcome. For anything bigger than a small fix, please
+open an issue first so we can agree on the idea before you spend time on
+the code; a pull request for a change that wasn't discussed may be
+declined.
 
 Changes reach `main` only after the maintainer reviews and approves them.
 As the license allows, you're free to fork SpaceScan and change your own
@@ -25,9 +25,9 @@ copy.
 
 ## Developer Certificate of Origin
 
-Every commit in an invited pull request must be signed off, to certify that you wrote the change or
-otherwise have the right to submit it under the project's license, as set
-out in the [Developer Certificate of Origin 1.1](https://developercertificate.org/).
+Every commit in a pull request must be signed off, to certify that you
+wrote the change or otherwise have the right to submit it under the
+project's license, as set out in the [Developer Certificate of Origin 1.1](https://developercertificate.org/).
 Add the sign-off with `git commit -s`, which appends a line like:
 
     Signed-off-by: Your Name <you@example.com>
