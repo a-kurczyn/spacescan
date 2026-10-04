@@ -725,21 +725,21 @@ mod tests {
     fn removing_under_a_filter_warns_about_hidden_files() {
         let mut app = DiskScanApp::default();
         let folder = test_node(
-            "/nonexistent-qa/mixed",
+            "/nonexistent/mixed",
             0,
             true,
             vec![
-                test_node("/nonexistent-qa/mixed/a.mkv", 6000, false, vec![]),
-                test_node("/nonexistent-qa/mixed/b.pdf", 900, false, vec![]),
+                test_node("/nonexistent/mixed/a.mkv", 6000, false, vec![]),
+                test_node("/nonexistent/mixed/b.pdf", 900, false, vec![]),
             ],
         );
-        let mut full = test_node("/nonexistent-qa", 0, true, vec![folder]);
+        let mut full = test_node("/nonexistent", 0, true, vec![folder]);
         full.children[0].size = 6900;
         full.children[0].file_count = 2;
         app.full_root = Some(Arc::new(full));
         app.pick = Some(Pick::Category(app.cats.of_name("x.mkv")));
         app.rebuild_view_tree();
-        let target = vec![PathBuf::from("/nonexistent-qa/mixed")];
+        let target = vec![PathBuf::from("/nonexistent/mixed")];
 
         app.ask_delete(target.clone());
         assert!(matches!(
@@ -776,25 +776,25 @@ mod tests {
     #[test]
     fn delete_dialog_counts_unreadable_folders_inside() {
         let mut app = DiskScanApp::default();
-        let locked = test_node("/nonexistent-qa/locked", 0, true, vec![]);
-        let other = test_node("/nonexistent-qa/other", 0, true, vec![]);
+        let locked = test_node("/nonexistent/locked", 0, true, vec![]);
+        let other = test_node("/nonexistent/other", 0, true, vec![]);
         app.root = Some(Arc::new(test_node(
-            "/nonexistent-qa",
+            "/nonexistent",
             0,
             true,
             vec![locked, other],
         )));
         app.unreadable = vec![
-            PathBuf::from("/nonexistent-qa/locked/secret"),
-            PathBuf::from("/nonexistent-qa/elsewhere"),
+            PathBuf::from("/nonexistent/locked/secret"),
+            PathBuf::from("/nonexistent/elsewhere"),
         ];
-        app.ask_delete(vec![PathBuf::from("/nonexistent-qa/locked")]);
+        app.ask_delete(vec![PathBuf::from("/nonexistent/locked")]);
         assert!(matches!(
             app.removal.confirm,
             Some(Confirm::Delete { unreadable: 1, .. })
         ));
         app.removal.confirm = None;
-        app.ask_delete(vec![PathBuf::from("/nonexistent-qa/other")]);
+        app.ask_delete(vec![PathBuf::from("/nonexistent/other")]);
         assert!(matches!(
             app.removal.confirm,
             Some(Confirm::Delete { unreadable: 0, .. })
