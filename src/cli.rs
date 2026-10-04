@@ -216,9 +216,37 @@ fn print_out(text: &str) -> Run {
     }
 }
 
+/// Whether standard output was closed when the program started. Rust's
+/// runtime points a closed one at /dev/null before `main`, after which a
+/// report would vanish without an error, so this is checked earlier.
+static STDOUT_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Runs at load time, before Rust's runtime starts.
+#[used]
+#[unsafe(link_section = ".init_array")]
+static CHECK_STDOUT: extern "C" fn() = {
+    extern "C" fn check() {
+        // SAFETY: F_GETFD only reads a descriptor's flags; it fails only
+        // when the descriptor isn't open.
+        let closed = unsafe { libc::fcntl(libc::STDOUT_FILENO, libc::F_GETFD) } == -1;
+        STDOUT_CLOSED.store(closed, std::sync::atomic::Ordering::Relaxed);
+    }
+    check
+};
+
 /// Runs what the command line asks for, or says to start the app.
 pub(crate) fn run(args: &[OsString]) -> Run {
-    let req = match parse(args) {
+    let parsed = parse(args);
+    // Anything printing to a closed output fails, as in other Unix tools.
+    if matches!(
+        parsed,
+        Ok(Parsed::Help | Parsed::Version | Parsed::Report(_))
+    ) && STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        eprintln!("spacescan: standard output is closed");
+        return Run::Exit(1);
+    }
+    let req = match parsed {
         Ok(Parsed::App(path)) => return Run::App(path),
         Ok(Parsed::Help) => return print_out(HELP),
         Ok(Parsed::Version) => {
