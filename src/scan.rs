@@ -773,8 +773,6 @@ pub(crate) struct InFolder<'a> {
     handle: &'a DirHandle,
     /// Its place in the live tree (None: above the scanned folder).
     live: Option<&'a LiveFolder>,
-    /// Set when a file with several hard links is found in it or below.
-    links: &'a std::sync::atomic::AtomicBool,
 }
 
 /// Scans one entry of folder `here`: a folder on the same filesystem is
@@ -836,14 +834,7 @@ pub(crate) fn scan_entry(
             let (sz, mode, mtime, ctime, uid, gid, btime) = match entry.metadata() {
                 Ok(m) => (
                     match ctx.size_of(&m) {
-                        size if m.nlink() > 1 => {
-                            // Read first: files with links come in crowds.
-                            let links = parent.links;
-                            if !links.load(std::sync::atomic::Ordering::Relaxed) {
-                                links.store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                            ctx.link_size(&m, size, here, &os_name)
-                        }
+                        size if m.nlink() > 1 => ctx.link_size(&m, size, here, &os_name),
                         size => size,
                     },
                     m.mode(),
@@ -896,16 +887,39 @@ fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
     exts
 }
 
-/// Sorts the entries of a folder holding files with several hard links
-/// (directly or further down): largest first, equal sizes by name, so the
-/// order is the same whichever name of a file was counted. (Elsewhere,
-/// equal sizes keep the listing's order.)
-fn sort_largest_first(children: &mut [Node]) {
+/// Sorts a folder's entries: largest first, equal sizes by name, so the same
+/// contents always come in the same order (whatever order the disk lists
+/// them in, whichever name of a hard-linked file was counted, and after
+/// changes made in place).
+pub(crate) fn sort_largest_first(children: &mut [Node]) {
     children.sort_by_key(|c| std::cmp::Reverse(c.size));
     for same in children.chunk_by_mut(|a, b| a.size == b.size) {
         if same.len() > 1 {
             same.sort_unstable_by(|a, b| a.disk_name().cmp(b.disk_name()));
         }
+    }
+}
+
+/// Re-sorts, in the tree under `root`, every folder holding one of `changed`
+/// or a folder above it, after their sizes changed in place: each once.
+pub(crate) fn resort_above(root: &mut Node, changed: &[PathBuf]) {
+    let mut folders: HashSet<&Path> = HashSet::new();
+    for p in changed {
+        folders.extend(p.ancestors().skip(1));
+    }
+    fn walk(n: &mut Node, at: &mut PathBuf, folders: &HashSet<&Path>) {
+        for c in n.children.iter_mut().filter(|c| c.is_dir) {
+            at.push(c.disk_name());
+            if folders.contains(at.as_path()) {
+                deep(|| walk(c, at, folders));
+            }
+            at.pop();
+        }
+        sort_largest_first(&mut n.children);
+    }
+    let mut at = root.path();
+    if folders.contains(at.as_path()) {
+        walk(root, &mut at, &folders);
     }
 }
 
@@ -918,7 +932,6 @@ pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
         &InFolder {
             handle: &None,
             live: None,
-            links: &Default::default(),
         },
         ctx,
     );
@@ -1124,15 +1137,12 @@ fn scan_dir_in(
     let folder = ctx.live.map(|live| live.open(parent.live, path, own_size));
     // The path its entries share.
     let here: Arc<Path> = path.into();
-    // Set when a file with several hard links is found below.
-    let links_here = std::sync::atomic::AtomicBool::new(false);
     let mut children: Vec<Node> = entries
         .par_iter()
         .map(|entry| {
             let this = InFolder {
                 handle: &handle,
                 live: folder.as_ref().map(|o| &*o.folder),
-                links: &links_here,
             };
             let mut node = scan_entry(entry, &here, &this, ctx);
             if let Some(live) = ctx.live {
@@ -1148,14 +1158,7 @@ fn scan_dir_in(
         })
         .collect();
 
-    if links_here.load(std::sync::atomic::Ordering::Relaxed) {
-        parent
-            .links
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        sort_largest_first(&mut children);
-    } else {
-        children.sort_by_key(|c| std::cmp::Reverse(c.size));
-    }
+    sort_largest_first(&mut children);
     // Saturating: apparent sizes of sparse files can add up past u64.
     let size = children
         .iter()

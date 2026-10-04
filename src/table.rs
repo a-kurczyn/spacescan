@@ -1814,7 +1814,9 @@ impl DiskScanApp {
         if full.path_is(&g.target) {
             full = Arc::new(node);
         } else {
-            replace_in_tree(Arc::make_mut(&mut full), &g.target, node);
+            let tree = Arc::make_mut(&mut full);
+            replace_in_tree(tree, &g.target, node);
+            resort_above(tree, std::slice::from_ref(&g.target));
         }
         self.full_root = Some(full);
         self.rebuild_view_tree();
@@ -2272,6 +2274,82 @@ mod cursor_tests {
         t.size = 1510;
         t.file_count = 3;
         t
+    }
+
+    fn scan(p: &Path) -> Node {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let ctx = ScanCtx {
+            mounts: &HashSet::new(),
+            progress: &tx,
+            cancel: &Default::default(),
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: None,
+        };
+        scan_dir(p, &ctx)
+    }
+
+    /// Every node's path, size, file count and place, in tree order.
+    fn shape(n: &Node, out: &mut Vec<(PathBuf, u64, u64)>) {
+        out.push((n.path(), n.size, n.file_count));
+        for c in &n.children {
+            shape(c, out);
+        }
+    }
+
+    /// After a delete (with and without a category picked) and after a
+    /// folder is rescanned, the tree equals a fresh scan of the same data:
+    /// folders that change places, and equal sizes in folders where the
+    /// disk lists names in another order than by name.
+    #[test]
+    fn edits_in_place_equal_a_fresh_scan() {
+        let dir = std::env::temp_dir().join(format!("spacemap-inplace-{}", std::process::id()));
+        for picked in [false, true] {
+            let _ = std::fs::remove_dir_all(&dir);
+            for d in ["big", "small", "ties", "ties/sub", "pa", "pb"] {
+                std::fs::create_dir_all(dir.join(d)).unwrap();
+            }
+            // "pa" is bigger until a delete leaves it the size of "pb".
+            std::fs::write(dir.join("pa/same"), vec![3u8; 8192]).unwrap();
+            std::fs::write(dir.join("pa/extra"), vec![3u8; 4096]).unwrap();
+            std::fs::write(dir.join("pb/same"), vec![3u8; 8192]).unwrap();
+            std::fs::write(dir.join("big/huge.rs"), vec![1u8; 600_000]).unwrap();
+            std::fs::write(dir.join("big/keep.rs"), vec![1u8; 4096]).unwrap();
+            std::fs::write(dir.join("small/a.rs"), vec![1u8; 200_000]).unwrap();
+            // Created out of name order: the disk lists them otherwise.
+            for name in ["zeta", "alpha", "mid", "beta", "omega"] {
+                std::fs::write(dir.join("ties").join(name), vec![2u8; 8192]).unwrap();
+            }
+            std::fs::write(dir.join("ties/mid2"), vec![2u8; 16384]).unwrap();
+            let mut app = DiskScanApp {
+                full_root: Some(Arc::new(scan(&dir))),
+                ..DiskScanApp::default()
+            };
+            if picked {
+                app.pick = Some(Pick::Category(app.cats.of_name("x.rs")));
+            }
+            app.rebuild_view_tree();
+            // Delete: "big" drops below "small", and "mid2" becomes a tie.
+            std::fs::remove_file(dir.join("big/huge.rs")).unwrap();
+            std::fs::remove_file(dir.join("pa/extra")).unwrap();
+            std::fs::write(dir.join("ties/mid2"), vec![2u8; 8192]).unwrap();
+            app.drop_from_tree(&[dir.join("big/huge.rs"), dir.join("pa/extra")]);
+            app.graft = Some(Graft {
+                target: dir.join("ties"),
+                view_paths: vec![dir.clone()],
+                cursor: None,
+                free_space: None,
+            });
+            assert!(app.finish_graft(scan(&dir.join("ties"))));
+            let (mut got, mut want) = (Vec::new(), Vec::new());
+            shape(app.full_root.as_ref().unwrap(), &mut got);
+            shape(&scan(&dir), &mut want);
+            assert_eq!(got, want, "picked {picked}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Deleting and splicing in a rescanned folder change the tree in place

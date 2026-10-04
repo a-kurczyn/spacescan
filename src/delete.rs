@@ -576,6 +576,8 @@ impl DiskScanApp {
             for p in gone {
                 remove_from_tree(full, p);
             }
+            // The folders above keep their order rule (largest first).
+            resort_above(full, gone);
         }
         self.rebuild_view_tree();
         self.restore_view(&view_paths);
