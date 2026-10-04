@@ -90,8 +90,9 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-68 | S4 | A file-manager list with a path that no longer exists: the missing entry isn't reported | VERIFIED | c117faa | Entries of a pasted file list that no longer exist are listed in Issues ("Couldn't copy …: not found") and stay listed after the target folder's rescan; the rest are pasted. | **QA ✔ (2d2c2c8) missing entries listed as "Couldn't copy …: not found" (all missing, non-UTF-8 name escaped, missing parent folder, next to a clash), the rest pasted; 1,000 missing of 2,000 → 1,000 copied, Issues capped by the log limit.** |
 | SM-69 | S4 | Whole-drive scan progress ("N% · X files · Y") isn't exposed to screen readers | VERIFIED | c117faa | The whole-drive progress bar carries its text ("N% · X files · Y") as its name for screen readers, together with its value. | **QA ✔ whole-filesystem scan: progress bar named "6% · 431,585 files · 20.3 MiB", % only grows.** |
 | SM-70 | S4 | Scanning a folder that directly holds ~300,000 files: the heading says "0 folders, 0 files" and the table stays empty until the end | VERIFIED | c117faa | During a scan the contents heading reads "· X files so far" (all files found under the folder shown so far) instead of "0 folders, 0 files"; files directly in a folder still appear as rows once that folder has been read. | **QA ✔ 300k-file folder: heading "2,761 files so far" … "283,692 files so far" (only grows, ≤ final), then "0 folders, 300,000 files".** |
-| SM-71 | S3 | After an in-place delete (or move) the chart differs from a fresh scan of the same data: a folder's slice colour and its child slices aren't redone | OPEN | | | |
-| SM-72 | S4 | Rows of exactly equal size: order after a delete differs from a rescan / fresh scan (and fresh scans order ties by disk order, not by name) | OPEN | | | |
+| SM-71 | S3 | After an in-place delete (or move) the chart differs from a fresh scan of the same data: a folder's slice colour and its child slices aren't redone | VERIFIED | | | **QA ✔ (319b5ba) after D, T, cut+paste, copy+paste, D under a category, D under a filter, a delete that makes two folders equal, one that drops a folder below its sibling (category picked) and grow/shrink + r: every folder, the bar, the extensions and the chart pixels equal a fresh scan. Exception: SM-73.** |
+| SM-72 | S4 | Rows of exactly equal size: order after a delete differs from a rescan / fresh scan (and fresh scans order ties by disk order, not by name) | VERIFIED | | | **QA ✔ equal sizes listed by name (byte order) in fresh scans, after a delete and after r ("eqA, eqB"; "alpha, mid, zeta").** |
+| SM-73 | S4 | After deleting/trashing many files from a folder, the folder's own size isn't updated until a rescan (filesystem freed its directory blocks) | OPEN | | | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -493,6 +494,11 @@ Expected:
 - Scenario: folders zeta, alpha, mid created in that order, each 300 KiB; mid has one more 100 KiB file. Scan (mid first). Delete mid's extra file.
 - Actual: after the delete the rows read mid, zeta, alpha; `r` or a fresh scan gives zeta, alpha, mid. Fresh scans order equal sizes by on-disk order, not by name (zeta before alpha).
 - Expected: one deterministic order for ties in every path (name order would make both agree and be predictable).
+
+### SM-73 · S4 · Folder's own size stale after a mass delete
+- Scenario (XFS, like this machine's /var/tmp): a folder with 60 small .log files and 3 × 50 KB .dat files; filter "*.log", mark all 60, T (trash).
+- Actual: the folder row shows 160 KiB; a fresh scan (or r) shows 156 KiB. When that many entries go, the filesystem shrinks the folder's own allocation (4 KiB → 0), and the in-place update keeps the old value. The chart differs from a fresh scan by a sliver (~400 px). All file numbers are right.
+- Expected: after a delete/trash/move, the changed folders' own sizes are re-read so the tree equals a fresh scan (as SM-71's fix intends).
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.
