@@ -192,8 +192,21 @@ impl CategoryModel {
     /// missing. A file that can't be used gives the defaults and a problem
     /// for the Issues log, and is left as it is.
     pub(crate) fn load() -> (Self, Option<String>) {
+        Self::load_from_file(true)
+    }
+
+    /// Like `load`, but never writes: a missing file means the built-in
+    /// categories (for the command line, which leaves the config alone).
+    pub(crate) fn load_read_only() -> (Self, Option<String>) {
+        Self::load_from_file(false)
+    }
+
+    fn load_from_file(write_missing: bool) -> (Self, Option<String>) {
         let path = config_dir().join("categories.json");
         let text = match std::fs::metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !write_missing => {
+                return (Self::defaults(), None);
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let written = std::fs::create_dir_all(config_dir())
                     .and_then(|_| std::fs::write(&path, DEFAULT_CATEGORIES));

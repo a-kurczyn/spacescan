@@ -325,6 +325,21 @@ mod tests {
 
     /// categories.json: written when missing, used when edited, left alone
     /// (built-in categories used) when broken.
+    /// The command line's read-only loading never creates categories.json;
+    /// the app's loading does.
+    #[test]
+    fn read_only_categories_write_nothing() {
+        with_home(|_| {
+            let path = config_dir().join("categories.json");
+            let _ = std::fs::remove_file(&path);
+            let (m, problem) = CategoryModel::load_read_only();
+            assert!(problem.is_none() && !path.exists());
+            assert_eq!(m, CategoryModel::defaults());
+            CategoryModel::load();
+            assert!(path.exists());
+        });
+    }
+
     #[test]
     fn categories_file_is_written_used_and_kept() {
         with_home(|_| {

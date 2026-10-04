@@ -584,12 +584,23 @@ impl DiskScanApp {
                 )));
                 return;
             }
-            if let Err(e) = std::fs::metadata(&path) {
-                let _ = tx.send(ScanMsg::Error(trf(
-                    "ERR_CANNOT_STAT",
-                    &[&show_path(&path), &e.to_string()],
-                )));
-                return;
+            match std::fs::metadata(&path) {
+                Err(e) => {
+                    let _ = tx.send(ScanMsg::Error(trf(
+                        "ERR_CANNOT_STAT",
+                        &[&show_path(&path), &e.to_string()],
+                    )));
+                    return;
+                }
+                // A file given to scan (on the command line, say).
+                Ok(m) if !m.is_dir() => {
+                    let _ = tx.send(ScanMsg::Error(trf(
+                        "ERR_NOT_A_DIRECTORY",
+                        &[&show_path(&path)],
+                    )));
+                    return;
+                }
+                Ok(_) => {}
             }
             let mounts = mount_points();
             let ctx = ScanCtx {

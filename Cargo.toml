@@ -27,7 +27,9 @@ wl-clipboard-rs = "0.9"
 lto = "fat"
 codegen-units = 1
 
-# Tests and benchmarks built with --release stay quick to build.
-[profile.bench]
+# Like release, but quick to build (no link-time optimization), for test
+# runs during development: `cargo test --profile quick`.
+[profile.quick]
+inherits = "release"
 lto = false
 codegen-units = 16

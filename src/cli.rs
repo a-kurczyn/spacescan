@@ -69,29 +69,34 @@ struct Request {
     apparent: bool,
 }
 
-/// Reads the command line (`args` without the program's name): `Ok(None)`
-/// to start the app, `Err` with the reason when it's wrong.
-fn parse(args: &[OsString]) -> Result<Result<Request, Run>, String> {
+/// What a command line asks for, once read.
+#[derive(Debug, PartialEq)]
+enum Parsed {
+    /// Start the app, scanning this folder first if given.
+    App(Option<PathBuf>),
+    Help,
+    Version,
+    Report(Request),
+}
+
+/// Reads the command line (`args` without the program's name), or says
+/// what's wrong with it.
+fn parse(args: &[OsString]) -> Result<Parsed, String> {
     let Some(first) = args.first() else {
-        return Ok(Err(Run::App(None)));
+        return Ok(Parsed::App(None));
     };
     let command = match first.to_str() {
-        Some("-h" | "--help") => {
-            print!("{HELP}");
-            return Ok(Err(Run::Exit(0)));
-        }
-        Some("-V" | "--version") => {
-            println!("spacemap {}", env!("CARGO_PKG_VERSION"));
-            return Ok(Err(Run::Exit(0)));
-        }
+        Some("-h" | "--help") => return Ok(Parsed::Help),
+        Some("-V" | "--version") => return Ok(Parsed::Version),
         Some("list") => Command::List,
         Some("flat") => Command::Flat,
         Some("exts") => Command::Exts,
         Some(s) if s.starts_with('-') => return Err(format!("unknown option {s}")),
         // Anything else is a folder to open in the app.
-        _ if args.len() == 1 => return Ok(Err(Run::App(Some(PathBuf::from(first))))),
+        _ if args.len() == 1 => return Ok(Parsed::App(Some(PathBuf::from(first)))),
         _ => return Err(format!("unknown command {}", first.to_string_lossy())),
     };
+    let name = command_name(command);
     let mut req = Request {
         command,
         path: PathBuf::new(),
@@ -103,11 +108,18 @@ fn parse(args: &[OsString]) -> Result<Result<Request, Run>, String> {
         apparent: false,
     };
     let mut path = None;
+    let mut only_paths = false;
     let mut rest = args[1..].iter();
     while let Some(arg) = rest.next() {
         let text = arg.to_str().unwrap_or("");
+        if only_paths || !text.starts_with('-') || text == "-" {
+            if path.replace(PathBuf::from(arg)).is_some() {
+                return Err("only one folder can be given".to_string());
+            }
+            continue;
+        }
         // "--opt value" or "--opt=value".
-        let (name, inline) = match text.split_once('=') {
+        let (option, inline) = match text.split_once('=') {
             Some((n, v)) if n.starts_with("--") => (n, Some(v.to_string())),
             _ => (text, None),
         };
@@ -118,14 +130,22 @@ fn parse(args: &[OsString]) -> Result<Result<Request, Run>, String> {
                     .next()
                     .and_then(|v| v.to_str())
                     .map(str::to_string)
-                    .ok_or_else(|| format!("{name} needs {what}")),
+                    .ok_or_else(|| format!("{option} needs {what}")),
             }
         };
-        match name {
-            "-h" | "--help" => {
-                print!("{HELP}");
-                return Ok(Err(Run::Exit(0)));
+        // Options for some commands only.
+        let refuse = |allowed: &[Command]| {
+            (!allowed.contains(&command)).then(|| format!("{name} takes no {option}"))
+        };
+        match option {
+            "--" => only_paths = true,
+            "-h" | "--help" => return Ok(Parsed::Help),
+            "-V" | "--version" => return Ok(Parsed::Version),
+            "--reverse" | "--apparent-size" if inline.is_some() => {
+                return Err(format!("{option} takes no value"));
             }
+            "--reverse" => req.reverse = true,
+            "--apparent-size" => req.apparent = true,
             "--format" => {
                 req.format = match value("txt, csv or json")?.as_str() {
                     "txt" => Format::Txt,
@@ -135,18 +155,22 @@ fn parse(args: &[OsString]) -> Result<Result<Request, Run>, String> {
                 }
             }
             "--sort" => {
+                if let Some(e) = refuse(&[Command::List, Command::Flat]) {
+                    return Err(e + " (exts is ordered with --by)");
+                }
                 req.sort = match value("a column")?.as_str() {
                     "size" => SortColumn::Size,
                     "files" if command == Command::List => SortColumn::Files,
                     "name" => SortColumn::Name,
                     "modified" => SortColumn::Modified,
                     "changed" => SortColumn::Changed,
-                    other => {
-                        return Err(format!("can't sort {} by {other}", command_name(command)));
-                    }
+                    other => return Err(format!("can't sort {name} by {other}")),
                 }
             }
             "--by" => {
+                if let Some(e) = refuse(&[Command::Exts]) {
+                    return Err(e);
+                }
                 req.by_files = match value("bytes or files")?.as_str() {
                     "bytes" => false,
                     "files" => true,
@@ -154,28 +178,20 @@ fn parse(args: &[OsString]) -> Result<Result<Request, Run>, String> {
                 }
             }
             "--limit" => {
+                if let Some(e) = refuse(&[Command::Flat]) {
+                    return Err(e);
+                }
                 req.limit = Some(
                     value("a number")?
                         .parse()
-                        .map_err(|_| format!("{name} needs a number"))?,
+                        .map_err(|_| format!("{option} needs a whole number"))?,
                 )
             }
-            "--reverse" => req.reverse = true,
-            "--apparent-size" => req.apparent = true,
-            s if s.starts_with('-') && s.len() > 1 => return Err(format!("unknown option {s}")),
-            _ if path.is_none() => path = Some(PathBuf::from(arg)),
-            _ => return Err("only one folder can be given".to_string()),
+            _ => return Err(format!("unknown option {option}")),
         }
     }
-    // Options that only make sense for one command.
-    if req.limit.is_some() && command != Command::Flat {
-        return Err("--limit is for flat".to_string());
-    }
-    if req.by_files && command != Command::Exts {
-        return Err("--by is for exts".to_string());
-    }
-    req.path = path.ok_or_else(|| format!("{} needs a folder", command_name(command)))?;
-    Ok(Ok(req))
+    req.path = path.ok_or_else(|| format!("{name} needs a folder"))?;
+    Ok(Parsed::Report(req))
 }
 
 fn command_name(c: Command) -> &'static str {
@@ -186,11 +202,29 @@ fn command_name(c: Command) -> &'static str {
     }
 }
 
+/// Writes `text` to the standard output. A reader that stops early
+/// (`| head`) isn't an error.
+fn print_out(text: &str) -> Run {
+    let mut out = std::io::stdout().lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => Run::Exit(0),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Run::Exit(0),
+        Err(e) => {
+            eprintln!("spacemap: {e}");
+            Run::Exit(1)
+        }
+    }
+}
+
 /// Runs what the command line asks for, or says to start the app.
 pub(crate) fn run(args: &[OsString]) -> Run {
     let req = match parse(args) {
-        Ok(Ok(req)) => req,
-        Ok(Err(run)) => return run,
+        Ok(Parsed::App(path)) => return Run::App(path),
+        Ok(Parsed::Help) => return print_out(HELP),
+        Ok(Parsed::Version) => {
+            return print_out(&format!("spacemap {}\n", env!("CARGO_PKG_VERSION")));
+        }
+        Ok(Parsed::Report(req)) => req,
         Err(why) => {
             eprintln!("spacemap: {why}\nTry 'spacemap --help'.");
             return Run::Exit(2);
@@ -210,11 +244,25 @@ pub(crate) fn run(args: &[OsString]) -> Run {
             return Run::Exit(1);
         }
     }
-    let (tree, problems) = scan_for_cli(&path, req.apparent);
+    let (tree, problems, unreadable) = scan_for_cli(&path, req.apparent);
     for p in &problems {
         eprintln!("spacemap: {p}");
     }
-    let cats = CategoryModel::load().0;
+    // The folder itself couldn't be read: nothing to report.
+    if unreadable.contains(&path) {
+        return Run::Exit(1);
+    }
+    // Categories are only needed for extensions, and are read without ever
+    // writing the user's files.
+    let cats = if req.command == Command::Exts {
+        let (cats, problem) = CategoryModel::load_read_only();
+        if let Some(p) = problem {
+            eprintln!("spacemap: {p}");
+        }
+        cats
+    } else {
+        CategoryModel::defaults()
+    };
     let out = std::io::stdout().lock();
     let mut out = std::io::BufWriter::new(out);
     let written = write_report(&mut out, &req, &tree, &cats).and_then(|()| out.flush());
@@ -230,16 +278,19 @@ pub(crate) fn run(args: &[OsString]) -> Run {
 }
 
 /// Scans `path` as the app does, without the live chart; also returns the
-/// problems met (folders that couldn't be read…).
-fn scan_for_cli(path: &Path, apparent: bool) -> (Node, Vec<String>) {
+/// problems met and the folders that couldn't be read.
+fn scan_for_cli(path: &Path, apparent: bool) -> (Node, Vec<String>, Vec<PathBuf>) {
     let (tx, rx) = channel();
-    let problems = std::thread::spawn(move || {
-        rx.into_iter()
-            .filter_map(|m| match m {
-                ScanMsg::LogError(e) => Some(e),
-                _ => None,
-            })
-            .collect::<Vec<String>>()
+    let collect = std::thread::spawn(move || {
+        let (mut problems, mut unreadable) = (Vec::new(), Vec::new());
+        for m in rx {
+            match m {
+                ScanMsg::LogError(e) => problems.push(e),
+                ScanMsg::Unreadable(p) => unreadable.push(p),
+                _ => {}
+            }
+        }
+        (problems, unreadable)
     });
     let mounts = mount_points();
     let ctx = ScanCtx {
@@ -255,7 +306,8 @@ fn scan_for_cli(path: &Path, apparent: bool) -> (Node, Vec<String>) {
     let tree = scan_dir(path, &ctx);
     drop(ctx);
     drop(tx);
-    (tree, problems.join().unwrap_or_default())
+    let (problems, unreadable) = collect.join().unwrap_or_default();
+    (tree, problems, unreadable)
 }
 
 /// Writes the report `req` asks for about `tree`.
@@ -274,7 +326,24 @@ fn write_report(
         Command::Flat => {
             let mut files = Vec::new();
             collect_files(tree, &mut files);
-            sort_rows(&mut files, req.sort, req.reverse);
+            if req.sort == SortColumn::Name {
+                // By the path below the folder, built once per file.
+                let top = tree.path();
+                let mut keyed: Vec<(String, &Node)> = files
+                    .par_iter()
+                    .map(|n| {
+                        let p = n.path();
+                        (show_path(p.strip_prefix(&top).unwrap_or(&p)), *n)
+                    })
+                    .collect();
+                keyed.par_sort_by(|a, b| natural_cmp(&a.0, &b.0).then_with(|| a.0.cmp(&b.0)));
+                files = keyed.into_iter().map(|(_, n)| n).collect();
+                if req.reverse {
+                    files.reverse();
+                }
+            } else {
+                sort_rows(&mut files, req.sort, req.reverse);
+            }
             files.truncate(req.limit.unwrap_or(usize::MAX));
             write_entries(out, req.format, tree, &files, true)
         }
@@ -355,6 +424,16 @@ fn write_entries(
         }
     };
     let kind = |n: &Node| if n.is_dir { "folder" } else { "file" };
+    // A folder where another filesystem is mounted (not scanned) is shown
+    // with a label; CSV and JSON give its own name and say so.
+    let mounted = |n: &Node| n.is_dir && *n.name != *show_os(n.disk_name());
+    let own_name = |n: &Node| {
+        if flat {
+            name(n)
+        } else {
+            show_os(n.disk_name())
+        }
+    };
     match format {
         Format::Txt => {
             let folders = rows.iter().filter(|n| n.is_dir).count() as u64;
@@ -433,17 +512,26 @@ fn write_entries(
             }
         }
         Format::Csv => {
-            let head = if flat { "path" } else { "type,name" };
-            writeln!(out, "{head},size,files,modified,changed,permissions")?;
+            let (head, tail) = if flat {
+                ("path", "")
+            } else {
+                ("type,name", ",other_filesystem")
+            };
+            writeln!(out, "{head},size,files,modified,changed,permissions{tail}")?;
             for n in rows {
                 let first = if flat {
                     csv_field(&name(n))
                 } else {
-                    format!("{},{}", kind(n), csv_field(&name(n)))
+                    format!("{},{}", kind(n), csv_field(&own_name(n)))
+                };
+                let last = if flat {
+                    String::new()
+                } else {
+                    format!(",{}", mounted(n))
                 };
                 writeln!(
                     out,
-                    "{first},{},{},{},{},{}",
+                    "{first},{},{},{},{},{}{last}",
                     n.size,
                     n.file_count,
                     iso_time(n.mtime),
@@ -465,7 +553,13 @@ fn write_entries(
                 if !flat {
                     entry.insert("type".into(), kind(n).into());
                 }
-                entry.insert((if flat { "path" } else { "name" }).into(), name(n).into());
+                entry.insert(
+                    (if flat { "path" } else { "name" }).into(),
+                    own_name(n).into(),
+                );
+                if !flat {
+                    entry.insert("other_filesystem".into(), mounted(n).into());
+                }
                 entry.insert("size".into(), n.size.into());
                 entry.insert("files".into(), n.file_count.into());
                 entry.insert("modified".into(), iso_time(n.mtime).into());
@@ -631,7 +725,7 @@ mod tests {
     }
 
     fn report(req: &Request) -> String {
-        let (tree, _) = scan_for_cli(&req.path, req.apparent);
+        let (tree, ..) = scan_for_cli(&req.path, req.apparent);
         let mut out = Vec::new();
         write_report(&mut out, req, &tree, &CategoryModel::defaults()).unwrap();
         String::from_utf8(out).unwrap()
@@ -674,20 +768,35 @@ mod tests {
         rows
     }
 
+    /// Command lines read as meant, and wrong ones refused: options before
+    /// or after the folder, "--opt=value", "--" before a folder named like
+    /// an option, help and version anywhere; values on on/off options,
+    /// options of another command, missing or bad values, two folders.
     #[test]
     fn command_lines_are_read_or_refused() {
-        assert_eq!(parse(&args(&[])), Ok(Err(Run::App(None))));
+        assert_eq!(parse(&args(&[])), Ok(Parsed::App(None)));
         assert_eq!(
             parse(&args(&["/tmp"])),
-            Ok(Err(Run::App(Some("/tmp".into()))))
+            Ok(Parsed::App(Some("/tmp".into())))
         );
-        assert_eq!(parse(&args(&["--version"])), Ok(Err(Run::Exit(0))));
-        assert_eq!(parse(&args(&["-V"])), Ok(Err(Run::Exit(0))));
-        let ok = |a: &[&str]| parse(&args(a)).unwrap().unwrap();
+        assert_eq!(
+            parse(&args(&["list"])),
+            Err("list needs a folder".to_string())
+        );
+        for help in [&["--help"][..], &["-h"], &["list", "/x", "-h"]] {
+            assert_eq!(parse(&args(help)), Ok(Parsed::Help));
+        }
+        for version in [&["--version"][..], &["-V"], &["exts", ".", "-V"]] {
+            assert_eq!(parse(&args(version)), Ok(Parsed::Version));
+        }
+        let ok = |a: &[&str]| match parse(&args(a)) {
+            Ok(Parsed::Report(r)) => r,
+            other => panic!("{a:?}: {other:?}"),
+        };
         let r = ok(&[
             "flat",
-            "/x",
             "--format=csv",
+            "/x",
             "--limit",
             "5",
             "--sort",
@@ -695,8 +804,8 @@ mod tests {
             "--reverse",
         ]);
         assert_eq!(
-            (r.format, r.limit, r.sort, r.reverse),
-            (Format::Csv, Some(5), SortColumn::Name, true)
+            (r.format, r.limit, r.sort, r.reverse, r.path),
+            (Format::Csv, Some(5), SortColumn::Name, true, "/x".into())
         );
         let r = ok(&[
             "exts",
@@ -708,19 +817,31 @@ mod tests {
             "--apparent-size",
         ]);
         assert_eq!(
-            (r.by_files, r.format, r.apparent, r.path),
-            (true, Format::Json, true, "/x".into())
+            (r.by_files, r.format, r.apparent),
+            (true, Format::Json, true)
         );
+        assert_eq!(ok(&["list", "--", "-dash"]).path, PathBuf::from("-dash"));
+        assert_eq!(
+            ok(&["list", "--", "--reverse"]).path,
+            PathBuf::from("--reverse")
+        );
+        assert_eq!(ok(&["list", "list"]).path, PathBuf::from("list"));
         for bad in [
             &["--nope"][..],
-            &["list"],
             &["list", "/a", "/b"],
+            &["list", "/a", "--", "/b"],
             &["list", "/a", "--limit", "3"],
+            &["list", "/a", "--by", "bytes"],
             &["flat", "/a", "--by", "files"],
             &["flat", "/a", "--sort", "files"],
+            &["exts", "/a", "--sort", "name"],
             &["list", "/a", "--format", "xml"],
             &["list", "/a", "--limit"],
             &["flat", "/a", "--limit", "-1"],
+            &["flat", "/a", "--limit", "2.5"],
+            &["list", "/a", "--apparent-size=false"],
+            &["list", "/a", "--reverse=yes"],
+            &["list", "/a", "-x"],
             &["a", "b"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
@@ -733,7 +854,7 @@ mod tests {
     #[test]
     fn list_and_flat_keep_every_name() {
         let dir = odd_tree("names");
-        let (tree, _) = scan_for_cli(&dir, false);
+        let (tree, ..) = scan_for_cli(&dir, false);
         let mut want: Vec<String> = tree.children.iter().map(|c| c.name.to_string()).collect();
         want.sort();
         // CSV
@@ -747,7 +868,8 @@ mod tests {
                 "files",
                 "modified",
                 "changed",
-                "permissions"
+                "permissions",
+                "other_filesystem"
             ]
         );
         let mut names: Vec<String> = csv[1..].iter().map(|r| r[1].clone()).collect();
@@ -789,6 +911,112 @@ mod tests {
         );
         let all = read_csv(&report(&request(Command::Flat, &dir, Format::Csv)));
         assert_eq!(all.len() - 1, 8);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The flat list sorted by name goes by each file's whole path, so files
+    /// of the same name in different folders are told apart and a folder's
+    /// files stay together.
+    #[test]
+    fn flat_by_name_goes_by_path() {
+        let dir = std::env::temp_dir().join(format!("spacemap-cli-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["b", "a/z", "c"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+            std::fs::write(dir.join(d).join("same.txt"), b"1").unwrap();
+        }
+        std::fs::write(dir.join("a/aa.txt"), b"1").unwrap();
+        std::fs::write(dir.join("top.txt"), b"1").unwrap();
+        let mut req = request(Command::Flat, &dir, Format::Csv);
+        req.sort = SortColumn::Name;
+        let paths: Vec<String> = read_csv(&report(&req))[1..]
+            .iter()
+            .map(|r| r[0].clone())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "a/aa.txt",
+                "a/z/same.txt",
+                "b/same.txt",
+                "c/same.txt",
+                "top.txt"
+            ]
+        );
+        req.reverse = true;
+        let back: Vec<String> = read_csv(&report(&req))[1..]
+            .iter()
+            .map(|r| r[0].clone())
+            .collect();
+        assert_eq!(back, paths.iter().rev().cloned().collect::<Vec<_>>());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A folder where another filesystem is mounted: its own name and a
+    /// mark in CSV and JSON, the app's label in text; a carriage return in
+    /// a name comes escaped, and CSV quotes any field holding one.
+    #[test]
+    fn mount_points_and_carriage_returns() {
+        let dir = std::env::temp_dir().join(format!("spacemap-cli-mount-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("mnt")).unwrap();
+        std::fs::write(dir.join("cr\rname"), b"1").unwrap();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || for _ in rx {});
+        let mounts: HashSet<PathBuf> = [dir.join("mnt")].into();
+        let ctx = ScanCtx {
+            mounts: &mounts,
+            progress: &tx,
+            cancel: &Default::default(),
+            apparent_size: false,
+            hard_links: Default::default(),
+            saw_hangul: &Default::default(),
+            in_file_order: false,
+            live: None,
+        };
+        let tree = scan_dir(&dir, &ctx);
+        let write = |format: Format| {
+            let mut out = Vec::new();
+            write_report(
+                &mut out,
+                &request(Command::List, &dir, format),
+                &tree,
+                &CategoryModel::defaults(),
+            )
+            .unwrap();
+            String::from_utf8(out).unwrap()
+        };
+        let csv = read_csv(&write(Format::Csv));
+        assert_eq!(csv[0].last().unwrap(), "other_filesystem");
+        let mnt = csv.iter().find(|r| r[1] == "mnt").unwrap();
+        assert_eq!(mnt.last().unwrap(), "true");
+        // Names come escaped, as the app shows them: no raw carriage return.
+        let cr = csv.iter().find(|r| r[1].starts_with("cr")).unwrap();
+        assert_eq!(
+            (cr[1].as_str(), cr.last().unwrap().as_str()),
+            ("cr\\rname", "false")
+        );
+        // Any text holding one is still quoted.
+        assert_eq!(csv_field("a\rb"), "\"a\rb\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+        let json: serde_json::Value = serde_json::from_str(&write(Format::Json)).unwrap();
+        let entry = json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "mnt")
+            .unwrap();
+        assert_eq!(entry["other_filesystem"], true);
+        assert!(
+            write(Format::Txt).contains(
+                &*tree
+                    .children
+                    .iter()
+                    .find(|c| c.disk_name() == "mnt")
+                    .unwrap()
+                    .name
+            )
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
