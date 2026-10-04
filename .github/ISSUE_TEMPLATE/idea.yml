@@ -1,0 +1,16 @@
+name: Idea or suggestion
+description: A new feature, a change, or a translation fix.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you'd like spacemap to do, and what you'd use it for.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: Optional. Any workaround or other tool you use for it now.

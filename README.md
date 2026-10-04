@@ -2,7 +2,8 @@
 
 A fast disk-usage explorer for Linux. spacemap scans any drive, mount point
 or folder and shows where the space went, as an interactive sunburst chart
-or as an ncdu-style table you can drive from the keyboard.
+or as an ncdu-style table you can drive from the keyboard. It also writes
+plain-text, CSV or JSON reports from the command line.
 
 <!-- ![spacemap chart view](docs/screenshot.png) -->
 
@@ -12,7 +13,12 @@ or as an ncdu-style table you can drive from the keyboard.
   space they use, and the drive's free space is shown too. Click a slice to
   zoom in, click the center to go back up. Ctrl+scroll enlarges the chart
   and dragging pans it, to reach very thin slices.
-  Hover for size, file count, owner, permissions and dates.
+- **Colours that mean something.** A slice takes the colour of the file
+  category using most of it (video, audio, images, code…), and gets darker
+  the longer its files have been on the disk. A colour-blind-safe palette
+  is one click away in the settings.
+- **Hover details:** size, file count, owner, permissions, dates, and the
+  newest and oldest file inside a folder.
 - **Summary table.** Keyboard-driven, like ncdu: sort by size, name, file
   count, modified or changed time, or permissions; show, hide and reorder
   columns; jump to a name; mark several rows. A flat list shows the
@@ -21,35 +27,63 @@ or as an ncdu-style table you can drive from the keyboard.
 - **Breakdown by category and file extension** for the folder you're viewing:
   click a category or extension to show only those files (Ctrl+click picks
   several extensions).
+- **Measure by bytes or by number of files.** Switch the whole app (chart,
+  table, shares and colours) to count files instead of space, to find the
+  folders full of tiny files.
 - **Accurate numbers.** Sizes are real disk usage, like `du`: sparse files
   count what they actually use and hard-linked files count once. Switch to
   apparent size for network or FUSE drives that don't report disk usage.
-- **Live results.** The chart and table fill in while the scan runs; Esc
-  cancels.
+- **Live results.** The chart and table fill in while the scan runs, with a
+  progress bar when scanning a whole drive; Esc cancels.
 - **Filters** by name pattern (`*.iso`, `*.[mkv,mp4]`), size range and
   created or modified dates.
 - **Safe cleanup.** Move to the trash or delete permanently, always with a
   confirmation. spacemap refuses to delete anything that is or contains a
   mounted filesystem.
+- **Copy and move.** Ctrl+C / Ctrl+X and Ctrl+V between folders, or to and
+  from your file manager through the system clipboard.
+- **Command-line reports** of a folder's contents, all its files, or its
+  file extensions, as text, CSV or JSON (see below).
 - **Handles large and awkward trees:** millions of files, very deep folders,
   paths longer than `PATH_MAX`, unreadable folders (listed as issues, not
   errors), and names in any script.
 - **In ten languages:** English, Spanish, French, German, Italian,
   Portuguese, Russian, Japanese, Chinese and Korean; more can be added with
   a plain text file (see below).
+- **Accessible:** usable from the keyboard alone, and the main controls are
+  named for screen readers.
 
 ## Requirements
 
-- Linux (spacemap uses Linux-specific filesystem interfaces).
-- A desktop session (Wayland or X11).
+- Linux (spacemap uses Linux-specific filesystem interfaces), x86-64.
+- A desktop session (Wayland or X11) for the app; the command-line reports
+  need no display.
 - `xdg-desktop-portal` for the folder picker. Without it you can still type
   a path into the path bar.
-- To build: Rust 1.85 or newer (edition 2024).
+- To build: Rust 1.95 or newer.
 
-## Building and installing
+## Installing
+
+### AppImage
+
+Download `SpaceMap-<version>-x86_64.AppImage` from the
+[Releases](https://github.com/a-kurczyn/spacemap/releases) page, make it
+executable and run it:
 
 ```sh
-git clone https://github.com/<owner>/spacemap.git
+chmod +x SpaceMap-*-x86_64.AppImage
+./SpaceMap-*-x86_64.AppImage
+```
+
+It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
+release is built from the tagged source in this repository.
+
+<!-- TODO before release: AUR and Fedora COPR sections, once the packages exist. -->
+
+### From source
+
+```sh
+git clone https://github.com/a-kurczyn/spacemap.git
 cd spacemap
 cargo install --path .
 ```
@@ -60,7 +94,8 @@ To build without installing, run `cargo build --release`; the binary is
 
 ## Usage
 
-Start `spacemap`, then pick where to scan:
+Start `spacemap`, or `spacemap PATH` to scan a folder right away. Then pick
+where to scan:
 
 - 🔍 opens a folder picker for any drive, mount point or folder,
 - `/` scans the whole system, 🏠 scans your home folder,
@@ -86,12 +121,55 @@ trash or delete it. In the table, the main keys are:
 | `r` | Rescan this folder |
 | `?` | All keyboard shortcuts |
 
+### Command line
+
+```text
+spacemap COMMAND PATH [OPTIONS]
+
+Commands:
+  list   the folders and files directly in PATH, with their totals
+  flat   every file under PATH, in all its subfolders
+  exts   file extensions under PATH, with their sizes and file counts
+
+Options:
+  --format txt|csv|json    output format (default: txt)
+  --sort size|files|name|modified|changed
+                           order of list and flat (default: size; files: list only)
+  --by bytes|files         order of exts (default: bytes)
+  --reverse                reverse the order
+  --limit N                flat: only the first N files
+  --apparent-size          count file lengths instead of disk space used
+  -h, --help               show this help
+  -V, --version            show the version
+```
+
+For example, the 20 biggest files in your Downloads folder, or a
+spreadsheet of what's in your home folder:
+
+```sh
+spacemap flat ~/Downloads --limit 20
+spacemap list ~ --format csv > home.csv
+```
+
+Reports go to standard output and problems to standard error. Sizes in CSV
+and JSON are in bytes, and times are local ISO 8601. The exit code is 0 on
+success (unreadable subfolders are reported but don't fail the run), 1 if
+the folder can't be read, and 2 for a mistake on the command line. Reports
+never open a window and never change your settings.
+
 ## Configuration
 
 Settings are saved to `~/.config/spacemap/settings.json` and can be changed
-in the ⚙ panel: chart depth, minimum slice angle, slices per ring, colors,
-line rendering, table columns and sort order, apparent-size mode and
-language.
+in the ⚙ panel: chart depth, minimum slice angle, slices per ring, colours
+and age shades, line rendering, table columns and sort order, measuring by
+bytes or files, apparent-size mode and language.
+
+### File categories
+
+The categories and their extensions are in
+`~/.config/spacemap/categories.json`, written with the defaults on first
+start. Edit it to move an extension to another category or add your own;
+it's read again at every scan. Extensions in no category count as "Other".
 
 ### Adding a language
 
