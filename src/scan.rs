@@ -1537,11 +1537,12 @@ mod memory {
     /// Resident memory across rescans of a big tree, as the app does them:
     /// the new scan is built while the old tree is still held, then
     /// replaces it. Run with
-    /// `SPACEMAP_MEM_TREE=/ cargo test --release rescan_memory -- --ignored --nocapture`.
+    /// `SPACESCAN_MEM_TREE=/ cargo test --release rescan_memory -- --ignored --nocapture`.
     #[test]
     #[ignore]
     fn rescan_memory() {
-        let root = PathBuf::from(std::env::var("SPACEMAP_MEM_TREE").unwrap_or_else(|_| "/".into()));
+        let root =
+            PathBuf::from(std::env::var("SPACESCAN_MEM_TREE").unwrap_or_else(|_| "/".into()));
         let (tx, rx) = channel();
         std::thread::spawn(move || for _ in rx {});
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1612,7 +1613,7 @@ mod hangul_tests {
     use super::*;
     #[test]
     fn scan_notices_korean_names() {
-        let dir = std::env::temp_dir().join(format!("spacemap-hangul-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-hangul-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("sub").join("한국어.txt"), "x").unwrap();
@@ -1662,7 +1663,7 @@ mod live_category_tests {
     /// exactly what the finished tree's category bar shows.
     #[test]
     fn streamed_extension_totals_match_the_finished_tree() {
-        let dir = std::env::temp_dir().join(format!("spacemap-livecat-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-livecat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("a/b")).unwrap();
         std::fs::write(dir.join("top.MKV"), vec![0u8; 20_000]).unwrap();
@@ -1712,13 +1713,13 @@ mod scan_perf {
     use super::*;
 
     /// Timing of the work done once a scan ends, on the folder in
-    /// $SPACEMAP_BENCH: slice looks, the category breakdown, a filtered
+    /// $SPACESCAN_BENCH: slice looks, the category breakdown, a filtered
     /// copy (run with `cargo test --release after_scan -- --ignored
     /// --nocapture`).
     #[test]
     #[ignore]
     fn after_scan_bench() {
-        let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").expect("set SPACEMAP_BENCH"));
+        let dir = PathBuf::from(std::env::var("SPACESCAN_BENCH").expect("set SPACESCAN_BENCH"));
         let (tx, rx) = channel();
         std::thread::spawn(move || for _ in rx {});
         let cats = Arc::new(CategoryModel::defaults());
@@ -1759,33 +1760,33 @@ mod scan_perf {
         }
     }
 
-    /// Scan timing on the folder in $SPACEMAP_BENCH (run with
-    /// `SPACEMAP_BENCH=<dir> cargo test --release scan_perf -- --ignored --nocapture`).
-    /// $SPACEMAP_THREADS sets the number of scan threads, and $SPACEMAP_RUNS
+    /// Scan timing on the folder in $SPACESCAN_BENCH (run with
+    /// `SPACESCAN_BENCH=<dir> cargo test --release scan_perf -- --ignored --nocapture`).
+    /// $SPACESCAN_THREADS sets the number of scan threads, and $SPACESCAN_RUNS
     /// the number of runs (default 5; 1 for a cold-cache measurement).
     #[test]
     #[ignore]
     fn scan_bench() {
-        let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").expect("set SPACEMAP_BENCH"));
+        let dir = PathBuf::from(std::env::var("SPACESCAN_BENCH").expect("set SPACESCAN_BENCH"));
         let env_num = |name: &str, default: usize| {
             std::env::var(name)
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(default)
         };
-        let threads = env_num("SPACEMAP_THREADS", 0);
-        // $SPACEMAP_FILE_ORDER=1 reads entries in file-number order.
-        let in_file_order = std::env::var_os("SPACEMAP_FILE_ORDER").is_some();
-        // $SPACEMAP_LIVE=1 counts every file for the live chart, as the app
-        // does; $SPACEMAP_WINDOW=1 also does the window's work meanwhile
+        let threads = env_num("SPACESCAN_THREADS", 0);
+        // $SPACESCAN_FILE_ORDER=1 reads entries in file-number order.
+        let in_file_order = std::env::var_os("SPACESCAN_FILE_ORDER").is_some();
+        // $SPACESCAN_LIVE=1 counts every file for the live chart, as the app
+        // does; $SPACESCAN_WINDOW=1 also does the window's work meanwhile
         // (extension totals, reading the live tree every 100 ms).
-        let with_live = std::env::var_os("SPACEMAP_LIVE").is_some();
-        let window = std::env::var_os("SPACEMAP_WINDOW").is_some();
+        let with_live = std::env::var_os("SPACESCAN_LIVE").is_some();
+        let window = std::env::var_os("SPACESCAN_WINDOW").is_some();
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
             .build()
             .unwrap();
-        for run in 0..env_num("SPACEMAP_RUNS", 5) {
+        for run in 0..env_num("SPACESCAN_RUNS", 5) {
             let live = with_live
                 .then(|| pool.install(|| LiveTree::new(Arc::new(CategoryModel::defaults()))));
             let (tx, rx) = channel();
@@ -1848,7 +1849,7 @@ mod order_tests {
     /// Reading entries in file-number order gives the same tree.
     #[test]
     fn file_order_gives_the_same_tree() {
-        let dir = std::env::temp_dir().join(format!("spacemap-order-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-order-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         for i in 0..50 {
@@ -1891,7 +1892,7 @@ mod mount_tests {
     /// whatever device it reports (btrfs subvolumes report their own).
     #[test]
     fn scans_stop_only_at_mount_points() {
-        let dir = std::env::temp_dir().join(format!("spacemap-mounts-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-mounts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("mounted")).unwrap();
         std::fs::create_dir_all(dir.join("plain")).unwrap();
@@ -1929,19 +1930,19 @@ mod scan_dump {
     use std::fmt::Write as _;
     use std::os::unix::ffi::OsStrExt;
 
-    /// Writes everything a scan of $SPACEMAP_BENCH produces to
-    /// $SPACEMAP_DUMP, in a fixed order: every node's values, every finished
+    /// Writes everything a scan of $SPACESCAN_BENCH produces to
+    /// $SPACESCAN_DUMP, in a fixed order: every node's values, every finished
     /// folder's report, every error and unreadable folder. Two versions of
     /// the scanner must give identical files (run with RAYON_NUM_THREADS=1
     /// where hard links are shared between folders: which name counts them
-    /// depends on thread timing). $SPACEMAP_APPARENT=1 counts apparent sizes.
+    /// depends on thread timing). $SPACESCAN_APPARENT=1 counts apparent sizes.
     /// Run with `cargo test --release scan_dump -- --ignored`.
     #[test]
     #[ignore]
     fn scan_dump() {
-        let dir = PathBuf::from(std::env::var("SPACEMAP_BENCH").unwrap());
-        let out = std::env::var("SPACEMAP_DUMP").unwrap();
-        let apparent = std::env::var_os("SPACEMAP_APPARENT").is_some();
+        let dir = PathBuf::from(std::env::var("SPACESCAN_BENCH").unwrap());
+        let out = std::env::var("SPACESCAN_DUMP").unwrap();
+        let apparent = std::env::var_os("SPACESCAN_APPARENT").is_some();
         let (tx, rx) = channel();
         let collect = std::thread::spawn(move || {
             let mut lines = Vec::new();
@@ -2130,7 +2131,7 @@ mod path_tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("spacemap-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -2279,7 +2280,7 @@ mod path_tests {
     /// node's path exists, and agrees with all the other readings.
     #[test]
     fn scanned_paths_exist() {
-        let dir = std::env::temp_dir().join(format!("spacemap-paths-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-paths-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let names: [&[u8]; 5] = [
             b"\xff dir",
@@ -2381,7 +2382,7 @@ mod hard_link_tests {
     /// one counted inside still counts there.
     #[test]
     fn rescanned_folders_match_the_full_scan() {
-        let dir = std::env::temp_dir().join(format!("spacemap-relinks-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-relinks-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["a", "b/c", "z"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -2442,7 +2443,7 @@ mod hard_link_tests {
     /// counted once.
     #[test]
     fn hard_links_count_at_their_first_name_every_time() {
-        let dir = std::env::temp_dir().join(format!("spacemap-links-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-links-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let deep_dir = (0..30).fold(dir.join("z"), |p, i| p.join(format!("d{i}")));
         for d in ["a/b", "a-c", "m", "same", "many1", "many2"] {

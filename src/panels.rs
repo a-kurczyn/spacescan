@@ -2544,7 +2544,7 @@ mod typed_path_tests {
     /// exist; a name with the space wins over the same name without it.
     #[test]
     fn spaces_around_typed_paths() {
-        let dir = std::env::temp_dir().join(format!("spacemap-typed-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-typed-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for name in ["sp ", " lead", "both", "both ", "  "] {
             std::fs::create_dir_all(dir.join(name)).unwrap();

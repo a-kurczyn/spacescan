@@ -1,7 +1,7 @@
 //! File categories (Video, Audio, Documents, …) for the colored bar beside
 //! the contents table, which filters it to one category.
 //!
-//! The categories come from ~/.config/spacemap/categories.json, written from
+//! The categories come from ~/.config/spacescan/categories.json, written from
 //! the built-in defaults (src/categories.json) when missing. Each category
 //! has a name and a list of file extensions. The name is a language-file
 //! token ("CAT_VIDEO"); one without a translation is shown as written. Files
@@ -202,7 +202,14 @@ impl CategoryModel {
     }
 
     fn load_from_file(write_missing: bool) -> (Self, Option<String>) {
-        let path = config_dir().join("categories.json");
+        // Read-only, before the app first ran under its new name: the old
+        // settings folder's file.
+        let dir = if !write_missing && std::fs::symlink_metadata(config_dir()).is_err() {
+            config::old_config_dir()
+        } else {
+            config_dir()
+        };
+        let path = dir.join("categories.json");
         let text = match std::fs::metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && !write_missing => {
                 return (Self::defaults(), None);

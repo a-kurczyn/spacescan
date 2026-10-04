@@ -1,4 +1,4 @@
-//! Command-line use: `spacemap --help` lists the commands. A command scans
+//! Command-line use: `spacescan --help` lists the commands. A command scans
 //! a folder and prints what the app's tables show, as text, CSV or JSON.
 
 use super::*;
@@ -6,12 +6,12 @@ use std::ffi::OsString;
 use std::io::Write;
 
 const HELP: &str = "\
-spacemap — see what takes the space on your disks
+spacescan — see what takes the space on your disks
 
 Usage:
-  spacemap                 start the app
-  spacemap PATH            start the app and scan PATH
-  spacemap COMMAND PATH [OPTIONS]
+  spacescan                 start the app
+  spacescan PATH            start the app and scan PATH
+  spacescan COMMAND PATH [OPTIONS]
 
 Commands:
   list   the folders and files directly in PATH, with their totals
@@ -210,7 +210,7 @@ fn print_out(text: &str) -> Run {
         Ok(()) => Run::Exit(0),
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Run::Exit(0),
         Err(e) => {
-            eprintln!("spacemap: {e}");
+            eprintln!("spacescan: {e}");
             Run::Exit(1)
         }
     }
@@ -222,11 +222,11 @@ pub(crate) fn run(args: &[OsString]) -> Run {
         Ok(Parsed::App(path)) => return Run::App(path),
         Ok(Parsed::Help) => return print_out(HELP),
         Ok(Parsed::Version) => {
-            return print_out(&format!("spacemap {}\n", env!("CARGO_PKG_VERSION")));
+            return print_out(&format!("spacescan {}\n", env!("CARGO_PKG_VERSION")));
         }
         Ok(Parsed::Report(req)) => req,
         Err(why) => {
-            eprintln!("spacemap: {why}\nTry 'spacemap --help'.");
+            eprintln!("spacescan: {why}\nTry 'spacescan --help'.");
             return Run::Exit(2);
         }
     };
@@ -236,17 +236,17 @@ pub(crate) fn run(args: &[OsString]) -> Run {
     match std::fs::metadata(&path) {
         Ok(m) if m.is_dir() => {}
         Ok(_) => {
-            eprintln!("spacemap: {} is not a folder", show_path(&path));
+            eprintln!("spacescan: {} is not a folder", show_path(&path));
             return Run::Exit(1);
         }
         Err(e) => {
-            eprintln!("spacemap: {}", friendly_io_error(&path, &e));
+            eprintln!("spacescan: {}", friendly_io_error(&path, &e));
             return Run::Exit(1);
         }
     }
     let (tree, problems, unreadable) = scan_for_cli(&path, req.apparent);
     for p in &problems {
-        eprintln!("spacemap: {p}");
+        eprintln!("spacescan: {p}");
     }
     // The folder itself couldn't be read: nothing to report.
     if unreadable.contains(&path) {
@@ -257,7 +257,7 @@ pub(crate) fn run(args: &[OsString]) -> Run {
     let cats = if req.command == Command::Exts {
         let (cats, problem) = CategoryModel::load_read_only();
         if let Some(p) = problem {
-            eprintln!("spacemap: {p}");
+            eprintln!("spacescan: {p}");
         }
         cats
     } else {
@@ -271,7 +271,7 @@ pub(crate) fn run(args: &[OsString]) -> Run {
         // The reader stopped early (`| head`): not an error.
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Run::Exit(0),
         Err(e) => {
-            eprintln!("spacemap: {e}");
+            eprintln!("spacescan: {e}");
             Run::Exit(1)
         }
     }
@@ -729,7 +729,7 @@ mod tests {
     /// A tree with odd names: a comma, a quote, a line break, a backslash,
     /// a leading space, bytes that aren't UTF-8; equal sizes; a subfolder.
     fn odd_tree(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("spacemap-cli-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-cli-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub, \"quoted\"")).unwrap();
         let names: [&[u8]; 7] = [
@@ -947,7 +947,7 @@ mod tests {
     /// files stay together.
     #[test]
     fn flat_by_name_goes_by_path() {
-        let dir = std::env::temp_dir().join(format!("spacemap-cli-paths-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-cli-paths-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["b", "a/z", "c"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -985,7 +985,7 @@ mod tests {
     /// a name comes escaped, and CSV quotes any field holding one.
     #[test]
     fn mount_points_and_carriage_returns() {
-        let dir = std::env::temp_dir().join(format!("spacemap-cli-mount-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-cli-mount-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("mnt")).unwrap();
         std::fs::write(dir.join("cr\rname"), b"1").unwrap();

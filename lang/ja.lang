@@ -1,6 +1,6 @@
 # name: 日本語
 #
-# spacemap language file (see en.lang for how these files work).
+# SpaceScan language file (see en.lang for how these files work).
 
 # ---- Toolbar ----
 TOOLBAR_SUMMARY_VIEW=概要ビュー
@@ -82,7 +82,7 @@ SETTINGS_FLAT_ROWS_HOVER=フラット表示はこの件数までのファイル�
 SETTINGS_FLAT_ALL=フラット表示ですべてのファイルを表示
 SETTINGS_FLAT_ALL_HOVER=フラット表示に行数の上限なくすべてのファイルを表示します。ファイルが数百万あると、並べ替えに数秒かかります。
 SETTINGS_PATHS_CLIPBOARD=Ctrl+C / Ctrl+X でファイルをシステムのクリップボードへ
-SETTINGS_PATHS_CLIPBOARD_HOVER=選んだファイルをシステムのクリップボードにも入れ、ファイルマネージャーに貼り付け (Ctrl+X の後なら移動) たり、他のプログラムにパスとして貼り付けたりできるようにします。オフの場合、spacemap の Ctrl+V は自分の選択を使います。右クリックの「このフォルダーに貼り付け」は常に使えます。
+SETTINGS_PATHS_CLIPBOARD_HOVER=選んだファイルをシステムのクリップボードにも入れ、ファイルマネージャーに貼り付け (Ctrl+X の後なら移動) たり、他のプログラムにパスとして貼り付けたりできるようにします。オフの場合、SpaceScan の Ctrl+V は自分の選択を使います。右クリックの「このフォルダーに貼り付け」は常に使えます。
 SETTINGS_LOG=ログ
 SETTINGS_MAX_LOG_LINES=保存する問題の最大行数
 SETTINGS_SCANNING=スキャン
@@ -296,6 +296,7 @@ A11Y_CATEGORY_KEY=%s、キー %s
 ERR_CATEGORIES_FILE=カテゴリーファイル %s を使えません (%s)。組み込みのカテゴリーを使用します。
 ERR_CATEGORIES_PROBLEMS=カテゴリーファイル %s: スキップ %s
 ERR_CATEGORIES_SAVE=カテゴリーファイル %s を書き込めませんでした: %s
+ERR_OLD_SETTINGS_COPY=以前の spacemap の設定から %s をコピーできませんでした: %s
 ERR_CATEGORIES_NO_LIST="categories" リストが必要です
 ERR_CATEGORIES_NO_NAME=%s に名前がありません
 ERR_CATEGORIES_ENTRY=%s: "%s" の無効な項目: %s

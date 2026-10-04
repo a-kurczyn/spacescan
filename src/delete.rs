@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn deletes_trees_deeper_than_path_max() {
         let base =
-            std::env::temp_dir().join(format!("spacemap-deep-delete-{}", std::process::id()));
+            std::env::temp_dir().join(format!("spacescan-deep-delete-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let outside = base.join("outside.txt");
@@ -809,7 +809,7 @@ mod tests {
         // As the app does at start (the test binary skips `main`).
         crate::raise_open_file_limit();
         let base =
-            std::env::temp_dir().join(format!("spacemap-deep-{levels}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("spacescan-deep-{levels}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let top = base.join("chain");

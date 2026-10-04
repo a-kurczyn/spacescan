@@ -3123,7 +3123,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "spacemap"
+name = "spacescan"
 version = "0.1.0"
 dependencies = [
  "chrono",

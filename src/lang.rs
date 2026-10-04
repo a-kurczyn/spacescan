@@ -1,7 +1,7 @@
 //! Translations. Every user-facing string is a `KEY=value` line in a
 //! language file (lang/<code>.lang, built into the binary). English is the
 //! base: a key missing from a language shows in English. A file
-//! ~/.config/spacemap/lang/<code>.lang overrides lines of a built-in
+//! ~/.config/spacescan/lang/<code>.lang overrides lines of a built-in
 //! language, or adds a new language. Values may contain `%s` placeholders,
 //! filled in order by `trf`.
 
@@ -37,7 +37,7 @@ fn display_name(text: &str) -> Option<String> {
 }
 
 pub(crate) fn config_dir() -> PathBuf {
-    home_dir().join(".config/spacemap")
+    home_dir().join(".config/spacescan")
 }
 
 pub(crate) fn lang_dir() -> PathBuf {
@@ -264,7 +264,7 @@ mod tests {
     /// read.
     #[test]
     fn only_small_regular_files_are_read() {
-        let dir = std::env::temp_dir().join(format!("spacemap-langfile-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-langfile-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let fifo = dir.join("fifo.lang");

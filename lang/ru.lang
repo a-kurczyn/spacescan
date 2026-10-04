@@ -1,6 +1,6 @@
 # name: Русский
 #
-# spacemap language file (see en.lang for how these files work).
+# SpaceScan language file (see en.lang for how these files work).
 
 # ---- Toolbar ----
 TOOLBAR_SUMMARY_VIEW=Сводка
@@ -82,7 +82,7 @@ SETTINGS_FLAT_ROWS_HOVER=Плоский список показывает не �
 SETTINGS_FLAT_ALL=Показывать все файлы в плоском списке
 SETTINGS_FLAT_ALL_HOVER=Плоский список показывает все файлы без ограничения строк. При миллионах файлов сортировка занимает несколько секунд.
 SETTINGS_PATHS_CLIPBOARD=Ctrl+C / Ctrl+X помещают файлы в системный буфер обмена
-SETTINGS_PATHS_CLIPBOARD_HOVER=Также помещает выбранные файлы в системный буфер обмена, чтобы вставить их в файловом менеджере (после Ctrl+X — переместить) или как пути в других программах. Если выключено, Ctrl+V в spacemap использует собственный выбор; «Вставить в эту папку» в меню правой кнопки работает всегда.
+SETTINGS_PATHS_CLIPBOARD_HOVER=Также помещает выбранные файлы в системный буфер обмена, чтобы вставить их в файловом менеджере (после Ctrl+X — переместить) или как пути в других программах. Если выключено, Ctrl+V в SpaceScan использует собственный выбор; «Вставить в эту папку» в меню правой кнопки работает всегда.
 SETTINGS_LOG=Журнал
 SETTINGS_MAX_LOG_LINES=Макс. хранимых строк проблем
 SETTINGS_SCANNING=Анализ
@@ -296,6 +296,7 @@ A11Y_CATEGORY_KEY=%s, клавиша %s
 ERR_CATEGORIES_FILE=Не удалось использовать файл категорий %s (%s); используются встроенные категории.
 ERR_CATEGORIES_PROBLEMS=Файл категорий %s: пропущено %s
 ERR_CATEGORIES_SAVE=Не удалось записать файл категорий %s: %s
+ERR_OLD_SETTINGS_COPY=Не удалось скопировать %s из старых настроек spacemap: %s
 ERR_CATEGORIES_NO_LIST=нужен список "categories"
 ERR_CATEGORIES_NO_NAME=у %s нет имени
 ERR_CATEGORIES_ENTRY=%s: недопустимая запись в "%s": %s

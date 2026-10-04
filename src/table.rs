@@ -2315,7 +2315,7 @@ mod cursor_tests {
     /// exactly the order a scan gives.
     #[test]
     fn switching_the_measure_resorts_everything() {
-        let dir = std::env::temp_dir().join(format!("spacemap-measure-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-measure-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["heavy", "crowd/inner", "tie_b", "tie_a"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -2374,7 +2374,7 @@ mod cursor_tests {
     /// equal to a fresh scan sorted by files.
     #[test]
     fn measure_holds_across_scan_ends_and_rescans() {
-        let dir = std::env::temp_dir().join(format!("spacemap-measure2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-measure2-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["heavy", "crowd", "sub/a", "sub/b"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -2438,7 +2438,7 @@ mod cursor_tests {
     /// follow, so the tree equals a fresh scan.
     #[test]
     fn folders_take_their_own_size_again_after_deletes() {
-        let dir = std::env::temp_dir().join(format!("spacemap-ownsize-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-ownsize-{}", std::process::id()));
         for apparent in [false, true] {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(dir.join("logs/deeper")).unwrap();
@@ -2482,7 +2482,7 @@ mod cursor_tests {
     /// disk lists names in another order than by name.
     #[test]
     fn edits_in_place_equal_a_fresh_scan() {
-        let dir = std::env::temp_dir().join(format!("spacemap-inplace-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-inplace-{}", std::process::id()));
         for picked in [false, true] {
             let _ = std::fs::remove_dir_all(&dir);
             for d in ["big", "small", "ties", "ties/sub", "pa", "pb"] {

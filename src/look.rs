@@ -1009,7 +1009,8 @@ mod tests {
     /// big file, and equal counts go by name.
     #[test]
     fn live_chart_follows_the_measure() {
-        let dir = std::env::temp_dir().join(format!("spacemap-livemeasure-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("spacescan-livemeasure-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("big")).unwrap();
         std::fs::create_dir_all(dir.join("crowd")).unwrap();
@@ -1113,7 +1114,7 @@ mod tests {
     /// classifying its name, and none for folders.
     #[test]
     fn scans_store_each_files_category() {
-        let dir = std::env::temp_dir().join(format!("spacemap-cats-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-cats-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         for name in [
@@ -1417,7 +1418,8 @@ mod live_stress {
     /// the one scanning (extra threads share a counter shard).
     #[test]
     fn live_tree_is_exact_under_load() {
-        let dir = std::env::temp_dir().join(format!("spacemap-live-stress-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("spacescan-live-stress-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let exts = ["eml", "JPG", "mkv", "txt", "x", ""];
         std::fs::create_dir_all(dir.join("flat")).unwrap();
@@ -1505,7 +1507,7 @@ mod live_stress {
     /// Thousands of folders right below the scanned one.
     #[test]
     fn wide_shallow_tree() {
-        let dir = std::env::temp_dir().join(format!("spacemap-live-wide-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-live-wide-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in 0..5000 {
             let sub = dir.join(format!("d{d}"));
@@ -1528,7 +1530,7 @@ mod live_stress {
     /// kept.
     #[test]
     fn small_folders_are_grouped_exactly() {
-        let dir = std::env::temp_dir().join(format!("spacemap-live-group-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("spacescan-live-group-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("big")).unwrap();
         std::fs::write(dir.join("big/huge.mkv"), vec![0u8; 50_000_000]).unwrap();

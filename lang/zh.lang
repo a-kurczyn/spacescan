@@ -1,6 +1,6 @@
 # name: 简体中文
 #
-# spacemap language file (see en.lang for how these files work).
+# SpaceScan language file (see en.lang for how these files work).
 
 # ---- Toolbar ----
 TOOLBAR_SUMMARY_VIEW=摘要视图
@@ -82,7 +82,7 @@ SETTINGS_FLAT_ROWS_HOVER=平铺列表最多显示这么多文件，按当前排�
 SETTINGS_FLAT_ALL=平铺列表显示所有文件
 SETTINGS_FLAT_ALL_HOVER=平铺列表显示所有文件，不限行数。文件达数百万时，排序需要几秒钟。
 SETTINGS_PATHS_CLIPBOARD=Ctrl+C / Ctrl+X 将文件放入系统剪贴板
-SETTINGS_PATHS_CLIPBOARD_HOVER=同时把所选文件放入系统剪贴板，以便在文件管理器中粘贴（Ctrl+X 后为移动），或作为路径粘贴到其他程序。关闭后，spacemap 中的 Ctrl+V 使用其自身的选择；右键菜单的“粘贴到此文件夹”始终可用。
+SETTINGS_PATHS_CLIPBOARD_HOVER=同时把所选文件放入系统剪贴板，以便在文件管理器中粘贴（Ctrl+X 后为移动），或作为路径粘贴到其他程序。关闭后，SpaceScan 中的 Ctrl+V 使用其自身的选择；右键菜单的“粘贴到此文件夹”始终可用。
 SETTINGS_LOG=日志
 SETTINGS_MAX_LOG_LINES=保存的问题行数上限
 SETTINGS_SCANNING=扫描
@@ -296,6 +296,7 @@ A11Y_CATEGORY_KEY=%s，按键 %s
 ERR_CATEGORIES_FILE=无法使用分类文件 %s (%s)；改用内置分类。
 ERR_CATEGORIES_PROBLEMS=分类文件 %s：已跳过 %s
 ERR_CATEGORIES_SAVE=无法写入分类文件 %s：%s
+ERR_OLD_SETTINGS_COPY=无法从旧的 spacemap 设置中复制 %s：%s
 ERR_CATEGORIES_NO_LIST=需要一个 "categories" 列表
 ERR_CATEGORIES_NO_NAME=%s 没有名称
 ERR_CATEGORIES_ENTRY=%s："%s" 中的条目无效：%s

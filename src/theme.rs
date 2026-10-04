@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// The colors spacemap takes from KDE's color scheme.
+/// The colors spacescan takes from KDE's color scheme.
 pub(crate) struct KdeColors {
     pub(crate) window_bg: Color32,
     pub(crate) view_bg: Color32,

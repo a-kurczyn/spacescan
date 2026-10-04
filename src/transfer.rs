@@ -508,7 +508,7 @@ fn new_part_file(dst: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
     use std::os::unix::fs::OpenOptionsExt;
     let name = dst.file_name().unwrap_or_default().to_string_lossy();
     for n in 0u32.. {
-        let part = dst.with_file_name(format!(".{name}.spacemap-part{n}"));
+        let part = dst.with_file_name(format!(".{name}.spacescan-part{n}"));
         match std::fs::File::options()
             .write(true)
             .create_new(true)
@@ -949,9 +949,9 @@ impl DiskScanApp {
             self.status = tr("STATUS_TRANSFER_BUSY");
             return;
         }
-        // Files copied in another program after spacemap's own Ctrl+C or
+        // Files copied in another program after spacescan's own Ctrl+C or
         // Ctrl+X replaced its paths on the clipboard, so they win. (With the
-        // paths kept off the clipboard, spacemap's own pick always wins.)
+        // paths kept off the clipboard, spacescan's own pick always wins.)
         let Ok(copied) = clipboard_files() else {
             // Not knowing what's there, pasting an older pick could be wrong.
             self.status = tr("ERR_CLIPBOARD_NO_ANSWER");
@@ -1213,7 +1213,7 @@ mod tests {
 
     fn scratch(name: &str) -> PathBuf {
         let d =
-            std::env::temp_dir().join(format!("spacemap-transfer-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("spacescan-transfer-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -1362,7 +1362,7 @@ mod tests {
         let shm = Path::new("/dev/shm");
         let d = scratch("xfs");
         let Ok(src_root) = std::fs::metadata(shm)
-            .map(|_| shm.join(format!("spacemap-xfs-{}", std::process::id())))
+            .map(|_| shm.join(format!("spacescan-xfs-{}", std::process::id())))
         else {
             return;
         };
@@ -1579,7 +1579,7 @@ mod tests {
             b"/tmp/last",
         ];
         assert_eq!(got, want);
-        // What spacemap offers reads back as the same paths.
+        // What spacescan offers reads back as the same paths.
         let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/a b\n\xff%c\\d"));
         let formats = clipboard_formats(std::slice::from_ref(&odd), ClipMode::Move);
         let uris = &formats.iter().find(|f| f.0 == "text/uri-list").unwrap().1;
@@ -1744,7 +1744,7 @@ mod tests {
         let leftovers: Vec<_> = std::fs::read_dir(&to)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains("spacemap-part"))
+            .filter(|e| e.file_name().to_string_lossy().contains("spacescan-part"))
             .collect();
         assert!(leftovers.is_empty(), "no half-written copies are left");
         let _ = std::fs::remove_dir_all(&d);

@@ -1,4 +1,4 @@
-//! spacemap: a disk usage explorer for Linux, with a sunburst chart and an
+//! spacescan: a disk usage explorer for Linux, with a sunburst chart and an
 //! ncdu-style table.
 
 use eframe::egui;
@@ -1307,21 +1307,30 @@ fn main() -> eframe::Result<()> {
         cli::Run::App(path) => path,
         cli::Run::Exit(code) => std::process::exit(code),
     };
+    // Before anything reads the settings.
+    let not_copied = config::copy_old_config();
     quiet_accessibility_panic();
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1100.0, 800.0])
+            .with_title("SpaceScan")
+            .with_app_id("spacescan"),
         ..Default::default()
     };
     eframe::run_native(
-        "spacemap",
+        "spacescan",
         options,
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
             install_fallback_fonts(&cc.egui_ctx, false);
-            Ok(Box::new(DiskScanApp {
+            let mut app = DiskScanApp {
                 start_path,
                 ..DiskScanApp::default()
-            }))
+            };
+            for n in &not_copied {
+                app.log_issue(n.message());
+            }
+            Ok(Box::new(app))
         }),
     )
 }

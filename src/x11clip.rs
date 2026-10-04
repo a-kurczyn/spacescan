@@ -166,7 +166,7 @@ pub(crate) fn read(format: &str) -> Result<Option<Vec<u8>>, NoAnswer> {
             .ok()?
             .owner;
         let target = atom(&conn, format)?;
-        let property = atom(&conn, "SPACEMAP_CLIPBOARD")?;
+        let property = atom(&conn, "SPACESCAN_CLIPBOARD")?;
         let incr = atom(&conn, "INCR")?;
         Some((win, clipboard, owner, target, property, incr))
     };

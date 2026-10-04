@@ -1,6 +1,6 @@
 # name: Français
 #
-# spacemap language file (see en.lang for how these files work).
+# SpaceScan language file (see en.lang for how these files work).
 
 # ---- Toolbar ----
 TOOLBAR_SUMMARY_VIEW=Vue résumé
@@ -82,7 +82,7 @@ SETTINGS_FLAT_ROWS_HOVER=La liste à plat affiche au plus ce nombre de fichiers,
 SETTINGS_FLAT_ALL=Afficher tous les fichiers dans la liste à plat
 SETTINGS_FLAT_ALL_HOVER=La liste à plat affiche tous les fichiers, sans limite de lignes. Avec des millions de fichiers, la trier prend quelques secondes.
 SETTINGS_PATHS_CLIPBOARD=Ctrl+C / Ctrl+X placent les fichiers dans le presse-papiers du système
-SETTINGS_PATHS_CLIPBOARD_HOVER=Place aussi les fichiers choisis dans le presse-papiers du système, pour les coller dans un gestionnaire de fichiers (déplacés après Ctrl+X) ou comme chemins dans d'autres programmes. Désactivé, Ctrl+V dans spacemap utilise sa propre sélection ; « Coller dans ce dossier » du menu du clic droit marche toujours.
+SETTINGS_PATHS_CLIPBOARD_HOVER=Place aussi les fichiers choisis dans le presse-papiers du système, pour les coller dans un gestionnaire de fichiers (déplacés après Ctrl+X) ou comme chemins dans d'autres programmes. Désactivé, Ctrl+V dans SpaceScan utilise sa propre sélection ; « Coller dans ce dossier » du menu du clic droit marche toujours.
 SETTINGS_LOG=Journal
 SETTINGS_MAX_LOG_LINES=Lignes de problèmes conservées (max.)
 SETTINGS_SCANNING=Analyse
@@ -296,6 +296,7 @@ A11Y_CATEGORY_KEY=%s, touche %s
 ERR_CATEGORIES_FILE=Impossible d'utiliser le fichier de catégories %s (%s) ; catégories intégrées utilisées.
 ERR_CATEGORIES_PROBLEMS=Fichier de catégories %s : ignoré %s
 ERR_CATEGORIES_SAVE=Impossible d'écrire le fichier de catégories %s : %s
+ERR_OLD_SETTINGS_COPY=Impossible de copier %s depuis les anciens paramètres de spacemap : %s
 ERR_CATEGORIES_NO_LIST=il faut une liste "categories"
 ERR_CATEGORIES_NO_NAME=%s n'a pas de nom
 ERR_CATEGORIES_ENTRY=%s : entrée non valide dans "%s" : %s

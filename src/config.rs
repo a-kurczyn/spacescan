@@ -1,5 +1,5 @@
 //! Settings remembered between launches (language, chart settings, the
-//! Summary table's layout), saved in ~/.config/spacemap/settings.json
+//! Summary table's layout), saved in ~/.config/spacescan/settings.json
 //! whenever they change.
 
 use super::*;
@@ -75,16 +75,128 @@ impl Unreadable {
     /// The line for the Issues log. (Kept out of `read_settings`, which also
     /// runs while translations load, when looking one up would deadlock.)
     fn message(&self) -> String {
-        let why = match self {
+        trf(
+            "ERR_SETTINGS_UNREADABLE",
+            &[&show_path(&settings_file()), &self.why()],
+        )
+    }
+
+    fn why(&self) -> String {
+        match self {
             Unreadable::NotAFile => tr("ERR_SETTINGS_NOT_FILE"),
             Unreadable::TooBig => tr("ERR_SETTINGS_TOO_BIG"),
             Unreadable::Io(e) => e.to_string(),
-        };
+        }
+    }
+}
+
+/// The settings folder under the app's earlier name.
+pub(crate) fn old_config_dir() -> PathBuf {
+    home_dir().join(".config/spacemap")
+}
+
+/// A file of the old settings folder that wasn't copied, and why.
+pub(crate) struct NotCopied {
+    path: PathBuf,
+    why: Unreadable,
+}
+
+impl NotCopied {
+    /// The line for the Issues log.
+    pub(crate) fn message(&self) -> String {
         trf(
-            "ERR_SETTINGS_UNREADABLE",
-            &[&show_path(&settings_file()), &why],
+            "ERR_OLD_SETTINGS_COPY",
+            &[&show_path(&self.path), &self.why.why()],
         )
     }
+}
+
+/// On the first start under the new name, copies the old settings folder's
+/// settings.json, categories.json and lang/*.lang into the new one. The old
+/// folder is only read. Nothing happens when the new folder exists (even
+/// empty) or the old one doesn't.
+pub(crate) fn copy_old_config() -> Vec<NotCopied> {
+    copy_config(&old_config_dir(), &config_dir())
+}
+
+fn copy_config(old: &Path, new: &Path) -> Vec<NotCopied> {
+    use std::io::ErrorKind::NotFound;
+    let mut missed = Vec::new();
+    let mut miss = |path: &Path, why| {
+        missed.push(NotCopied {
+            path: path.into(),
+            why,
+        })
+    };
+    if std::fs::symlink_metadata(new).is_ok() {
+        return missed;
+    }
+    match std::fs::metadata(old) {
+        Ok(m) if m.is_dir() => {}
+        Ok(_) => return missed,
+        Err(e) if e.kind() == NotFound => return missed,
+        Err(e) => {
+            miss(old, Unreadable::Io(e));
+            return missed;
+        }
+    }
+    let mut files = vec![
+        PathBuf::from("settings.json"),
+        PathBuf::from("categories.json"),
+    ];
+    match std::fs::read_dir(old.join("lang")) {
+        Ok(entries) => {
+            let mut langs: Vec<PathBuf> = entries
+                .flatten()
+                .map(|e| e.file_name())
+                .filter(|n| Path::new(n).extension().is_some_and(|x| x == "lang"))
+                .map(|n| Path::new("lang").join(n))
+                .collect();
+            langs.sort();
+            files.extend(langs);
+        }
+        Err(e) if e.kind() == NotFound => {}
+        Err(e) => miss(&old.join("lang"), Unreadable::Io(e)),
+    }
+    for file in files {
+        let from = old.join(&file);
+        let bytes = match read_small_bytes(&from) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => continue,
+            Err(why) => {
+                miss(&from, why);
+                continue;
+            }
+        };
+        let to = new.join(&file);
+        let written = std::fs::create_dir_all(to.parent().unwrap_or(new))
+            .and_then(|()| std::fs::write(&to, bytes));
+        if let Err(e) = written {
+            miss(&to, Unreadable::Io(e));
+        }
+    }
+    missed
+}
+
+/// A file's bytes if it's a regular file of at most MAX_SETTINGS_BYTES;
+/// None if there's nothing there. A FIFO or a device is never opened.
+fn read_small_bytes(path: &Path) -> Result<Option<Vec<u8>>, Unreadable> {
+    use std::io::Read;
+    match std::fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Unreadable::Io(e)),
+        Ok(m) if !m.is_file() => return Err(Unreadable::NotAFile),
+        Ok(m) if m.len() > MAX_SETTINGS_BYTES => return Err(Unreadable::TooBig),
+        Ok(_) => {}
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|f| f.take(MAX_SETTINGS_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(Unreadable::Io)?;
+    if bytes.len() as u64 > MAX_SETTINGS_BYTES {
+        return Err(Unreadable::TooBig);
+    }
+    Ok(Some(bytes))
 }
 
 /// settings.json's text: None if there's no file; Err if it's something
@@ -307,9 +419,9 @@ mod tests {
     fn with_home(f: impl FnOnce(&Path)) {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let home = std::env::temp_dir().join(format!("spacemap-cfg-test-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("spacescan-cfg-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(home.join(".config/spacemap")).unwrap();
+        std::fs::create_dir_all(home.join(".config/spacescan")).unwrap();
         let old = std::env::var_os("HOME");
         // SAFETY (for the set_var/remove_var calls): tests that change HOME
         // hold LOCK, and no other test reads HOME: the app and translations
@@ -321,6 +433,205 @@ mod tests {
             None => unsafe { std::env::remove_var("HOME") },
         }
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Every file under `dir` (links not followed) with its kind, bytes
+    /// and permissions, to show a folder was left exactly as it was.
+    fn snapshot(dir: &Path) -> Vec<(PathBuf, String, Vec<u8>, u32)> {
+        use std::os::unix::fs::PermissionsExt;
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let m = std::fs::symlink_metadata(&d).unwrap();
+            let mode = m.permissions().mode();
+            let entry = if m.file_type().is_symlink() {
+                (
+                    "link".into(),
+                    std::fs::read_link(&d)
+                        .unwrap()
+                        .into_os_string()
+                        .into_encoded_bytes(),
+                )
+            } else if m.is_dir() {
+                for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                    stack.push(e.path());
+                }
+                ("dir".into(), Vec::new())
+            } else if m.is_file() {
+                ("file".into(), std::fs::read(&d).unwrap_or_default())
+            } else {
+                ("other".into(), Vec::new())
+            };
+            out.push((d, entry.0, entry.1, mode));
+        }
+        out.sort();
+        out
+    }
+
+    fn test_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("spacescan-copy-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The old settings folder is copied once, byte for byte, and never
+    /// changed: settings, categories and language files only; nothing when
+    /// the new folder exists or the old one doesn't.
+    #[test]
+    fn old_settings_are_copied_once() {
+        let dir = test_dir("plain");
+        let (old, new) = (dir.join("old"), dir.join("new"));
+        // No old folder: nothing happens.
+        assert!(copy_config(&old, &new).is_empty());
+        assert!(!new.exists());
+        std::fs::create_dir_all(old.join("lang")).unwrap();
+        std::fs::write(old.join("settings.json"), b"{\"bad utf8\": \"\xff\"}").unwrap();
+        std::fs::write(old.join("categories.json"), b"{ oops").unwrap();
+        std::fs::write(old.join("lang/nl.lang"), b"# name: Nederlands\n").unwrap();
+        std::fs::write(old.join("lang/notes.txt"), b"not a language").unwrap();
+        std::fs::write(old.join("other.json"), b"{}").unwrap();
+        let before = snapshot(&old);
+        assert!(copy_config(&old, &new).is_empty());
+        assert_eq!(snapshot(&old), before);
+        for f in ["settings.json", "categories.json", "lang/nl.lang"] {
+            assert_eq!(
+                std::fs::read(new.join(f)).unwrap(),
+                std::fs::read(old.join(f)).unwrap(),
+                "{f}"
+            );
+        }
+        assert!(!new.join("lang/notes.txt").exists() && !new.join("other.json").exists());
+        // Second start: the new folder wins, even after changes.
+        std::fs::write(new.join("settings.json"), b"{}").unwrap();
+        std::fs::write(old.join("settings.json"), b"{\"newer\": 1}").unwrap();
+        assert!(copy_config(&old, &new).is_empty());
+        assert_eq!(std::fs::read(new.join("settings.json")).unwrap(), b"{}");
+        // An empty new folder also wins.
+        let empty = dir.join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        assert!(copy_config(&old, &empty).is_empty());
+        assert_eq!(std::fs::read_dir(&empty).unwrap().count(), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Links in the old folder are read through and copied as regular
+    /// files, leaving links and targets alone; a FIFO, a device and a huge
+    /// file are skipped at once (never opened) and listed.
+    #[test]
+    fn old_links_are_read_and_odd_files_skipped() {
+        use std::os::unix::fs::symlink;
+        let dir = test_dir("odd");
+        let real = dir.join("real");
+        std::fs::create_dir_all(real.join("lang")).unwrap();
+        std::fs::write(dir.join("target.json"), b"{\"a\": 1}").unwrap();
+        symlink(dir.join("target.json"), real.join("settings.json")).unwrap();
+        symlink("/dev/zero", real.join("categories.json")).unwrap();
+        std::fs::write(real.join("lang/big.lang"), vec![b'#'; 2 << 20]).unwrap();
+        let fifo = std::ffi::CString::new(
+            real.join("lang/fifo.lang")
+                .into_os_string()
+                .into_encoded_bytes(),
+        )
+        .unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o644) }, 0);
+        std::fs::write(real.join("lang/ok.lang"), b"OK=1").unwrap();
+        let old = dir.join("old");
+        symlink(&real, &old).unwrap();
+        let new = dir.join("new");
+        let (before, target) = (
+            snapshot(&dir.join("real")),
+            std::fs::read(dir.join("target.json")).unwrap(),
+        );
+        let t = std::time::Instant::now();
+        let missed = copy_config(&old, &new);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2));
+        let mut why: Vec<(String, &str)> = missed
+            .iter()
+            .map(|m| {
+                let w = match m.why {
+                    Unreadable::NotAFile => "not a file",
+                    Unreadable::TooBig => "too big",
+                    Unreadable::Io(_) => "io",
+                };
+                (m.path.strip_prefix(&old).unwrap().display().to_string(), w)
+            })
+            .collect();
+        why.sort();
+        assert_eq!(
+            why,
+            [
+                ("categories.json".into(), "not a file"),
+                ("lang/big.lang".into(), "too big"),
+                ("lang/fifo.lang".into(), "not a file"),
+            ]
+        );
+        let settings = std::fs::symlink_metadata(new.join("settings.json")).unwrap();
+        assert!(settings.is_file());
+        assert_eq!(std::fs::read(new.join("settings.json")).unwrap(), target);
+        assert_eq!(std::fs::read(new.join("lang/ok.lang")).unwrap(), b"OK=1");
+        assert!(!new.join("categories.json").exists() && !new.join("lang/big.lang").exists());
+        assert_eq!(snapshot(&dir.join("real")), before);
+        assert_eq!(std::fs::read(dir.join("target.json")).unwrap(), target);
+        assert_eq!(std::fs::read_link(&old).unwrap(), real);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An old folder that can't be read is listed and left alone; a
+    /// read-only one is copied.
+    #[test]
+    fn unreadable_or_read_only_old_settings() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = test_dir("perms");
+        let old = dir.join("old");
+        std::fs::create_dir_all(old.join("lang")).unwrap();
+        std::fs::write(old.join("settings.json"), b"{}").unwrap();
+        std::fs::write(old.join("lang/nl.lang"), b"A=1").unwrap();
+        let mode =
+            |p: &Path, m| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        mode(&old.join("lang"), 0o555);
+        mode(&old, 0o555);
+        let before = snapshot(&old);
+        assert!(copy_config(&old, &dir.join("new")).is_empty());
+        assert_eq!(std::fs::read(dir.join("new/lang/nl.lang")).unwrap(), b"A=1");
+        assert_eq!(snapshot(&old), before);
+        mode(&old, 0o000);
+        let missed = copy_config(&old, &dir.join("new2"));
+        mode(&old, 0o755);
+        mode(&old.join("lang"), 0o755);
+        // Root reads anything; everyone else is refused.
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } != 0 {
+            assert!(!missed.is_empty());
+            assert!(missed.iter().all(|m| matches!(m.why, Unreadable::Io(_))));
+            assert!(!dir.join("new2").join("settings.json").exists());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The command line reads the old folder's categories until the app
+    /// has run under its new name, and writes nothing.
+    #[test]
+    fn command_line_reads_old_categories_until_the_new_folder_exists() {
+        with_home(|home| {
+            std::fs::remove_dir_all(config_dir()).unwrap();
+            let old = old_config_dir();
+            std::fs::create_dir_all(&old).unwrap();
+            std::fs::write(
+                old.join("categories.json"),
+                r#"{"categories": [{"name": "Mail", "extensions": ["eml"]}]}"#,
+            )
+            .unwrap();
+            let before = snapshot(home);
+            let (m, problem) = CategoryModel::load_read_only();
+            assert!(problem.is_none());
+            assert_eq!(m.label(m.of_name("a.eml")), "Mail");
+            assert_eq!(snapshot(home), before);
+            std::fs::create_dir_all(config_dir()).unwrap();
+            let (m, _) = CategoryModel::load_read_only();
+            assert_eq!(m, CategoryModel::defaults());
+        });
     }
 
     /// categories.json: written when missing, used when edited, left alone
@@ -447,7 +758,7 @@ mod tests {
     #[test]
     fn symlinked_file_is_updated_in_place() {
         with_home(|home| {
-            let real = home.join("dotfiles-spacemap.json");
+            let real = home.join("dotfiles-spacescan.json");
             std::fs::write(&real, "{}").unwrap();
             std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
             std::os::unix::fs::symlink(&real, settings_file()).unwrap();
