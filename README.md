@@ -81,8 +81,6 @@ chmod +x SpaceScan-*-x86_64.AppImage
 It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
 release is built from the tagged source in this repository.
 
-<!-- TODO before release: sections for the AUR (Arch), Fedora COPR (rpm) and a .deb (Debian, Ubuntu), once the packages exist. -->
-
 ### From source
 
 ```sh
