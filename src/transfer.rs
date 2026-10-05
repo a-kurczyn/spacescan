@@ -184,6 +184,19 @@ enum MovedSource {
 const SYNC_BYTES: u64 = 256 << 20;
 const SYNC_SOURCES: usize = 1000;
 
+/// Plain-language reason a file or folder couldn't be removed, or (when
+/// `renaming`) moved within its drive: changing a folder was refused, unlike
+/// `io_reason`'s reasons for reading.
+fn change_reason(e: &std::io::Error, renaming: bool) -> String {
+    match e.raw_os_error() {
+        Some(libc::EACCES | libc::EPERM) if renaming => tr("ERR_RENAME_NO_PERMISSION"),
+        Some(libc::EACCES | libc::EPERM) => tr("ERR_CHANGE_NO_PERMISSION"),
+        Some(libc::EROFS) => tr("ERR_CHANGE_READ_ONLY"),
+        _ if e.kind() == std::io::ErrorKind::NotFound => tr("ERR_IO_NOT_FOUND"),
+        _ => e.to_string(),
+    }
+}
+
 /// Writes everything waiting for the filesystem holding `dir` to its disk.
 fn sync_filesystem(dir: &Path) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
@@ -347,7 +360,7 @@ impl Worker {
             if let Err(e) = sync_filesystem(dir) {
                 self.issue(trf(
                     "ERR_MOVE_FAILED",
-                    &[&show_path(&self.moved.item), &io_reason(&e)],
+                    &[&show_path(&self.moved.item), &change_reason(&e, false)],
                 ));
                 self.moved.failed = true;
                 return;
@@ -375,7 +388,11 @@ impl Worker {
                 Ok(()) => self.removed.push(p),
                 Err(e) => {
                     if !quiet {
-                        self.issue(trf("ERR_MOVE_FAILED", &[&show_path(&p), &io_reason(&e)]));
+                        // Its copy is in place: say that, and why it's still here.
+                        self.issue(trf(
+                            "ERR_MOVE_ORIGINAL_KEPT",
+                            &[&show_path(&p), &change_reason(&e, false)],
+                        ));
                         self.moved.failed = true;
                     }
                     kept.push(p);
@@ -427,7 +444,8 @@ impl Worker {
                 // Another filesystem: copied, each part removed once there.
                 Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {}
                 Err(e) => {
-                    self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
+                    let why = change_reason(&e, true);
+                    self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &why]));
                     return Ok(Outcome::Incomplete);
                 }
             }
@@ -1763,7 +1781,17 @@ mod tests {
             })
             .collect();
         assert_eq!(issues.len(), 1, "{issues:?}");
-        assert!(issues[0].contains("ro/x"));
+        // What really failed (SM-81): the copy is there, the original stays.
+        assert_eq!(
+            issues[0],
+            trf(
+                "ERR_MOVE_ORIGINAL_KEPT",
+                &[
+                    &show_path(&src.join("ro/x")),
+                    &tr("ERR_CHANGE_NO_PERMISSION")
+                ]
+            )
+        );
         let _ = std::fs::remove_dir_all(&src_root);
         let _ = std::fs::remove_dir_all(&d);
     }
