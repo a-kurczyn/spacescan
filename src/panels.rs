@@ -343,8 +343,18 @@ impl DiskScanApp {
                     );
                     egui::Popup::menu(&menu).show(|ui| {
                         let item = |ui: &mut egui::Ui, key: &str, keys: &str| {
-                            ui.add(egui::Button::new(tr(key)).shortcut_text(keys))
-                                .clicked()
+                            let text = tr(key);
+                            let resp = ui.add(egui::Button::new(&text).shortcut_text(keys));
+                            // For screen readers: a menu item named by its text
+                            // alone, its shortcut given separately.
+                            ui.ctx().accesskit_node_builder(resp.id, |node| {
+                                node.set_role(egui::accesskit::Role::MenuItem);
+                                node.set_label(text);
+                                if !keys.is_empty() {
+                                    node.set_keyboard_shortcut(keys);
+                                }
+                            });
+                            resp.clicked()
                         };
                         if item(ui, "SETTINGS_TITLE", "") {
                             menu_pick = Some(MenuPick::Settings);
