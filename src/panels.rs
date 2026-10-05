@@ -146,6 +146,11 @@ impl DiskScanApp {
         let mut nav_action = NavAction::None;
         let mut settings_toggled = false;
         let mut menu_pick: Option<MenuPick> = None;
+        // F10 opens or closes the main menu from the keyboard, as in other
+        // desktop apps (not while a window over the app asks something).
+        let windows_open =
+            self.show_about || self.table.show_help || self.quit_asked || self.delete_dialog_open();
+        let menu_by_key = !windows_open && ctx.input(|i| i.key_pressed(egui::Key::F10));
         let settings_open = self.show_settings;
         let mut open_picker = false;
         let mut start_at: Option<PathBuf> = None;
@@ -341,8 +346,12 @@ impl DiskScanApp {
                         "☰",
                         &tr("MENU_MAIN"),
                     );
+                    if menu_by_key {
+                        egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&menu));
+                    }
                     egui::Popup::menu(&menu).show(|ui| {
-                        let item = |ui: &mut egui::Ui, key: &str, keys: &str| {
+                        let mut focus_first = menu_by_key;
+                        let mut item = |ui: &mut egui::Ui, key: &str, keys: &str| {
                             let text = tr(key);
                             let resp = ui.add(egui::Button::new(&text).shortcut_text(keys));
                             // For screen readers: a menu item named by its text
@@ -354,6 +363,14 @@ impl DiskScanApp {
                                     node.set_keyboard_shortcut(keys);
                                 }
                             });
+                            // Opened with F10: the keyboard starts on the first item.
+                            if std::mem::take(&mut focus_first) {
+                                resp.request_focus();
+                            }
+                            // Picked with the keyboard too, the menu closes.
+                            if resp.clicked() {
+                                ui.close();
+                            }
                             resp.clicked()
                         };
                         if item(ui, "SETTINGS_TITLE", "") {
@@ -2701,6 +2718,38 @@ mod typed_path_tests {
 #[cfg(test)]
 mod about_tests {
     use super::*;
+
+    /// F10 opens and closes the main menu, but not while a window over the
+    /// app asks something.
+    #[test]
+    fn f10_opens_the_main_menu() {
+        let ctx = egui::Context::default();
+        let mut app = DiskScanApp::default();
+        let mut press = |app: &mut DiskScanApp, key: Option<egui::Key>| {
+            let events = key
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into_iter()
+                .collect();
+            let raw = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(raw, |ui| app.toolbar_ui(ui));
+            egui::Popup::is_any_open(&ctx)
+        };
+        assert!(!press(&mut app, None));
+        assert!(press(&mut app, Some(egui::Key::F10)));
+        assert!(press(&mut app, None));
+        assert!(!press(&mut app, Some(egui::Key::F10)));
+        app.show_about = true;
+        assert!(!press(&mut app, Some(egui::Key::F10)));
+    }
 
     /// Esc closes an open About or shortcuts window and leaves the scan
     /// running; with nothing open it cancels the scan.

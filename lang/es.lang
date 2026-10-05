@@ -283,6 +283,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Quitar las marcas, o cerrar los detalles
 HELP_KEYS_HELP=?
 HELP_HELP=Esta ayuda
+HELP_KEYS_MENU=F10
 HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categorías (barra junto a la tabla de contenido) ----

@@ -279,6 +279,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Togli le selezioni, o chiudi i dettagli
 HELP_KEYS_HELP=?
 HELP_HELP=Questo aiuto
+HELP_KEYS_MENU=F10
 HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----

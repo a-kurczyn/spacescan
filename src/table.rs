@@ -526,6 +526,7 @@ const HELP_ROWS: &[(&str, &[(&str, &str)])] = &[
             ("HELP_KEYS_INFO", "HELP_INFO"),
             ("HELP_KEYS_ESC", "HELP_ESC"),
             ("HELP_KEYS_HELP", "HELP_HELP"),
+            ("HELP_KEYS_MENU", "MENU_MAIN"),
             ("HELP_KEYS_QUIT", "MENU_QUIT"),
         ],
     ),
@@ -584,6 +585,7 @@ impl DiskScanApp {
             && !self.table.show_help
             && !self.show_about
             && !self.quit_asked
+            && !egui::Popup::is_any_open(ctx)
         {
             ctx.memory_mut(|m| {
                 if let Some(id) = m.focused() {

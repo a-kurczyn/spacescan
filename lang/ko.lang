@@ -279,6 +279,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=표시 해제, 또는 자세한 정보 닫기
 HELP_KEYS_HELP=?
 HELP_HELP=이 도움말
+HELP_KEYS_MENU=F10
 HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
