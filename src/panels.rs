@@ -2725,7 +2725,7 @@ mod about_tests {
     fn f10_opens_the_main_menu() {
         let ctx = egui::Context::default();
         let mut app = DiskScanApp::default();
-        let mut press = |app: &mut DiskScanApp, key: Option<egui::Key>| {
+        let press = |app: &mut DiskScanApp, key: Option<egui::Key>| {
             let events = key
                 .map(|key| egui::Event::Key {
                     key,
