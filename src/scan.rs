@@ -377,12 +377,13 @@ pub(crate) fn file_name_of(p: &Path) -> String {
 /// A name for display that can't be mistaken for another, like `ls -b`:
 /// invalid UTF-8 bytes appear as `\xFF`, control characters as `\n`,
 /// `\t` or `\x1B` (`\u{85}` above ASCII, so it can't pass for a raw
-/// byte), and a backslash as `\\`.
+/// byte), characters that show as nothing or rearrange the text around
+/// them as `\u{200B}` (see `is_invisible`), and a backslash as `\\`.
 pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     use std::os::unix::ffi::OsStrExt;
     // Nearly every name is valid UTF-8 with nothing to escape: a plain copy.
     if let Ok(text) = std::str::from_utf8(s.as_bytes()) {
-        let plain = |c: char| c != '\\' && !c.is_control();
+        let plain = |c: char| c != '\\' && !c.is_control() && !is_invisible(c);
         let clean = if text.is_ascii() {
             text.bytes().all(|b| b >= 0x20 && b != 0x7f && b != b'\\')
         } else {
@@ -392,9 +393,50 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
             return text.to_owned();
         }
     }
+    show_os_escaped(s)
+}
+
+/// The name `shown` stands for, read back from `show_os`'s escapes; None
+/// if it has none, or one `show_os` never writes.
+pub(crate) fn unshow_os(shown: &str) -> Option<std::ffi::OsString> {
+    use std::os::unix::ffi::OsStringExt;
+    if !shown.contains('\\') {
+        return None;
+    }
+    let mut out: Vec<u8> = Vec::with_capacity(shown.len());
+    let mut rest = shown;
+    while let Some(at) = rest.find('\\') {
+        out.extend_from_slice(&rest.as_bytes()[..at]);
+        let esc = &rest[at + 1..];
+        let (bytes, used): (Vec<u8>, usize) = match esc.chars().next()? {
+            '\\' => (vec![b'\\'], 1),
+            'n' => (vec![b'\n'], 1),
+            't' => (vec![b'\t'], 1),
+            'r' => (vec![b'\r'], 1),
+            'x' => (vec![u8::from_str_radix(esc.get(1..3)?, 16).ok()?], 3),
+            'u' => {
+                let hex = esc.strip_prefix("u{")?.split_once('}')?.0;
+                let c = char::from_u32(u32::from_str_radix(hex, 16).ok()?)?;
+                (c.to_string().into_bytes(), 3 + hex.len())
+            }
+            _ => return None,
+        };
+        out.extend_from_slice(&bytes);
+        rest = &esc[used..];
+    }
+    out.extend_from_slice(rest.as_bytes());
+    Some(std::ffi::OsString::from_vec(out))
+}
+
+/// `show_os` for a name that may need escapes.
+fn show_os_escaped(s: &std::ffi::OsStr) -> String {
+    use std::os::unix::ffi::OsStrExt;
     let mut out = String::with_capacity(s.len());
     for chunk in s.as_bytes().utf8_chunks() {
-        for c in chunk.valid().chars() {
+        let mut chars = chunk.valid().chars().peekable();
+        // The character before, emoji presentation selectors skipped.
+        let mut prev: Option<char> = None;
+        while let Some(c) = chars.next() {
             match c {
                 '\\' => out.push_str("\\\\"),
                 '\n' => out.push_str("\\n"),
@@ -403,8 +445,13 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
                 c if c.is_control() && c.is_ascii() => {
                     out.push_str(&format!("\\x{:02X}", c as u32))
                 }
-                c if c.is_control() => out.push_str(&format!("\\u{{{:X}}}", c as u32)),
+                c if c.is_control() || (is_invisible(c) && !in_emoji(prev, c, chars.peek())) => {
+                    out.push_str(&format!("\\u{{{:X}}}", c as u32))
+                }
                 c => out.push(c),
+            }
+            if !matches!(c, '\u{FE0E}' | '\u{FE0F}') {
+                prev = Some(c);
             }
         }
         for b in chunk.invalid() {
@@ -412,6 +459,75 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
         }
     }
     out
+}
+
+/// True for a character that shows as nothing, or changes how the text
+/// around it shows without showing itself: Unicode's default-ignorable
+/// characters (zero-width spaces and joiners, direction controls, the soft
+/// hyphen, the byte order mark, variation selectors, Hangul fillers, tags)
+/// and the line and paragraph separators. Two names differing only in one
+/// would look the same (SM-79).
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD
+            | 0x034F
+            | 0x061C
+            | 0x115F..=0x1160
+            | 0x17B4..=0x17B5
+            | 0x180B..=0x180F
+            | 0x200B..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x206F
+            | 0x3164
+            | 0xFE00..=0xFE0F
+            | 0xFEFF
+            | 0xFFA0
+            | 0xFFF0..=0xFFFB
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0000..=0xE0FFF
+    )
+}
+
+/// True for an emoji, or a symbol that can show as one.
+fn is_pictographic(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00A9
+            | 0x00AE
+            | 0x203C
+            | 0x2049
+            | 0x2122
+            | 0x2139
+            | 0x2194..=0x21AA
+            | 0x231A..=0x23FF
+            | 0x24C2
+            | 0x25AA..=0x27BF
+            | 0x2934..=0x2935
+            | 0x2B05..=0x2B55
+            | 0x3030
+            | 0x303D
+            | 0x3297
+            | 0x3299
+            | 0x1F000..=0x1FAFF
+    )
+}
+
+/// True if invisible `c`, between `prev` and `next`, is part of an emoji
+/// and shows there: a joiner between two emoji (👨‍👩‍👧), or a presentation
+/// selector after an emoji (❤️) or in a keycap (1️⃣).
+fn in_emoji(prev: Option<char>, c: char, next: Option<&char>) -> bool {
+    let emoji_before = prev.is_some_and(is_pictographic);
+    match c {
+        '\u{200D}' => emoji_before && next.is_some_and(|&n| is_pictographic(n)),
+        '\u{FE0E}' | '\u{FE0F}' => {
+            emoji_before
+                || (prev.is_some_and(|p| p.is_ascii_digit() || p == '#' || p == '*')
+                    && next == Some(&'\u{20E3}'))
+        }
+        _ => false,
+    }
 }
 
 /// `n` with its children but not theirs: what the live table shows.
@@ -1463,29 +1579,6 @@ mod tests {
     /// escaping path gives, for every kind of odd name.
     #[test]
     fn plain_names_take_the_quick_path_safely() {
-        // The careful path, as it was before the quick copy.
-        fn careful(s: &std::ffi::OsStr) -> String {
-            let mut out = String::new();
-            for chunk in s.as_bytes().utf8_chunks() {
-                for c in chunk.valid().chars() {
-                    match c {
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\t' => out.push_str("\\t"),
-                        '\r' => out.push_str("\\r"),
-                        c if c.is_control() && c.is_ascii() => {
-                            out.push_str(&format!("\\x{:02X}", c as u32))
-                        }
-                        c if c.is_control() => out.push_str(&format!("\\u{{{:X}}}", c as u32)),
-                        c => out.push(c),
-                    }
-                }
-                for b in chunk.invalid() {
-                    out.push_str(&format!("\\x{b:02X}"));
-                }
-            }
-            out
-        }
         let names: &[&[u8]] = &[
             b"",
             b"plain.txt",
@@ -1501,11 +1594,87 @@ mod tests {
             b"\xc3\x28",
             "emoji \u{1f600}".as_bytes(),
             "rtl \u{202e}".as_bytes(),
+            "zero\u{200b}width".as_bytes(),
+            "family \u{1f468}\u{200d}\u{1f469}".as_bytes(),
+            "heart \u{2764}\u{fe0f}".as_bytes(),
+            "\u{3164}".as_bytes(),
         ];
         for name in names {
             let os = std::ffi::OsStr::from_bytes(name);
-            assert_eq!(show_os(os), careful(os), "{name:?}");
+            assert_eq!(show_os(os), show_os_escaped(os), "{name:?}");
         }
+    }
+
+    /// Every shown name reads back to exactly the name it stands for, so
+    /// the escapes lose nothing; text that isn't one of them reads as None.
+    #[test]
+    fn shown_names_read_back() {
+        let names: &[&[u8]] = &[
+            b"back\\slash",
+            b"\\u{200B} typed literally",
+            b"tab\there\nand\rthere",
+            b"bell\x07 del\x7f",
+            b"raw \xff\x80 bytes",
+            "c1 \u{85}\u{9f}".as_bytes(),
+            "zero\u{200b}width \u{202e}rtl \u{2028}".as_bytes(),
+            "\u{1F468}\u{200D}x and 1\u{FE0F}".as_bytes(),
+        ];
+        for name in names {
+            let os = std::ffi::OsStr::from_bytes(name);
+            let shown = show_os(os);
+            assert_eq!(unshow_os(&shown).as_deref(), Some(os), "{shown}");
+        }
+        for not_escapes in ["plain", "a\\q", "a\\x4", "a\\u{110000}", "a\\u{20", "end\\"] {
+            assert_eq!(unshow_os(not_escapes), None, "{not_escapes}");
+        }
+    }
+
+    /// Two names differing only in a character that shows as nothing, or
+    /// that rearranges the text around it, never look the same (SM-79);
+    /// emoji built with joiners and presentation selectors stay as they
+    /// are, and so does ordinary text.
+    #[test]
+    fn invisible_characters_are_shown() {
+        let plain = show_os(std::ffi::OsStr::new("pq"));
+        for x in [
+            '\u{200B}',
+            '\u{200C}',
+            '\u{200D}',
+            '\u{FEFF}',
+            '\u{200E}',
+            '\u{202E}',
+            '\u{00AD}',
+            '\u{2060}',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{2066}',
+            '\u{FE0F}',
+            '\u{034F}',
+            '\u{3164}',
+            '\u{E0041}',
+        ] {
+            let name = format!("p{x}q");
+            let shown = show_os(std::ffi::OsStr::new(&name));
+            assert_ne!(shown, plain, "{x:?}");
+            assert_eq!(shown, format!("p\\u{{{:X}}}q", x as u32));
+        }
+        for kept in [
+            "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+            "\u{2764}\u{FE0F}",
+            "\u{2764}\u{FE0F}\u{200D}\u{1F525}",
+            "1\u{FE0F}\u{20E3}",
+            "\u{1F44D}\u{1F3FD}",
+            "caf\u{E9} na\u{EF}ve \u{65E5}\u{672C}\u{8A9E} \u{D55C}\u{AE00} \u{1F600}",
+            "e\u{301}",
+        ] {
+            assert_eq!(show_os(std::ffi::OsStr::new(kept)), kept);
+        }
+        // A joiner or selector outside an emoji is shown.
+        assert_eq!(
+            show_os(std::ffi::OsStr::new("\u{1F468}\u{200D}x")),
+            "\u{1F468}\\u{200D}x"
+        );
+        assert_eq!(show_os(std::ffi::OsStr::new("1\u{FE0F}")), "1\\u{FE0F}");
     }
 
     #[test]

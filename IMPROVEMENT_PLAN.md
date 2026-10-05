@@ -27,7 +27,18 @@ check the status marks, `git log`, and the QA tracker (QA_FINDINGS.md).
       measure change; idle redraw 10 Hz (4 Hz with a screen reader); the
       progress bar counts the whole scan.
 
-## Batch 1: safety, quick efficiency wins, small cleanups (done, sent to QA)
+## Batch 1: safety, quick efficiency wins, small cleanups (done)
+
+QA round 26 on 1fadef5: everything verified, but NO-GO for a new S3,
+SM-79 (invisible characters made names look the same).
+
+- [x] SM-79: characters that show as nothing or rearrange text (Unicode
+      default-ignorables, line/paragraph separators) shown as `\u{200B}`;
+      emoji joiners and presentation selectors inside emoji kept. The path
+      bar reads escapes back when the text as typed doesn't exist.
+- [ ] S4 for the user to decide (not fixed unless asked): a move that can't
+      remove a source in a read-only folder says "don't have permission to
+      read or enter that folder"; it was the removal that was refused.
 
 Safety
 - [x] 1.1 Cross-drive move: make copies durable before deleting sources

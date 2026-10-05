@@ -2736,19 +2736,29 @@ mod category_bar_tests {
 }
 
 /// The path typed in the path bar: as typed if that exists (names may end
-/// in spaces), else without the spaces around it. "~" and "~/…" mean the
-/// home folder, as in a shell.
+/// in spaces), else without the spaces around it, else (when that doesn't
+/// exist either) with the escapes the app shows names with read back, so a
+/// shown path can be edited and opened. "~" and "~/…" mean the home
+/// folder, as in a shell.
 pub(crate) fn typed_path(typed: &str) -> PathBuf {
-    let expand = |t: &str| match t.strip_prefix('~') {
-        Some("") => home_dir(),
-        Some(rest) if rest.starts_with('/') => home_dir().join(&rest[1..]),
+    use std::os::unix::ffi::OsStrExt;
+    let expand = |t: &std::ffi::OsStr| match t.as_bytes() {
+        b"~" => home_dir(),
+        [b'~', b'/', rest @ ..] => home_dir().join(std::ffi::OsStr::from_bytes(rest)),
         _ => PathBuf::from(t),
     };
-    let exact = expand(typed);
-    if typed != typed.trim() && std::fs::symlink_metadata(&exact).is_ok() {
-        exact
-    } else {
-        expand(typed.trim())
+    let exists = |p: &Path| std::fs::symlink_metadata(p).is_ok();
+    let exact = expand(typed.as_ref());
+    if typed != typed.trim() && exists(&exact) {
+        return exact;
+    }
+    let trimmed = expand(typed.trim().as_ref());
+    if exists(&trimmed) {
+        return trimmed;
+    }
+    match unshow_os(typed.trim()).map(|real| expand(&real)) {
+        Some(p) if exists(&p) => p,
+        _ => trimmed,
     }
 }
 
@@ -2779,6 +2789,23 @@ mod typed_path_tests {
         assert_eq!(typed_path("~"), home_dir());
         assert_eq!(typed_path(" ~/x "), home_dir().join("x"));
         assert_eq!(typed_path("~user"), PathBuf::from("~user"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A shown path with escapes in it (as the path bar shows a folder with
+    /// an invisible character in its name) opens that folder.
+    #[test]
+    fn shown_paths_open_their_folder() {
+        let dir = std::env::temp_dir().join(format!("spacescan-shown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let real = dir.join("p\u{200B}q");
+        std::fs::create_dir_all(&real).unwrap();
+        let shown = show_path(&real);
+        assert!(shown.ends_with("p\\u{200B}q"));
+        assert_eq!(typed_path(&shown), real);
+        assert_eq!(typed_path(&format!("  {shown} ")), real);
+        // Typed as it really is, it opens too.
+        assert_eq!(typed_path(&real.display().to_string()), real);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
