@@ -1007,38 +1007,40 @@ fn file_summary(nodes: &[Node]) -> Vec<(String, u64, u64)> {
     exts
 }
 
-/// Whether sizes are measured in files instead of bytes (a setting): what
-/// slices, shares, bars and the folders' order follow.
-pub(crate) static MEASURE_FILES: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// True while sizes are measured in files.
-pub(crate) fn measure_files() -> bool {
-    #[cfg(test)]
-    return TEST_MEASURE_FILES.with(|m| m.get());
-    #[cfg(not(test))]
-    MEASURE_FILES.load(std::sync::atomic::Ordering::Relaxed)
+/// What sizes are measured in (a setting): what slices, shares, bars and
+/// the folders' order follow. Passed to whatever depends on it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum Measure {
+    #[default]
+    Bytes,
+    Files,
 }
 
-/// Sets the measure in use (`files`, else bytes).
-pub(crate) fn set_measure_files(files: bool) {
-    #[cfg(test)]
-    TEST_MEASURE_FILES.with(|m| m.set(files));
-    MEASURE_FILES.store(files, std::sync::atomic::Ordering::Relaxed);
-}
+impl Measure {
+    /// The measure of the setting "measure in files" (`files`).
+    pub(crate) fn of_setting(files: bool) -> Measure {
+        if files {
+            Measure::Files
+        } else {
+            Measure::Bytes
+        }
+    }
 
-// Tests run side by side: each test thread has its own measure.
-#[cfg(test)]
-thread_local! {
-    static TEST_MEASURE_FILES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
+    pub(crate) fn by_files(self) -> bool {
+        self == Measure::Files
+    }
 
-/// What `n` weighs in the measure in use: its bytes, or its files.
-pub(crate) fn weight(n: &Node) -> u64 {
-    if measure_files() {
-        n.file_count
-    } else {
-        n.size
+    /// What `n` weighs: its bytes, or its files.
+    pub(crate) fn of(self, n: &Node) -> u64 {
+        self.pick(n.size, n.file_count)
+    }
+
+    /// What something of `size` bytes and `files` files weighs.
+    pub(crate) fn pick(self, size: u64, files: u64) -> u64 {
+        match self {
+            Measure::Bytes => size,
+            Measure::Files => files,
+        }
     }
 }
 
@@ -1081,9 +1083,9 @@ pub(crate) fn sort_largest_first(children: &mut [Node]) {
 
 /// Re-sorts, in the tree under `root`, every folder holding one of `changed`
 /// or a folder above it, after their sizes changed in place: each once, by
-/// the measure in use.
-pub(crate) fn resort_above(root: &mut Node, changed: &[PathBuf]) {
-    let files = measure_files();
+/// `measure`.
+pub(crate) fn resort_above(root: &mut Node, changed: &[PathBuf], measure: Measure) {
+    let files = measure.by_files();
     let mut folders: HashSet<&Path> = HashSet::new();
     for p in changed {
         folders.extend(p.ancestors().skip(1));
@@ -1944,8 +1946,8 @@ mod live_category_tests {
         assert_eq!(live.get("eml").map(|e| e.1), Some(600));
         let cats = CategoryModel::defaults();
         assert_eq!(
-            category_rows(&live, &cats),
-            category_breakdown(&tree, &cats)
+            category_rows(&live, &cats, Measure::Bytes),
+            category_breakdown(&tree, &cats, Measure::Bytes)
         );
         assert_eq!(live.get("mkv").map(|e| e.1), Some(1));
         assert_eq!(live.get("mp4").map(|e| e.1), Some(2));
@@ -1983,16 +1985,17 @@ mod scan_perf {
         let tree = scan_dir(&dir, &ctx);
         for run in 0..3 {
             let t = Instant::now();
-            let looks = Looks::build(&tree, &cats, false);
+            let looks = Looks::build(&tree, &cats, false, Measure::Bytes);
             let t_looks = t.elapsed();
             let t = Instant::now();
-            let stored = Looks::build(&tree, &cats, true);
+            let stored = Looks::build(&tree, &cats, true, Measure::Bytes);
             let t_stored = t.elapsed();
             let t = Instant::now();
-            let rows = category_breakdown(&tree, &cats);
+            let rows = category_breakdown(&tree, &cats, Measure::Bytes);
             let t_cat = t.elapsed();
             let t = Instant::now();
-            let filtered = crate::filter::filter_tree_by(&tree, &|n: &Node| n.size > 4096);
+            let filtered =
+                crate::filter::filter_tree_by(&tree, &|n: &Node| n.size > 4096, Measure::Bytes);
             let t_filter = t.elapsed();
             let t = Instant::now();
             let copy = tree.clone();
@@ -2066,7 +2069,13 @@ mod scan_perf {
                     scope.spawn(move || {
                         let mut looks = LiveLooks::default();
                         while scanning.load(std::sync::atomic::Ordering::Relaxed) {
-                            std::hint::black_box(live.snapshot(7, 1.3 / 360.0, None, &mut looks));
+                            std::hint::black_box(live.snapshot(
+                                7,
+                                1.3 / 360.0,
+                                None,
+                                Measure::Bytes,
+                                &mut looks,
+                            ));
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });

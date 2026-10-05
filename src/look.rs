@@ -108,9 +108,13 @@ impl Looks {
     /// Works out the look of every folder under `root`, in one pass over the
     /// tree (big subtrees in parallel). `stored`: the files' `cat` bytes
     /// come from `cats` and can be used instead of classifying each name.
-    pub(crate) fn build(root: &Node, cats: &CategoryModel, stored: bool) -> Looks {
-        // Read once: the walk runs on several threads.
-        let by_files = measure_files();
+    pub(crate) fn build(
+        root: &Node,
+        cats: &CategoryModel,
+        stored: bool,
+        measure: Measure,
+    ) -> Looks {
+        let by_files = measure.by_files();
         /// Subtrees with fewer files than this are walked on one thread.
         const SPLIT: u64 = 2_000;
         fn walk(
@@ -167,7 +171,7 @@ impl Looks {
     }
 
     /// The look of node `n`: a file's own, or its folder's.
-    pub(crate) fn of(&self, n: &Node, cats: &CategoryModel) -> Look {
+    pub(crate) fn of(&self, n: &Node, cats: &CategoryModel, measure: Measure) -> Look {
         if n.is_dir
             && let Some(look) = self.folders.get(&(n as *const Node as usize))
         {
@@ -175,7 +179,7 @@ impl Looks {
         }
         let mut totals = Totals::new(cats.other().0 + 1);
         totals.add_file(cats.of_name(&n.name), n.size, n.ctime);
-        totals.look(n.size, n.file_count, measure_files())
+        totals.look(n.size, n.file_count, measure.by_files())
     }
 
     /// The look of several nodes together (an "other" slice): the category
@@ -185,25 +189,30 @@ impl Looks {
         &self,
         nodes: impl Iterator<Item = &'a Node>,
         cats: &CategoryModel,
+        measure: Measure,
     ) -> Look {
-        group_look(nodes.map(|n| self.of(n, cats)), cats)
+        group_look(nodes.map(|n| self.of(n, cats, measure)), cats, measure)
     }
 }
 
 /// The look of several looks together: the category with the most bytes,
 /// and the newest and oldest of their files.
-pub(crate) fn group_look(looks: impl Iterator<Item = Look>, cats: &CategoryModel) -> Look {
+pub(crate) fn group_look(
+    looks: impl Iterator<Item = Look>,
+    cats: &CategoryModel,
+    measure: Measure,
+) -> Look {
     let mut totals = Totals::new(cats.other().0 + 1);
     let (mut size, mut files) = (0u64, 0u64);
     for look in looks {
         totals.bytes[look.cat.0] = totals.bytes[look.cat.0].saturating_add(look.size);
         // Measuring files, each counts its files; else each counts once.
-        totals.files[look.cat.0] += if measure_files() { look.files } else { 1 };
+        totals.files[look.cat.0] += if measure.by_files() { look.files } else { 1 };
         totals.add_times(look.newest, look.oldest);
         size = size.saturating_add(look.size);
         files = files.saturating_add(look.files);
     }
-    totals.look(size, files, measure_files())
+    totals.look(size, files, measure.by_files())
 }
 
 /// One scan thread's share of a folder's counters, in one block: bytes
@@ -290,9 +299,9 @@ impl Summary {
         }
     }
 
-    fn look(&self, size: u64, files: u64) -> Look {
+    fn look(&self, size: u64, files: u64, measure: Measure) -> Look {
         Look {
-            cat: if measure_files() {
+            cat: if measure.by_files() {
                 self.cat_by_files
             } else {
                 self.cat
@@ -612,6 +621,7 @@ impl LiveTree {
         depth: usize,
         min_share: f64,
         pick: Option<Category>,
+        measure: Measure,
         looks: &mut LiveLooks,
     ) -> Option<Node> {
         let root = self.root.get()?;
@@ -625,21 +635,23 @@ impl LiveTree {
                 let all = Shown {
                     min_size: 0,
                     pick,
+                    measure,
                     now,
                 };
-                self.read(root, None, false, all, looks).weight()
+                self.read(root, None, false, all, looks).weight(measure)
             }
             known => known,
         };
         let shown = Shown {
             min_size: (total as f64 * min_share) as u64,
             pick,
+            measure,
             now,
         };
         // The scanned folder's own children are all kept: the table lists
         // them.
         let read = self.read(root, Some(depth), true, shown, looks);
-        looks.last_total = read.weight();
+        looks.last_total = read.weight(measure);
         looks.scanned = match pick {
             None => (read.size, read.files),
             // Everything, for the progress: a read without nodes only goes
@@ -706,7 +718,7 @@ impl LiveTree {
         for c in &children {
             let r = match c.done.get() {
                 // Small and finished: its stored values, no node.
-                Some(d) if small(weight_of(d.shown(shown.pick))) => {
+                Some(d) if small(weight_of(d.shown(shown.pick), shown.measure)) => {
                     let (size, files) = d.shown(shown.pick);
                     Read {
                         size,
@@ -742,8 +754,8 @@ impl LiveTree {
             // only those with some of its files.
             if below.is_some() && (shown.pick.is_none() || r.files > 0) {
                 match r.node {
-                    Some(n) if !small(r.weight()) => kids.push(n),
-                    _ => grouped.add(c, &r, shown.pick),
+                    Some(n) if !small(r.weight(shown.measure)) => kids.push(n),
+                    _ => grouped.add(c, &r, shown.pick, shown.measure),
                 }
             }
         }
@@ -766,10 +778,11 @@ impl LiveTree {
             let summary = summary.picked(shown.pick, files);
             let mut n = looks.node(f, size, file_count, summary, finished, shown.now);
             if below.is_some() {
-                sort_by_measure(&mut kids, measure_files());
+                sort_by_measure(&mut kids, shown.measure.by_files());
                 // "Other" goes after everything at least as big.
-                if let Some(other) = grouped.node(&f.path, looks, &self.cats, shown.now) {
-                    let at = kids.partition_point(|k| weight(k) >= weight(&other));
+                if let Some(other) = grouped.node(&f.path, looks, &self.cats, shown) {
+                    let m = shown.measure;
+                    let at = kids.partition_point(|k| m.of(k) >= m.of(&other));
                     kids.insert(at, other);
                 }
                 n.children = kids.into();
@@ -797,7 +810,7 @@ struct Grouped {
 impl Grouped {
     /// Adds subfolder `c`, read as `r` (with only category `pick`'s files
     /// counted, if one is picked).
-    fn add(&mut self, c: &LiveFolder, r: &Read, pick: Option<usize>) {
+    fn add(&mut self, c: &LiveFolder, r: &Read, pick: Option<usize>, measure: Measure) {
         self.count += 1;
         self.size = self.size.saturating_add(r.size);
         let summary = match (c.done.get(), &r.totals) {
@@ -807,7 +820,7 @@ impl Grouped {
         };
         self.file_count += r.files;
         self.looks
-            .push(summary.picked(pick, r.files).look(r.size, r.files));
+            .push(summary.picked(pick, r.files).look(r.size, r.files, measure));
     }
 
     /// The entry, colored like the chart's "other" slices; None if empty.
@@ -816,16 +829,16 @@ impl Grouped {
         parent: &Path,
         looks: &mut LiveLooks,
         cats: &CategoryModel,
-        now: Instant,
+        shown: Shown,
     ) -> Option<Node> {
         if self.count == 0 {
             return None;
         }
         // A path no real entry can have, for its look.
         let path = parent.join("\u{1}grouped");
-        let look = group_look(self.looks.iter().copied(), cats);
+        let look = group_look(self.looks.iter().copied(), cats, shown.measure);
         let key = path_key(&path);
-        put_first(&mut looks.since, key, now);
+        put_first(&mut looks.since, key, shown.now);
         put(
             &mut looks.summaries,
             key,
@@ -867,13 +880,15 @@ struct Shown {
     min_size: u64,
     /// Only the files of this category count (None: every file).
     pick: Option<usize>,
+    /// What sizes are measured in.
+    measure: Measure,
     /// The time of the read, when folders newly colored got their color.
     now: Instant,
 }
 
-/// The weight of (`size`, `files`) in the measure in use.
-fn weight_of((size, files): (u64, u64)) -> u64 {
-    if measure_files() { files } else { size }
+/// The weight of (`size`, `files`) in `measure`.
+fn weight_of((size, files): (u64, u64), measure: Measure) -> u64 {
+    measure.pick(size, files)
 }
 
 /// What `LiveTree::read` gives for one folder.
@@ -885,9 +900,9 @@ struct Read {
 }
 
 impl Read {
-    /// Its weight in the measure in use: bytes, or files.
-    fn weight(&self) -> u64 {
-        weight_of((self.size, self.files))
+    /// Its weight in `measure`: bytes, or files.
+    fn weight(&self, measure: Measure) -> u64 {
+        weight_of((self.size, self.files), measure)
     }
 }
 
@@ -940,11 +955,11 @@ impl LiveLooks {
 
     /// The look of folder `node` from what's classified under it so far
     /// (final once it finished), and since when it has one.
-    pub(crate) fn get(&self, node: &Node) -> Option<(Look, Instant)> {
+    pub(crate) fn get(&self, node: &Node, measure: Measure) -> Option<(Look, Instant)> {
         with_node_key(node, |key| {
             let since = *self.since.get(key)?;
             let summary = self.summaries.get(key)?;
-            Some((summary.look(node.size, node.file_count), since))
+            Some((summary.look(node.size, node.file_count, measure), since))
         })
     }
 
@@ -1079,16 +1094,14 @@ mod tests {
         );
         root.size = root.children.iter().map(|c| c.size).sum();
         root.file_count = root.children.iter().map(|c| c.file_count).sum();
-        set_measure_files(true);
-        let looks = Looks::build(&root, &cats, false);
+        let files = Measure::Files;
+        let looks = Looks::build(&root, &cats, false, files);
         let filtered =
-            crate::filter::filter_tree_by(&root, &|n: &Node| !n.name.starts_with("t1")).unwrap();
-        set_measure_files(false);
+            crate::filter::filter_tree_by(&root, &|n: &Node| !n.name.starts_with("t1"), files)
+                .unwrap();
         let (video, text) = (cats.of_name("x.mkv"), cats.of_name("x.txt"));
-        set_measure_files(true);
-        let cat = |n: &Node| looks.of(n, &cats).cat;
+        let cat = |n: &Node| looks.of(n, &cats, files).cat;
         let got = (cat(&root.children[0]), cat(&root.children[1]), cat(&root));
-        set_measure_files(false);
         // "a": 2,500 texts beat 100 big videos; overall 2,705 videos win.
         assert_eq!(got, (text, video, video));
         let counts: Vec<u64> = filtered.children.iter().map(|c| c.file_count).collect();
@@ -1115,7 +1128,6 @@ mod tests {
             std::fs::write(dir.join(format!("s{i}/f")), b"x").unwrap();
         }
         let read = |files: bool| {
-            set_measure_files(files);
             let live = LiveTree::new(Arc::new(CategoryModel::defaults()));
             let (tx, rx) = channel();
             std::thread::spawn(move || for _ in rx {});
@@ -1131,8 +1143,9 @@ mod tests {
             };
             scan_dir(&dir, &ctx);
             let mut looks = LiveLooks::default();
-            let snap = live.snapshot(2, 0.02, None, &mut looks).unwrap();
-            set_measure_files(false);
+            let snap = live
+                .snapshot(2, 0.02, None, Measure::of_setting(files), &mut looks)
+                .unwrap();
             let names: Vec<String> = snap.children.iter().map(|c| c.name.to_string()).collect();
             names
         };
@@ -1158,18 +1171,22 @@ mod tests {
         f.file_count = 11;
         let video = cats.of_name("a.mkv");
         let text = cats.of_name("a.txt");
-        let by_bytes = Looks::build(&f, &cats, false).of(&f, &cats).cat;
-        let rows_bytes: Vec<Category> = category_breakdown(&f, &cats)
+        let (bytes, files) = (Measure::Bytes, Measure::Files);
+        let by_bytes = Looks::build(&f, &cats, false, bytes)
+            .of(&f, &cats, bytes)
+            .cat;
+        let rows_bytes: Vec<Category> = category_breakdown(&f, &cats, bytes)
             .iter()
             .map(|r| r.cat)
             .collect();
-        set_measure_files(true);
-        let by_files = Looks::build(&f, &cats, false).of(&f, &cats).cat;
-        let rows_files: Vec<Category> = category_breakdown(&f, &cats)
+        let by_files = Looks::build(&f, &cats, false, files)
+            .of(&f, &cats, files)
+            .cat;
+        let rows_files: Vec<Category> = category_breakdown(&f, &cats, files)
             .iter()
             .map(|r| r.cat)
             .collect();
-        let a = Looks::build(&f, &cats, false).of(&f, &cats);
+        let a = Looks::build(&f, &cats, false, files).of(&f, &cats, files);
         let one = Look {
             files: 1,
             size: 5 << 30,
@@ -1182,9 +1199,8 @@ mod tests {
             cat: text,
             ..a
         };
-        let group = group_look([one, lots].into_iter(), &cats).cat;
-        set_measure_files(false);
-        let group_bytes = group_look([one, lots].into_iter(), &cats).cat;
+        let group = group_look([one, lots].into_iter(), &cats, files).cat;
+        let group_bytes = group_look([one, lots].into_iter(), &cats, bytes).cat;
         assert_eq!((by_bytes, by_files), (video, text));
         assert_eq!(rows_bytes, [video, text]);
         assert_eq!(rows_files, [text, video]);
@@ -1314,14 +1330,14 @@ mod tests {
                 n.cat = NO_CAT;
                 stack.extend(n.children.iter_mut());
             }
-            let classified = Looks::build(&clean, &cats, false);
-            let built = Looks::build(&root, &cats, bytes != Bytes::Wrong);
+            let classified = Looks::build(&clean, &cats, false, Measure::Bytes);
+            let built = Looks::build(&root, &cats, bytes != Bytes::Wrong, Measure::Bytes);
             let (mut a, mut b) = (vec![&root], vec![&clean]);
             while let (Some(n), Some(m)) = (a.pop(), b.pop()) {
                 if n.is_dir {
                     assert_eq!(
-                        built.of(n, &cats),
-                        classified.of(m, &cats),
+                        built.of(n, &cats, Measure::Bytes),
+                        classified.of(m, &cats, Measure::Bytes),
                         "{}",
                         n.path().display()
                     );
@@ -1368,14 +1384,14 @@ mod tests {
         docs.push(video);
         let folder = test_node("/r/d", 10000, true, docs);
         let root = test_node("/r", 10000, true, vec![folder]);
-        let looks = Looks::build(&root, &cats, false);
-        let look = looks.of(&root.children[0], &cats);
+        let looks = Looks::build(&root, &cats, false, Measure::Bytes);
+        let look = looks.of(&root.children[0], &cats, Measure::Bytes);
         // 9000 bytes of video beat 1000 bytes of documents.
         assert_eq!(cats.label(look.cat), "Video");
         assert_eq!((look.newest, look.oldest), (2000, 1000));
-        let root_look = looks.of(&root, &cats);
+        let root_look = looks.of(&root, &cats, Measure::Bytes);
         assert_eq!((root_look.newest, root_look.oldest), (2000, 1000));
-        let file = looks.of(&root.children[0].children[0], &cats);
+        let file = looks.of(&root.children[0].children[0], &cats, Measure::Bytes);
         assert_eq!(cats.label(file.cat), "Documents");
     }
 
@@ -1487,7 +1503,9 @@ mod live_stress {
                 let mut looks = LiveLooks::default();
                 let mut seen = HashMap::new();
                 while reading.load(Relaxed) {
-                    if let Some(root) = live.snapshot(usize::MAX, 0.0, None, &mut looks) {
+                    if let Some(root) =
+                        live.snapshot(usize::MAX, 0.0, None, Measure::Bytes, &mut looks)
+                    {
                         check(&root, &mut seen);
                     }
                     std::thread::yield_now();
@@ -1500,7 +1518,9 @@ mod live_stress {
         drop(tx);
         drain.join().unwrap();
         let mut looks = LiveLooks::default();
-        let snap = live.snapshot(usize::MAX, 0.0, None, &mut looks).unwrap();
+        let snap = live
+            .snapshot(usize::MAX, 0.0, None, Measure::Bytes, &mut looks)
+            .unwrap();
         // With a category picked: the folders of the finished tree filtered
         // by it, with the same sizes and file counts.
         let folders = |n: &Node| {
@@ -1518,12 +1538,22 @@ mod live_stress {
         let doc = cats.of_name("a.txt");
         let pick = Pick::Category(doc);
         // Nothing of it found: an empty top, as the app shows it.
-        let filtered = match filter_tree_by(&tree, &|n: &Node| cats.pick_matches(&pick, &n.name)) {
+        let filtered = match filter_tree_by(
+            &tree,
+            &|n: &Node| cats.pick_matches(&pick, &n.name),
+            Measure::Bytes,
+        ) {
             Some(f) => folders(&f),
             None => vec![(tree.path(), 0, 0)],
         };
         let picked = live
-            .snapshot(usize::MAX, 0.0, Some(doc), &mut LiveLooks::default())
+            .snapshot(
+                usize::MAX,
+                0.0,
+                Some(doc),
+                Measure::Bytes,
+                &mut LiveLooks::default(),
+            )
             .unwrap();
         assert_eq!(folders(&picked), filtered);
         same(&snap, &tree, &looks, &cats)
@@ -1615,7 +1645,7 @@ mod live_stress {
             put(&mut looks.summaries, path_key(&n.path()), summary);
         }
         for (i, n) in nodes.iter().enumerate() {
-            let (look, since) = looks.get(n).unwrap();
+            let (look, since) = looks.get(n, Measure::Bytes).unwrap();
             assert_eq!(look.newest, i as i64, "{}", n.path().display());
             assert_eq!(since, start + std::time::Duration::from_millis(i as u64));
         }
@@ -1677,7 +1707,9 @@ mod live_stress {
         drop(tx);
         drain.join().unwrap();
         let mut looks = LiveLooks::default();
-        let snap = live.snapshot(12, 0.01, None, &mut looks).unwrap();
+        let snap = live
+            .snapshot(12, 0.01, None, Measure::Bytes, &mut looks)
+            .unwrap();
         assert_eq!((snap.size, snap.file_count), (tree.size, tree.file_count));
         // All 52 children of the scanned folder, however small.
         assert_eq!(snap.children.len(), 52);
@@ -1690,7 +1722,10 @@ mod live_stress {
         assert_eq!(&*grouped.name, trf("SEG_OTHER_ITEMS", &["3000"]));
         let subs: u64 = fin.children.iter().map(|c| c.size).sum();
         assert_eq!((grouped.size, grouped.file_count), (subs, 3000));
-        assert!(looks.get(grouped).is_some(), "the entry has a color");
+        assert!(
+            looks.get(grouped, Measure::Bytes).is_some(),
+            "the entry has a color"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1723,7 +1758,9 @@ mod live_stress {
             }
         }
         let mut looks = LiveLooks::default();
-        let snap = live.snapshot(5, 0.1, None, &mut looks).unwrap();
+        let snap = live
+            .snapshot(5, 0.1, None, Measure::Bytes, &mut looks)
+            .unwrap();
         let p_node = snap.children.iter().find(|c| &*c.name == "p").unwrap();
         assert_eq!((p_node.size, p_node.file_count), (600, 60));
         assert_eq!(p_node.children.len(), 1, "all 20 grouped");
@@ -1778,7 +1815,9 @@ mod live_stress {
         };
         let row = |p: &str, size, files| (p.to_string(), size, files);
         let mut looks = LiveLooks::default();
-        let all = live.snapshot(5, 0.0, None, &mut looks).unwrap();
+        let all = live
+            .snapshot(5, 0.0, None, Measure::Bytes, &mut looks)
+            .unwrap();
         assert_eq!((all.size, all.file_count), (1666, 7));
         assert_eq!(looks.scanned(), (1666, 7));
         assert_ne!(
@@ -1791,7 +1830,9 @@ mod live_stress {
         );
 
         let mut looks = LiveLooks::default();
-        let picked = live.snapshot(5, 0.0, Some(doc), &mut looks).unwrap();
+        let picked = live
+            .snapshot(5, 0.0, Some(doc), Measure::Bytes, &mut looks)
+            .unwrap();
         assert_eq!(
             shape(&picked),
             vec![
@@ -1812,7 +1853,9 @@ mod live_stress {
         // Too small for a slice of its own (under half of the 60 bytes
         // picked): grouped, with its picked share.
         let mut looks = LiveLooks::default();
-        let grouped = live.snapshot(5, 0.5, Some(doc), &mut looks).unwrap();
+        let grouped = live
+            .snapshot(5, 0.5, Some(doc), Measure::Bytes, &mut looks)
+            .unwrap();
         let deep = grouped
             .children
             .iter()
@@ -1847,7 +1890,9 @@ mod live_stress {
         let r = live.open(None, Path::new("/r"), 0);
         let mut looks = LiveLooks::default();
         assert_eq!(
-            live.snapshot(3, 0.0, None, &mut looks).unwrap().file_count,
+            live.snapshot(3, 0.0, None, Measure::Bytes, &mut looks)
+                .unwrap()
+                .file_count,
             0
         );
         for f in &files {
@@ -1857,7 +1902,9 @@ mod live_stress {
         for f in &files {
             want.add_file(cats.of_name(&f.name), f.size, f.ctime);
         }
-        let snap = live.snapshot(3, 0.0, None, &mut looks).unwrap();
+        let snap = live
+            .snapshot(3, 0.0, None, Measure::Bytes, &mut looks)
+            .unwrap();
         assert_eq!(looks.root.as_ref(), Some(&want));
         assert_eq!(snap.size, u64::MAX, "sizes cap, never wrap");
         let s = looks.summaries[path_key(Path::new("/r"))];
@@ -1895,7 +1942,7 @@ mod perf {
         let root = test_node("/r", 0, true, folders);
         for _ in 0..3 {
             let t = Instant::now();
-            let looks = Looks::build(&root, &cats, false);
+            let looks = Looks::build(&root, &cats, false, Measure::Bytes);
             eprintln!("{:?} for {} folders", t.elapsed(), looks.folders.len());
         }
     }

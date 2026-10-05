@@ -1071,7 +1071,7 @@ impl DiskScanApp {
             self.live_gen += 1;
             self.live_seen = self.partial_gen;
             self.live_view = flat_copy(&self.partial_root);
-            self.cat_breakdown = category_rows(&self.live_exts, &self.cats);
+            self.cat_breakdown = category_rows(&self.live_exts, &self.cats, self.measure);
             // The finished tree is broken down afresh when the scan ends.
             self.cat_breakdown_for = None;
         }
@@ -1134,6 +1134,7 @@ impl DiskScanApp {
             hidden: &self.hidden,
             settings: &self.settings,
             order: self.chart_order,
+            measure: self.measure,
         };
         let segs = layout_sunburst(&self.partial_root, free, opts);
         for seg in &segs {
@@ -1160,13 +1161,14 @@ impl DiskScanApp {
     /// filter, so every category stays visible (and clickable) while one is
     /// picked.
     pub(crate) fn refresh_cat_breakdown(&mut self, view_node: &Node) {
-        let key = (view_node.path(), self.base_gen, measure_files());
+        let key = (view_node.path(), self.base_gen, self.measure);
         if self.cat_breakdown_for.as_ref() != Some(&key) {
             let base = self
                 .cat_base
                 .as_deref()
                 .and_then(|b| find_node(b, &view_node.path()));
-            self.cat_breakdown = category_breakdown(base.unwrap_or(view_node), &self.cats);
+            self.cat_breakdown =
+                category_breakdown(base.unwrap_or(view_node), &self.cats, self.measure);
             self.cat_breakdown_for = Some(key);
         }
     }
@@ -1264,10 +1266,11 @@ impl DiskScanApp {
     /// row is a named button for screen readers. Only the visible rows are
     /// drawn, so thousands of extensions are fine.
     fn extension_table_ui(&mut self, ui: &mut egui::Ui, height: f32) {
+        let measure = self.measure;
         let rows = self.extension_rows();
         let total: u64 = rows
             .iter()
-            .map(|r| r.weight())
+            .map(|r| r.weight(measure))
             .fold(0u64, u64::saturating_add);
         let dark = ui.visuals().dark_mode;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
@@ -1381,7 +1384,7 @@ impl DiskScanApp {
                     });
                     let hit = table_row.response();
                     // The name screen readers announce, as for the category bar.
-                    let pct = row.weight() as f64 * 100.0 / total.max(1) as f64;
+                    let pct = row.weight(measure) as f64 * 100.0 / total.max(1) as f64;
                     let spoken = trf(
                         "A11Y_CATEGORY",
                         &[
@@ -1458,6 +1461,7 @@ impl DiskScanApp {
     /// `compact`: a narrow panel, with the bar alone (no heading or labels;
     /// tooltips and keys still work).
     fn category_bar_ui(&mut self, ui: &mut egui::Ui, height: f32, compact: bool) {
+        let measure = self.measure;
         let mut clicked: Option<Category> = None;
         let mut clear = false;
         ui.horizontal(|ui| {
@@ -1531,7 +1535,7 @@ impl DiskScanApp {
         let rows = &self.cat_breakdown;
         let total: u64 = rows
             .iter()
-            .map(|r| r.weight())
+            .map(|r| r.weight(measure))
             .fold(0u64, u64::saturating_add);
         let (rect, _) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), height.max(80.0)),
@@ -1552,7 +1556,7 @@ impl DiskScanApp {
             let usable = rect.height() - gap * (rows.len() - 1) as f32;
             let raw: Vec<f32> = rows
                 .iter()
-                .map(|r| r.weight() as f32 / total as f32 * usable)
+                .map(|r| r.weight(measure) as f32 / total as f32 * usable)
                 .collect();
             let thin = raw.iter().filter(|h| **h < min_h).count() as f32;
             let big_sum: f32 = raw.iter().filter(|h| **h >= min_h).sum();
@@ -1582,7 +1586,7 @@ impl DiskScanApp {
             };
             let room = (rect.height() / label_h).floor() as usize;
             let mut by_size: Vec<usize> = (0..n).collect();
-            by_size.sort_by_key(|&i| std::cmp::Reverse(rows[i].weight()));
+            by_size.sort_by_key(|&i| std::cmp::Reverse(rows[i].weight(measure)));
             let mut labelled = vec![false; n];
             if !compact {
                 for &i in by_size.iter().take(room) {
@@ -1721,7 +1725,7 @@ impl DiskScanApp {
                         ink,
                     );
                 }
-                let pct = row.weight() as f64 * 100.0 / total as f64;
+                let pct = row.weight(measure) as f64 * 100.0 / total as f64;
                 // The name screen readers announce.
                 let spoken = trf(
                     "A11Y_CATEGORY",
@@ -1743,7 +1747,7 @@ impl DiskScanApp {
                     painter.text(
                         Pos2::new(label_x, label_y[i] + pad + line_h),
                         egui::Align2::LEFT_TOP,
-                        format!("{pct:.1}% · {}", measure_text(row.size, row.files)),
+                        format!("{pct:.1}% · {}", measure_text(row.size, row.files, measure)),
                         font.clone(),
                         ui.visuals().weak_text_color(),
                     );
@@ -1821,27 +1825,32 @@ impl DiskScanApp {
                         .rest
                         .iter()
                         .filter_map(|&i| parent.children.get(i))
-                        .filter_map(|n| self.live_looks.get(n))
+                        .filter_map(|n| self.live_looks.get(n, self.measure))
                         .collect();
                     let since = found.iter().map(|f| f.1).min()?;
                     Some((
-                        group_look(found.into_iter().map(|f| f.0), &self.cats),
+                        group_look(found.into_iter().map(|f| f.0), &self.cats, self.measure),
                         Some(since),
                     ))
                 } else {
-                    let (look, since) = self.live_looks.get(get_node(view, &seg.idx_path))?;
+                    let (look, since) = self
+                        .live_looks
+                        .get(get_node(view, &seg.idx_path), self.measure)?;
                     Some((look, Some(since)))
                 }
             } else {
                 let (_, looks) = self.looks.as_ref()?;
                 if seg.is_other {
                     let rest = seg.rest.iter().filter_map(|&i| parent().children.get(i));
-                    Some((looks.of_group(rest, &self.cats), self.colored_at))
+                    Some((
+                        looks.of_group(rest, &self.cats, self.measure),
+                        self.colored_at,
+                    ))
                 } else {
                     let n = get_node(view, &seg.idx_path);
                     // A folder colored during the scan keeps its fade.
                     let since = self.live_looks.colored_at(n).or(self.colored_at);
-                    Some((looks.of(n, &self.cats), since))
+                    Some((looks.of(n, &self.cats, self.measure), since))
                 }
             }
         };
@@ -1926,6 +1935,7 @@ impl DiskScanApp {
             hidden: &self.hidden,
             settings: &self.settings,
             order: self.chart_order,
+            measure: self.measure,
         };
         let segs = layout_sunburst(view_node, free, opts);
         // Slice looks of the whole tree, worked out once per tree.
@@ -1940,7 +1950,7 @@ impl DiskScanApp {
                 .tree_cats
                 .as_ref()
                 .is_some_and(|c| Arc::ptr_eq(c, &self.cats));
-            let looks = Looks::build(root, &self.cats, stored);
+            let looks = Looks::build(root, &self.cats, stored, self.measure);
             if let Some(old) = self.looks.replace((self.tree_gen, looks)) {
                 drop_in_background(old);
             }
@@ -2006,10 +2016,10 @@ impl DiskScanApp {
                                     );
                                     let rest =
                                         seg.rest.iter().filter_map(|&i| parent.children.get(i));
-                                    looks.of_group(rest, &self.cats)
+                                    looks.of_group(rest, &self.cats, self.measure)
                                 } else {
                                     let n = real_node.filter(|n| n.is_dir)?;
-                                    looks.of(n, &self.cats)
+                                    looks.of(n, &self.cats, self.measure)
                                 };
                                 Some((look.newest, look.oldest))
                             }),
@@ -2335,19 +2345,15 @@ pub(crate) struct ExtRow {
 }
 
 impl ExtRow {
-    /// Its weight in the measure in use: bytes, or files.
-    fn weight(&self) -> u64 {
-        if measure_files() {
-            self.files
-        } else {
-            self.size
-        }
+    /// Its weight in `measure`: bytes, or files.
+    fn weight(&self, measure: Measure) -> u64 {
+        measure.pick(self.size, self.files)
     }
 }
 
-/// `size` bytes in `files` files, as the measure in use counts them.
-fn measure_text(size: u64, files: u64) -> String {
-    if measure_files() {
+/// `size` bytes in `files` files, as `measure` counts them.
+fn measure_text(size: u64, files: u64, measure: Measure) -> String {
+    if measure.by_files() {
         trn("COUNT_FILES", files, &[&format_count(files)])
     } else {
         human_size(size)

@@ -225,7 +225,7 @@ struct DiskScanApp {
     /// What the last read of the live tree showed: depth, smallest slice
     /// angle (as bits), picked category and measure. A change reads it again
     /// at once.
-    live_read_for: Option<(usize, u32, Option<Category>, bool)>,
+    live_read_for: Option<(usize, u32, Option<Category>, Measure)>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -243,7 +243,7 @@ struct DiskScanApp {
     cat_breakdown: Vec<CategoryRow>,
     /// The extensions table's rows, made from `cat_breakdown`.
     ext_rows: Option<panels::ExtRows>,
-    cat_breakdown_for: Option<(PathBuf, u64, bool)>,
+    cat_breakdown_for: Option<(PathBuf, u64, Measure)>,
     /// Counts changes to `cat_base`, for what's made from it.
     base_gen: u64,
     /// The path bar is a text field (else clickable folder names).
@@ -322,6 +322,9 @@ struct DiskScanApp {
     tree_apparent: bool,
     /// Whether the tree's folders are sorted by files (else by bytes).
     tree_by_files: bool,
+    /// What sizes are measured in, from the settings at the start of each
+    /// frame (see `follow_measure`).
+    measure: Measure,
     /// A folder to scan as soon as the app starts (from the command line).
     start_path: Option<PathBuf>,
     /// Problems from before the window opened (the old settings' copy),
@@ -415,6 +418,7 @@ impl Default for DiskScanApp {
             scan_apparent: false,
             tree_apparent: false,
             tree_by_files: false,
+            measure: Measure::Bytes,
             start_path: None,
             startup_issues: Vec::new(),
             sorts_switched: [false; 2],
@@ -640,8 +644,8 @@ impl DiskScanApp {
     /// a table sorted by size or files switched to it.
     fn follow_measure(&mut self) {
         let files = self.settings.measure_files;
-        if files != scan::measure_files() {
-            scan::set_measure_files(files);
+        if files != self.measure.by_files() {
+            self.measure = Measure::of_setting(files);
             // A sort by size follows to files and back; one chosen by files
             // stays.
             let sorts = [&mut self.contents_sort, &mut self.ext_sort];
@@ -694,7 +698,9 @@ impl DiskScanApp {
             return;
         };
         let base = match &self.filter {
-            Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| empty_like(&full))),
+            Some(f) => {
+                Arc::new(filter_tree(&full, f, self.measure).unwrap_or_else(|| empty_like(&full)))
+            }
             None => full,
         };
         if let Some(old) = self.cat_base.replace(base) {
@@ -734,9 +740,13 @@ impl DiskScanApp {
                 let kept = match pick {
                     Pick::Category(c) if stored && cat_byte(*c) != NO_CAT => {
                         let byte = cat_byte(*c);
-                        filter_tree_by(&base, &|n: &Node| n.cat == byte)
+                        filter_tree_by(&base, &|n: &Node| n.cat == byte, self.measure)
                     }
-                    _ => filter_tree_by(&base, &|n: &Node| cats.pick_matches(pick, &n.name)),
+                    _ => filter_tree_by(
+                        &base,
+                        &|n: &Node| cats.pick_matches(pick, &n.name),
+                        self.measure,
+                    ),
                 };
                 Arc::new(kept.unwrap_or_else(|| empty_like(&base)))
             }
@@ -1198,7 +1208,7 @@ impl DiskScanApp {
             self.settings.max_render_depth,
             min_angle.to_bits(),
             live_pick,
-            scan::measure_files(),
+            self.measure,
         );
         if self.scanning
             && let Some(tree) = self.live_tree.clone()
@@ -1219,6 +1229,7 @@ impl DiskScanApp {
                 self.settings.max_render_depth,
                 min_share,
                 live_pick,
+                self.measure,
                 &mut self.live_looks,
             ) {
                 self.partial_root = root;

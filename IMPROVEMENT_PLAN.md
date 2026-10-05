@@ -119,19 +119,21 @@ synthetic 4M-file tree, whole frames (UI + tessellation):
 
 ## Batch 3: architecture and readability
 
-- [ ] SM-81 (S4, the user wants it in this batch): a move to another
+- [x] SM-81 (S4, the user wants it in this batch): a move to another
       filesystem that can't remove a source in a read-only folder must say
       what failed (the copy was made, the original couldn't be removed
       because its folder can't be changed, and it's still in place), not
       "don't have permission to read or enter that folder". Status line as is.
-- [ ] Measure (bytes or files) passed as a parameter instead of the global
-      flag.
+- [x] Measure (bytes or files) passed as a parameter (`Measure`) instead
+      of the global flag; the app keeps it in `measure`, set where the flag
+      was. The per-thread test copy is gone.
 - [ ] `cfg!(test)` switches replaced by settings passed in at creation.
 - [ ] Split scan.rs (tree, formatting, filesystem helpers, scanning).
-- [ ] One path-to-node lookup (find_node, find_by_path, index_path_to).
+- [x] One path-to-node lookup (`find_index_path`; `find_node`,
+      `index_path_to` and the table's `place_in` use it).
 - [ ] A `Stat` struct for file details (removes repeated 14-field Node
       literals and the 8-argument `LiveTree::close`).
-- [ ] Document that slice looks are keyed by node address (valid per tree_gen).
+- [x] Document that slice looks are keyed by node address (valid per tree_gen).
 - [ ] Break up the long UI functions (table_ui, toolbar_ui, chart_ui,
       category_bar_ui, App::ui).
 - [ ] Library crate with explicit imports; DiskScanApp split into smaller

@@ -97,6 +97,8 @@ pub(crate) struct LayoutOpts<'a> {
     pub(crate) hidden: &'a HashSet<PathBuf>,
     pub(crate) settings: &'a Settings,
     pub(crate) order: ChartOrder,
+    /// What slices are sized by.
+    pub(crate) measure: Measure,
 }
 
 /// The slices of the chart of `node`, around the full circle. `free` is the
@@ -136,7 +138,9 @@ fn layout_ring(
         hidden,
         settings,
         order,
+        measure,
     } = opts;
+    let weight = |n: &Node| measure.of(n);
     if ring >= settings.max_render_depth {
         return;
     }
@@ -151,7 +155,11 @@ fn layout_ring(
     // so far fills the rest of the ring (also while a scan is running).
     let full_span = end_angle - start_angle;
     // Free space has no files: it only shows when measuring bytes.
-    let extra_free_bytes = if measure_files() { 0 } else { extra_free_bytes };
+    let extra_free_bytes = if measure.by_files() {
+        0
+    } else {
+        extra_free_bytes
+    };
     let content_end_angle = if extra_free_bytes > 0 && total_capacity > 0 {
         let free_frac = extra_free_bytes as f32 / total_capacity as f32;
         start_angle + full_span * (1.0 - free_frac)
@@ -510,6 +518,7 @@ mod tests {
             hidden: &HashSet::new(),
             settings,
             order: ChartOrder::Size,
+            measure: Measure::of_setting(settings.measure_files),
         };
         layout_ring(root, vec![], (0.0, span), 0, (0, 0), opts, &mut segs);
         segs
@@ -539,12 +548,13 @@ mod tests {
         let mut root = test_node("/m", 0, true, vec![few, many, empty]);
         root.size = root.children.iter().map(|c| c.size).sum();
         root.file_count = 101;
-        let draw = |root: &Node| {
+        let draw = |root: &Node, measure: Measure| {
             let mut segs = Vec::new();
             let opts = LayoutOpts {
                 hidden: &HashSet::new(),
                 settings: &Settings::default(),
                 order: ChartOrder::Size,
+                measure,
             };
             layout_ring(
                 root,
@@ -559,11 +569,9 @@ mod tests {
             segs.retain(|s| s.ring == 0);
             segs
         };
-        let bytes = draw(&root);
-        set_measure_files(true);
+        let bytes = draw(&root, Measure::Bytes);
         sort_by_measure(&mut root.children, true);
-        let files = draw(&root);
-        set_measure_files(false);
+        let files = draw(&root, Measure::Files);
         assert!(
             bytes.iter().any(|s| s.is_free),
             "free space shows when measuring bytes"

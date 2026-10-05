@@ -655,7 +655,8 @@ fn write_extensions(
     tree: &Node,
     cats: &CategoryModel,
 ) -> std::io::Result<()> {
-    let mut exts: Vec<(String, String, u64, u64)> = category_breakdown(tree, cats)
+    // Sorted again below, by what --by asks.
+    let mut exts: Vec<(String, String, u64, u64)> = category_breakdown(tree, cats, Measure::Bytes)
         .into_iter()
         .flat_map(|row| {
             let category = cats.label(row.cat);

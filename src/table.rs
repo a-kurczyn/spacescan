@@ -874,11 +874,8 @@ impl DiskScanApp {
         let row = |i: usize| order.rows.node(view_node, i);
         let n_rows = order.rows.len();
         let flat = order.key.flat.is_some();
-        let shown_weight = if measure_files() {
-            order.shown_files
-        } else {
-            order.shown_size
-        };
+        let measure = self.measure;
+        let shown_weight = measure.pick(order.shown_size, order.shown_files);
         // The cursor goes to the first row when it isn't in this folder.
         let found = self
             .table
@@ -1256,7 +1253,7 @@ impl DiskScanApp {
                                         Vec2::new(86.0, row_h * 0.55),
                                         egui::Sense::hover(),
                                     );
-                                    let frac = weight(c) as f32 / total as f32;
+                                    let frac = measure.of(c) as f32 / total as f32;
                                     if selected {
                                         // A dark track under the fill.
                                         ui.painter().rect_filled(
@@ -1289,7 +1286,7 @@ impl DiskScanApp {
                                 Cell::Opt(TableCol::Percent) => {
                                     ui.label(format!(
                                         "{:.1}%",
-                                        weight(c) as f64 * 100.0 / total as f64
+                                        measure.of(c) as f64 * 100.0 / total as f64
                                     ));
                                 }
                                 Cell::Opt(TableCol::Size) => {
@@ -2014,7 +2011,7 @@ impl DiskScanApp {
         } else {
             let tree = Arc::make_mut(&mut full);
             replace_in_tree(tree, &g.target, node);
-            resort_above(tree, std::slice::from_ref(&g.target));
+            resort_above(tree, std::slice::from_ref(&g.target), self.measure);
         }
         self.full_root = Some(full);
         self.rebuild_view_tree();

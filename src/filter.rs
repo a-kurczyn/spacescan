@@ -257,15 +257,21 @@ pub(crate) fn parse_date(s: &str, end_of_day: bool) -> Result<i64, String> {
 }
 
 /// Copy of `n` keeping only files that match `f`, with folder sizes and file
-/// counts recomputed from what's left. Folders with no matches are dropped.
-pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter) -> Option<Node> {
-    filter_tree_by(n, &|file: &Node| f.matches_file(file))
+/// counts recomputed from what's left, sorted by `measure`. Folders with no
+/// matches are dropped.
+pub(crate) fn filter_tree(n: &Node, f: &CompiledFilter, measure: Measure) -> Option<Node> {
+    filter_tree_by(n, &|file: &Node| f.matches_file(file), measure)
 }
 
 /// Copy of `n` keeping only the files `keep` accepts, and the folders that
-/// still contain one; folder sizes and counts cover what's kept.
-pub(crate) fn filter_tree_by(n: &Node, keep: &(dyn Fn(&Node) -> bool + Sync)) -> Option<Node> {
-    filter_by_measure(n, keep, measure_files())
+/// still contain one; folder sizes and counts cover what's kept, sorted by
+/// `measure`.
+pub(crate) fn filter_tree_by(
+    n: &Node,
+    keep: &(dyn Fn(&Node) -> bool + Sync),
+    measure: Measure,
+) -> Option<Node> {
+    filter_by_measure(n, keep, measure.by_files())
 }
 
 /// `filter_tree_by`, with folders sorted by `files` (file counts) or bytes.

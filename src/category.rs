@@ -330,13 +330,9 @@ pub(crate) struct CategoryRow {
 }
 
 impl CategoryRow {
-    /// Its weight in the measure in use: bytes, or files.
-    pub(crate) fn weight(&self) -> u64 {
-        if measure_files() {
-            self.files
-        } else {
-            self.size
-        }
+    /// Its weight in `measure`: bytes, or files.
+    pub(crate) fn weight(&self, measure: Measure) -> u64 {
+        measure.pick(self.size, self.files)
     }
 }
 
@@ -377,7 +373,11 @@ pub(crate) fn add_ext(totals: &mut ExtTotals, ext: String, size: u64, files: u64
 
 /// How the files under `node` split into categories, largest first;
 /// categories with no files are left out.
-pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<CategoryRow> {
+pub(crate) fn category_breakdown(
+    node: &Node,
+    model: &CategoryModel,
+    measure: Measure,
+) -> Vec<CategoryRow> {
     /// Subtrees with fewer files than this are added up on one thread.
     const SPLIT: u64 = 2_000;
     fn walk(n: &Node, acc: &mut ExtTotals, buf: &mut [u8; 16]) {
@@ -427,11 +427,15 @@ pub(crate) fn category_breakdown(node: &Node, model: &CategoryModel) -> Vec<Cate
     }
     let mut acc = ExtTotals::default();
     walk(node, &mut acc, &mut [0; 16]);
-    category_rows(&acc, model)
+    category_rows(&acc, model, measure)
 }
 
-/// Extension totals grouped into categories, largest first.
-pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<CategoryRow> {
+/// Extension totals grouped into categories, largest first in `measure`.
+pub(crate) fn category_rows(
+    totals: &ExtTotals,
+    model: &CategoryModel,
+    measure: Measure,
+) -> Vec<CategoryRow> {
     let mut rows: Vec<CategoryRow> = Vec::new();
     for (ext, &(size, files)) in totals {
         let cat = model.of_ext(ext);
@@ -452,9 +456,9 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
         row.files += files;
         row.exts.push((ext.clone(), size, files));
     }
-    // By the measure in use (bytes or files), ties by extension; rows ties
-    // in list order (Other last among equals).
-    let files = measure_files();
+    // By `measure` (bytes or files), ties by extension; rows ties in list
+    // order (Other last among equals).
+    let files = measure.by_files();
     for r in &mut rows {
         r.exts.sort_by(|a, b| {
             let (x, y) = if files { (a.2, b.2) } else { (a.1, b.1) };
@@ -600,7 +604,7 @@ mod tests {
                 ),
             ],
         );
-        let rows = category_breakdown(&tree, &m);
+        let rows = category_breakdown(&tree, &m, Measure::Bytes);
         let b: Vec<(String, u64, u64)> = rows
             .iter()
             .map(|r| (m.label(r.cat), r.size, r.files))
@@ -651,7 +655,12 @@ mod tests {
                 ),
             ],
         );
-        let only = filter_tree_by(&tree, &|n: &Node| m.of_name(&n.name) == video).unwrap();
+        let only = filter_tree_by(
+            &tree,
+            &|n: &Node| m.of_name(&n.name) == video,
+            Measure::Bytes,
+        )
+        .unwrap();
         assert_eq!((only.size, only.file_count), (105, 2));
         let names: Vec<&str> = only.children.iter().map(|c| &*c.name).collect();
         assert_eq!(names, vec!["a.mkv", "d"]);
@@ -714,12 +723,15 @@ mod tests {
             }
         }
         count(&root, &mut plain);
-        let want = category_rows(&plain.into_iter().collect(), &model);
-        assert_eq!(category_breakdown(&root, &model), want);
+        let want = category_rows(&plain.into_iter().collect(), &model, Measure::Bytes);
+        assert_eq!(category_breakdown(&root, &model, Measure::Bytes), want);
         let mut small: HashMap<String, (u64, u64)> = HashMap::new();
         count(&root.children[2], &mut small);
-        let want_small = category_rows(&small.into_iter().collect(), &model);
-        assert_eq!(category_breakdown(&root.children[2], &model), want_small);
+        let want_small = category_rows(&small.into_iter().collect(), &model, Measure::Bytes);
+        assert_eq!(
+            category_breakdown(&root.children[2], &model, Measure::Bytes),
+            want_small
+        );
     }
 
     /// Every pair of colors in the color-blind-safe palette, and each color

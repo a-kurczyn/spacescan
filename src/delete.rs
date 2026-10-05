@@ -637,7 +637,7 @@ impl DiskScanApp {
             parents.dedup();
             refresh_own_sizes(full, &parents, self.tree_apparent);
             // The folders above keep their order rule (largest first).
-            resort_above(full, gone);
+            resort_above(full, gone, self.measure);
         }
         self.rebuild_view_tree();
         self.restore_view(&view_paths);
@@ -857,15 +857,20 @@ mod tests {
 
         // The live tree, read in full and as the chart shows it.
         let mut looks = LiveLooks::default();
-        let partial = live.snapshot(usize::MAX, 0.0, None, &mut looks).unwrap();
+        let partial = live
+            .snapshot(usize::MAX, 0.0, None, Measure::Bytes, &mut looks)
+            .unwrap();
         assert_eq!(partial.file_count, files);
         assert!(find_node(&partial, &bottom).is_some());
-        assert!(live.snapshot(12, 1.3 / 360.0, None, &mut looks).is_some());
+        assert!(
+            live.snapshot(12, 1.3 / 360.0, None, Measure::Bytes, &mut looks)
+                .is_some()
+        );
 
         // Categories, filter, clone.
         let cats = CategoryModel::defaults();
         assert_eq!(
-            category_breakdown(&tree, &cats)
+            category_breakdown(&tree, &cats, Measure::Bytes)
                 .iter()
                 .find(|r| r.cat == cats.of_name("f.bin"))
                 .map(|r| r.files),
@@ -878,7 +883,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(
-            filter_tree(&tree, &filter).map(|t| t.file_count),
+            filter_tree(&tree, &filter, Measure::Bytes).map(|t| t.file_count),
             Some(files)
         );
         let mut copy = tree.clone();
