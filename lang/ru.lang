@@ -55,7 +55,7 @@ ERR_DATE_TZ='%s' не существует в местном часовом по
 ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
-SETTINGS_TITLE=Настройки диаграммы
+SETTINGS_TITLE=Настройки
 SETTINGS_DEPTH_GROUPING=Глубина и группировка
 SETTINGS_DEPTH_LEVELS=Показываемые уровни
 SETTINGS_MIN_SLICE_ANGLE=Мин. угол сектора (°)
@@ -214,6 +214,16 @@ ERR_LANG_FILE=Не удалось использовать языковой фа
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Клавиши
 HELP_CLOSE=Закрыть
+MENU_MAIN=Главное меню
+MENU_REPORT_BUG=Сообщить об ошибке
+MENU_ABOUT=О программе SpaceScan
+MENU_QUIT=Выход
+ABOUT_VERSION=Версия %s
+ABOUT_DESCRIPTION=Узнайте, что занимает место на ваших дисках.
+ABOUT_FREE_SOFTWARE=SpaceScan — свободная программа под лицензией GNU General Public License, только версии 3. Она предоставляется без каких-либо гарантий.
+ABOUT_WEBSITE=Веб-сайт
+ABOUT_LICENSE_LINK=Лицензия (GPL-3.0)
+ABOUT_THIRD_PARTY=Сторонние лицензии
 HELP_SECTION_MOVE=Перемещение
 HELP_SECTION_SORT=Сортировка и столбцы
 HELP_SECTION_ACT=Действия
@@ -265,6 +275,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Снять отметки или закрыть сведения
 HELP_KEYS_HELP=?
 HELP_HELP=Эта справка
+HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=Категории

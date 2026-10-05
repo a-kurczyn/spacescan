@@ -349,6 +349,8 @@ struct DiskScanApp {
     /// The settings as last saved; None until the file is up to date.
     saved_config: Option<Config>,
     show_settings: bool,
+    /// The About window is open.
+    show_about: bool,
     path_input: String,
     path_input_focused: bool,
     contents_sort: SortState,
@@ -425,6 +427,7 @@ impl Default for DiskScanApp {
             settings: Settings::default(),
             saved_config: None,
             show_settings: false,
+            show_about: false,
             path_input: String::new(),
             path_input_focused: false,
             cats: Arc::new(CategoryModel::defaults()),
@@ -1204,6 +1207,16 @@ impl eframe::App for DiskScanApp {
             self.table_keys(&ctx);
             self.table_overlays(&ctx, area);
         }
+        // Opened from the main menu in any view, or with "?" in the table.
+        if self.table.show_help {
+            self.help_overlay(&ctx);
+        }
+        if self.show_about {
+            self.about_window(&ctx);
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         // Not while the right-click menu is open (Esc still closes it).
         let menu_open = egui::Popup::is_any_open(&ctx);
         if self.root.is_some()
@@ -1212,6 +1225,8 @@ impl eframe::App for DiskScanApp {
             && !self.typing
             && !self.delete_dialog_open()
             && !menu_open
+            && !self.table.show_help
+            && !self.show_about
         {
             if let Some(d) = ctx.input(arrow_nav) {
                 self.move_selection(d);

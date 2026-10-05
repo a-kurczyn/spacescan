@@ -48,7 +48,82 @@ fn tool_window(
     });
 }
 
+/// The project's page.
+const WEBSITE_URL: &str = "https://github.com/a-kurczyn/spacescan";
+/// Where bugs are reported (the issue forms).
+const NEW_ISSUE_URL: &str = "https://github.com/a-kurczyn/spacescan/issues/new/choose";
+const LICENSE_URL: &str = "https://www.gnu.org/licenses/gpl-3.0.html";
+
+/// What was chosen in the main menu.
+enum MenuPick {
+    Settings,
+    Filters,
+    Shortcuts,
+    ReportBug,
+    About,
+    Quit,
+}
+
+/// Opens `target` (a web address or a file) in the desktop's default app.
+fn open_link(target: &str) {
+    let _ = std::process::Command::new("xdg-open").arg(target).spawn();
+}
+
+/// The licenses of the libraries SpaceScan is built with: the copy
+/// installed with the app if there is one, else the project's page.
+fn third_party_licenses() -> String {
+    // An AppImage runs from $APPDIR; packages install under /.
+    let appdir = std::env::var_os("APPDIR").map(PathBuf::from);
+    licenses_in(appdir.into_iter().chain([PathBuf::from("/")]))
+}
+
+/// The licenses file under the first of `bases` that has it, else the
+/// project's page.
+fn licenses_in(bases: impl IntoIterator<Item = PathBuf>) -> String {
+    const FILE: &str = "usr/share/doc/spacescan/THIRD-PARTY-LICENSES.html";
+    let installed = bases
+        .into_iter()
+        .map(|base| base.join(FILE))
+        .find(|p| p.is_file());
+    match installed {
+        Some(p) => p.display().to_string(),
+        None => format!("{WEBSITE_URL}/blob/main/THIRD-PARTY-LICENSES.html"),
+    }
+}
+
 impl DiskScanApp {
+    /// The About window: version, license and links.
+    pub(crate) fn about_window(&mut self, ctx: &egui::Context) {
+        let modal = egui::Modal::new("about".into()).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.vertical_centered(|ui| {
+                ui.heading("SpaceScan");
+                ui.label(trf("ABOUT_VERSION", &[env!("CARGO_PKG_VERSION")]));
+                ui.add_space(6.0);
+                ui.label(tr("ABOUT_DESCRIPTION"));
+                ui.add_space(10.0);
+                ui.label("Copyright © 2026 Alejandro Kurczyn");
+                ui.add(egui::Label::new(tr("ABOUT_FREE_SOFTWARE")).wrap());
+                ui.add_space(10.0);
+                for (key, target) in [
+                    ("ABOUT_WEBSITE", WEBSITE_URL.to_string()),
+                    ("ABOUT_LICENSE_LINK", LICENSE_URL.to_string()),
+                    ("ABOUT_THIRD_PARTY", third_party_licenses()),
+                ] {
+                    if ui.link(tr(key)).on_hover_text(&target).clicked() {
+                        open_link(&target);
+                    }
+                }
+                ui.add_space(10.0);
+                ui.button(tr("HELP_CLOSE")).clicked()
+            })
+            .inner
+        });
+        if modal.inner || modal.should_close() {
+            self.show_about = false;
+        }
+    }
+
     /// Top bar: starting points, path bar, view toggles.
     pub(crate) fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -66,6 +141,7 @@ impl DiskScanApp {
         }
         let mut nav_action = NavAction::None;
         let mut settings_toggled = false;
+        let mut menu_pick: Option<MenuPick> = None;
         let settings_open = self.show_settings;
         let mut open_picker = false;
         let mut start_at: Option<PathBuf> = None;
@@ -251,9 +327,42 @@ impl DiskScanApp {
                         }
                     }
                 },
-                // Right to left: settings, filters, then empty trash and the view
-                // buttons.
+                // Right to left: the main menu, settings, filters, then empty
+                // trash and the view buttons.
                 |ui| {
+                    let menu = glyph_toolbar_button(
+                        ui,
+                        ButtonRole::Action { lit: false },
+                        true,
+                        "☰",
+                        &tr("MENU_MAIN"),
+                    );
+                    egui::Popup::menu(&menu).show(|ui| {
+                        let item = |ui: &mut egui::Ui, key: &str, keys: &str| {
+                            ui.add(egui::Button::new(tr(key)).shortcut_text(keys))
+                                .clicked()
+                        };
+                        if item(ui, "SETTINGS_TITLE", "") {
+                            menu_pick = Some(MenuPick::Settings);
+                        }
+                        if item(ui, "FILTER_TITLE", "") {
+                            menu_pick = Some(MenuPick::Filters);
+                        }
+                        if item(ui, "HELP_TITLE", "?") {
+                            menu_pick = Some(MenuPick::Shortcuts);
+                        }
+                        ui.separator();
+                        if item(ui, "MENU_REPORT_BUG", "") {
+                            menu_pick = Some(MenuPick::ReportBug);
+                        }
+                        if item(ui, "MENU_ABOUT", "") {
+                            menu_pick = Some(MenuPick::About);
+                        }
+                        ui.separator();
+                        if item(ui, "MENU_QUIT", &tr("HELP_KEYS_QUIT")) {
+                            menu_pick = Some(MenuPick::Quit);
+                        }
+                    });
                     if glyph_toolbar_button(
                         ui,
                         ButtonRole::Toggle { on: settings_open },
@@ -323,6 +432,15 @@ impl DiskScanApp {
 
         self.path_input = path_input;
         self.path_input_focused = path_input_focused;
+        match menu_pick {
+            Some(MenuPick::Settings) => self.show_settings = true,
+            Some(MenuPick::Filters) => self.show_filters = true,
+            Some(MenuPick::Shortcuts) => self.table.show_help = true,
+            Some(MenuPick::ReportBug) => open_link(NEW_ISSUE_URL),
+            Some(MenuPick::About) => self.show_about = true,
+            Some(MenuPick::Quit) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            None => {}
+        }
         if settings_toggled {
             self.show_settings = !self.show_settings;
         }
@@ -2562,6 +2680,34 @@ mod typed_path_tests {
         assert_eq!(typed_path("~"), home_dir());
         assert_eq!(typed_path(" ~/x "), home_dir().join("x"));
         assert_eq!(typed_path("~user"), PathBuf::from("~user"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod about_tests {
+    use super::*;
+
+    /// The installed licenses file wins (the AppImage's before the
+    /// system's); with none, the project's page.
+    #[test]
+    fn third_party_licenses_are_found() {
+        let dir = std::env::temp_dir().join(format!("spacescan-about-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (app, system) = (dir.join("app"), dir.join("system"));
+        let file = "usr/share/doc/spacescan/THIRD-PARTY-LICENSES.html";
+        let page = format!("{WEBSITE_URL}/blob/main/THIRD-PARTY-LICENSES.html");
+        assert_eq!(licenses_in([app.clone(), system.clone()]), page);
+        std::fs::create_dir_all(system.join(file).parent().unwrap()).unwrap();
+        std::fs::write(system.join(file), "x").unwrap();
+        let both = || licenses_in([app.clone(), system.clone()]);
+        assert_eq!(both(), system.join(file).display().to_string());
+        // A folder with the file's name is not the file.
+        std::fs::create_dir_all(app.join(file)).unwrap();
+        assert_eq!(both(), system.join(file).display().to_string());
+        std::fs::remove_dir(app.join(file)).unwrap();
+        std::fs::write(app.join(file), "x").unwrap();
+        assert_eq!(both(), app.join(file).display().to_string());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

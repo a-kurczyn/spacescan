@@ -55,7 +55,7 @@ ERR_DATE_TZ='%s' はローカルのタイムゾーンに存在しません
 ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
-SETTINGS_TITLE=グラフの設定
+SETTINGS_TITLE=設定
 SETTINGS_DEPTH_GROUPING=深さとグループ化
 SETTINGS_DEPTH_LEVELS=表示する階層数
 SETTINGS_MIN_SLICE_ANGLE=スライスの最小角度 (°)
@@ -214,6 +214,16 @@ ERR_LANG_FILE=言語ファイル %s を使えません (%s)。組み込みの言
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=キーボードショートカット
 HELP_CLOSE=閉じる
+MENU_MAIN=メインメニュー
+MENU_REPORT_BUG=不具合を報告
+MENU_ABOUT=SpaceScan について
+MENU_QUIT=終了
+ABOUT_VERSION=バージョン %s
+ABOUT_DESCRIPTION=ディスクの容量を何が使っているかを確認できます。
+ABOUT_FREE_SOFTWARE=SpaceScan は GNU 一般公衆利用許諾書バージョン 3 のみのもとで提供されるフリーソフトウェアです。一切の保証はありません。
+ABOUT_WEBSITE=ウェブサイト
+ABOUT_LICENSE_LINK=ライセンス (GPL-3.0)
+ABOUT_THIRD_PARTY=サードパーティのライセンス
 HELP_SECTION_MOVE=移動
 HELP_SECTION_SORT=並べ替えと列
 HELP_SECTION_ACT=操作
@@ -265,6 +275,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=選択を解除、または詳細を閉じる
 HELP_KEYS_HELP=?
 HELP_HELP=このヘルプ
+HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=カテゴリー

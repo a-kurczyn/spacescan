@@ -55,7 +55,7 @@ ERR_DATE_TZ='%s' 在本地时区中不存在
 ERR_FIELD_PREFIX=%s：%s
 
 # ---- Settings panel ----
-SETTINGS_TITLE=图表设置
+SETTINGS_TITLE=设置
 SETTINGS_DEPTH_GROUPING=深度与分组
 SETTINGS_DEPTH_LEVELS=显示的层级数
 SETTINGS_MIN_SLICE_ANGLE=扇区最小角度 (°)
@@ -214,6 +214,16 @@ ERR_LANG_FILE=无法使用语言文件 %s（%s）；改用内置语言。
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=键盘快捷键
 HELP_CLOSE=关闭
+MENU_MAIN=主菜单
+MENU_REPORT_BUG=报告错误
+MENU_ABOUT=关于 SpaceScan
+MENU_QUIT=退出
+ABOUT_VERSION=版本 %s
+ABOUT_DESCRIPTION=查看是什么占用了磁盘空间。
+ABOUT_FREE_SOFTWARE=SpaceScan 是自由软件，仅依据 GNU 通用公共许可证第 3 版发布，不提供任何担保。
+ABOUT_WEBSITE=网站
+ABOUT_LICENSE_LINK=许可证 (GPL-3.0)
+ABOUT_THIRD_PARTY=第三方许可证
 HELP_SECTION_MOVE=移动
 HELP_SECTION_SORT=排序与列
 HELP_SECTION_ACT=操作
@@ -265,6 +275,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=清除标记，或关闭详情
 HELP_KEYS_HELP=?
 HELP_HELP=本帮助
+HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=分类

@@ -55,7 +55,7 @@ ERR_DATE_TZ='%s' non esiste nel fuso orario locale
 ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
-SETTINGS_TITLE=Impostazioni del grafico
+SETTINGS_TITLE=Impostazioni
 SETTINGS_DEPTH_GROUPING=Profondità e raggruppamento
 SETTINGS_DEPTH_LEVELS=Livelli di profondità mostrati
 SETTINGS_MIN_SLICE_ANGLE=Angolo minimo di uno spicchio (°)
@@ -214,6 +214,16 @@ ERR_LANG_FILE=Impossibile usare il file di lingua %s (%s); in uso la lingua inte
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Scorciatoie da tastiera
 HELP_CLOSE=Chiudi
+MENU_MAIN=Menu principale
+MENU_REPORT_BUG=Segnala un errore
+MENU_ABOUT=Informazioni su SpaceScan
+MENU_QUIT=Esci
+ABOUT_VERSION=Versione %s
+ABOUT_DESCRIPTION=Scopri cosa occupa lo spazio dei tuoi dischi.
+ABOUT_FREE_SOFTWARE=SpaceScan è software libero sotto la GNU General Public License, solo versione 3. Viene fornito senza alcuna garanzia.
+ABOUT_WEBSITE=Sito web
+ABOUT_LICENSE_LINK=Licenza (GPL-3.0)
+ABOUT_THIRD_PARTY=Licenze di terze parti
 HELP_SECTION_MOVE=Spostarsi
 HELP_SECTION_SORT=Ordinamento e colonne
 HELP_SECTION_ACT=Azioni
@@ -265,6 +275,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Togli le selezioni, o chiudi i dettagli
 HELP_KEYS_HELP=?
 HELP_HELP=Questo aiuto
+HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=Categorie

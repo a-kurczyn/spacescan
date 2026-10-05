@@ -424,7 +424,7 @@ pub(crate) struct TableState {
     jump: Option<String>,
     jump_focus_pending: bool,
     show_info: bool,
-    show_help: bool,
+    pub(crate) show_help: bool,
 }
 
 impl Default for TableState {
@@ -526,6 +526,7 @@ const HELP_ROWS: &[(&str, &[(&str, &str)])] = &[
             ("HELP_KEYS_INFO", "HELP_INFO"),
             ("HELP_KEYS_ESC", "HELP_ESC"),
             ("HELP_KEYS_HELP", "HELP_HELP"),
+            ("HELP_KEYS_QUIT", "MENU_QUIT"),
         ],
     ),
 ];
@@ -1284,13 +1285,10 @@ impl DiskScanApp {
         }
     }
 
-    /// Details panel (i) and help (?), drawn over the main area `area`.
+    /// Details panel (i), drawn over the main area `area`.
     pub(crate) fn table_overlays(&mut self, ctx: &egui::Context, area: egui::Rect) {
         if self.table.show_info && !self.scanning {
             self.info_panel(ctx, area);
-        }
-        if self.table.show_help {
-            self.help_overlay(ctx);
         }
     }
 
@@ -1355,24 +1353,31 @@ impl DiskScanApp {
             });
     }
 
-    fn help_overlay(&mut self, ctx: &egui::Context) {
+    /// The keyboard shortcuts ("?" or the main menu).
+    pub(crate) fn help_overlay(&mut self, ctx: &egui::Context) {
         let modal = egui::Modal::new("table_help".into()).show(ctx, |ui| {
             ui.set_max_width(560.0);
             ui.heading(tr("HELP_TITLE"));
-            for (section, rows) in HELP_ROWS {
-                ui.add_space(8.0);
-                ui.strong(tr(section));
-                egui::Grid::new(egui::Id::new("help_grid").with(section))
-                    .num_columns(2)
-                    .spacing([16.0, 4.0])
-                    .show(ui, |ui| {
-                        for (keys, desc) in *rows {
-                            ui.label(egui::RichText::new(tr(keys)).monospace());
-                            ui.label(tr(desc));
-                            ui.end_row();
-                        }
-                    });
-            }
+            // Scrolls when the window is too short for the whole list.
+            let room = (ctx.content_rect().height() - 140.0).max(120.0);
+            egui::ScrollArea::vertical()
+                .max_height(room)
+                .show(ui, |ui| {
+                    for (section, rows) in HELP_ROWS {
+                        ui.add_space(8.0);
+                        ui.strong(tr(section));
+                        egui::Grid::new(egui::Id::new("help_grid").with(section))
+                            .num_columns(2)
+                            .spacing([16.0, 4.0])
+                            .show(ui, |ui| {
+                                for (keys, desc) in *rows {
+                                    ui.label(egui::RichText::new(tr(keys)).monospace());
+                                    ui.label(tr(desc));
+                                    ui.end_row();
+                                }
+                            });
+                    }
+                });
             ui.add_space(10.0);
             ui.button(tr("HELP_CLOSE")).clicked()
         });
@@ -1395,7 +1400,7 @@ impl DiskScanApp {
             }
             return;
         }
-        if self.typing || self.delete_dialog_open() {
+        if self.typing || self.delete_dialog_open() || self.show_about {
             return;
         }
         use egui::Key;

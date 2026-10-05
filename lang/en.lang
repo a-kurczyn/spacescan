@@ -69,7 +69,7 @@ ERR_DATE_TZ='%s' doesn't exist in the local time zone
 ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
-SETTINGS_TITLE=Chart settings
+SETTINGS_TITLE=Settings
 SETTINGS_DEPTH_GROUPING=Depth & grouping
 SETTINGS_DEPTH_LEVELS=Depth levels shown
 SETTINGS_MIN_SLICE_ANGLE=Min slice angle (°)
@@ -230,6 +230,16 @@ ERR_LANG_FILE=Couldn't use the language file %s (%s); using the built-in languag
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=Keyboard shortcuts
 HELP_CLOSE=Close
+MENU_MAIN=Main menu
+MENU_REPORT_BUG=Report a bug
+MENU_ABOUT=About SpaceScan
+MENU_QUIT=Quit
+ABOUT_VERSION=Version %s
+ABOUT_DESCRIPTION=See what takes the space on your disks.
+ABOUT_FREE_SOFTWARE=SpaceScan is free software under the GNU General Public License, version 3 only. It comes with absolutely no warranty.
+ABOUT_WEBSITE=Website
+ABOUT_LICENSE_LINK=License (GPL-3.0)
+ABOUT_THIRD_PARTY=Third-party licenses
 HELP_SECTION_MOVE=Moving around
 HELP_SECTION_SORT=Sorting and columns
 HELP_SECTION_ACT=Actions
@@ -281,6 +291,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=Clear marks, or close the details
 HELP_KEYS_HELP=?
 HELP_HELP=This help
+HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=Categories

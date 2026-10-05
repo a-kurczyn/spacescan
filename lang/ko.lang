@@ -55,7 +55,7 @@ ERR_DATE_TZ='%s'은(는) 현지 시간대에 존재하지 않습니다
 ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
-SETTINGS_TITLE=차트 설정
+SETTINGS_TITLE=설정
 SETTINGS_DEPTH_GROUPING=깊이와 묶기
 SETTINGS_DEPTH_LEVELS=표시할 단계 수
 SETTINGS_MIN_SLICE_ANGLE=조각 최소 각도 (°)
@@ -214,6 +214,16 @@ ERR_LANG_FILE=언어 파일 %s을(를) 쓸 수 없습니다 (%s). 내장 언어�
 # ---- Keyboard shortcuts overlay (?) ----
 HELP_TITLE=단축키
 HELP_CLOSE=닫기
+MENU_MAIN=주 메뉴
+MENU_REPORT_BUG=버그 신고
+MENU_ABOUT=SpaceScan 정보
+MENU_QUIT=끝내기
+ABOUT_VERSION=버전 %s
+ABOUT_DESCRIPTION=디스크 공간을 무엇이 차지하는지 확인하세요.
+ABOUT_FREE_SOFTWARE=SpaceScan은 GNU 일반 공중 사용 허가서 버전 3만을 따르는 자유 소프트웨어입니다. 어떠한 보증도 제공하지 않습니다.
+ABOUT_WEBSITE=웹사이트
+ABOUT_LICENSE_LINK=라이선스 (GPL-3.0)
+ABOUT_THIRD_PARTY=서드파티 라이선스
 HELP_SECTION_MOVE=이동
 HELP_SECTION_SORT=정렬과 열
 HELP_SECTION_ACT=동작
@@ -265,6 +275,7 @@ HELP_KEYS_ESC=Esc
 HELP_ESC=표시 해제, 또는 자세한 정보 닫기
 HELP_KEYS_HELP=?
 HELP_HELP=이 도움말
+HELP_KEYS_QUIT=Ctrl+Q
 
 # ---- Categories (bar beside the contents table) ----
 SUMMARY_CATEGORIES=분류
