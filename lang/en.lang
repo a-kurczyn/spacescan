@@ -196,6 +196,7 @@ TABLE_TAG_FOLDER_COUNTS=%s, %s
 TABLE_TAG_FLAT_SOME=first %s of %s files from all subfolders
 TABLE_TAG_FLAT_ON_FINISH=flat list when the scan finishes
 TABLE_TAG_SCANNING=sizes so far · opening folders, delete and trash wait for the scan to finish
+TABLE_TAG_SORTING=sorting…
 TABLE_TAG_DOTFILES_HIDDEN=dotfiles hidden (%s)
 TABLE_TAG_MARKED=%s marked (%s)
 TABLE_JUMP=Jump to:

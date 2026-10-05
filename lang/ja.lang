@@ -180,6 +180,7 @@ TABLE_TAG_FOLDER_COUNTS=%s、%s
 TABLE_TAG_FLAT_SOME=先頭 %s 件 (すべてのサブフォルダーのファイル全 %s 件中)
 TABLE_TAG_FLAT_ON_FINISH=スキャン完了後にフラット表示
 TABLE_TAG_SCANNING=途中のサイズ · フォルダーを開く、削除、ゴミ箱はスキャン完了後
+TABLE_TAG_SORTING=並べ替え中…
 TABLE_TAG_DOTFILES_HIDDEN=ドットファイル非表示 (%s)
 TABLE_TAG_MARKED=%s 件選択 (%s)
 TABLE_JUMP=移動先:

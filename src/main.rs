@@ -238,11 +238,14 @@ struct DiskScanApp {
     /// The tree with `filter` applied but not `pick`: what the left panel
     /// breaks down, so every category and extension stays clickable.
     cat_base: Option<Arc<Node>>,
-    /// Category breakdown of the viewed folder, cached per (folder, tree_gen).
+    /// Category breakdown of the viewed folder, made from `cat_base`: for
+    /// (folder, base_gen, measure in use).
     cat_breakdown: Vec<CategoryRow>,
     /// The extensions table's rows, made from `cat_breakdown`.
     ext_rows: Option<panels::ExtRows>,
-    cat_breakdown_for: Option<(PathBuf, u64)>,
+    cat_breakdown_for: Option<(PathBuf, u64, bool)>,
+    /// Counts changes to `cat_base`, for what's made from it.
+    base_gen: u64,
     /// The path bar is a text field (else clickable folder names).
     path_editing: bool,
     path_edit_focus_pending: bool,
@@ -444,6 +447,7 @@ impl Default for DiskScanApp {
             cat_breakdown: Vec::new(),
             ext_rows: None,
             cat_breakdown_for: None,
+            base_gen: 0,
             // Largest first, like the chart.
             contents_sort: SortState {
                 column: SortColumn::Size,
@@ -579,7 +583,8 @@ impl DiskScanApp {
         let (tx, rx) = channel();
         self.scan_rx = Some(rx);
         // Every folder and file counts in the live tree as it's read.
-        let live = Arc::new(LiveTree::new(self.cats.clone()));
+        // Made for the scan threads: one counter shard each.
+        let live = Arc::new(scan_pool().install(|| LiveTree::new(self.cats.clone())));
         self.scan_cats = Some(self.cats.clone());
         self.live_tree = Some(live.clone());
         self.live_read_at = None;
@@ -622,7 +627,7 @@ impl DiskScanApp {
                 in_file_order: is_rotational(&path),
                 live: Some(&live),
             };
-            let root = scan_dir(&path, &ctx);
+            let root = scan_pool().install(|| scan_dir(&path, &ctx));
             if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 let counted_at = std::mem::take(&mut *ctx.hard_links.counted_at.lock().unwrap());
                 let secs = start.elapsed().as_secs_f64();
@@ -666,8 +671,11 @@ impl DiskScanApp {
             return;
         };
         let view_paths = self.view_paths(&root);
-        drop(root);
-        self.cat_base = None;
+        release_tree(root);
+        if let Some(base) = self.cat_base.take() {
+            release_tree(base);
+        }
+        self.finish_sorting();
         if let Some(full) = &mut self.full_root {
             scan::sort_tree_by_measure(Arc::make_mut(full), files);
         }
@@ -678,33 +686,62 @@ impl DiskScanApp {
 
     /// Rebuilds the displayed tree from the last scan, the filter and the
     /// picked category, keeping each view in the zoom history on the same
-    /// folder (or its nearest remaining parent).
+    /// folder (or its nearest remaining parent). For when the tree, the
+    /// filter or the measure changed; `repick` when only the pick did.
     fn rebuild_view_tree(&mut self) {
         self.tree_gen += 1;
         let Some(full) = self.full_root.clone() else {
             return;
         };
-        let empty = |full: &Node| {
-            let mut n = empty_node();
-            n.name = full.name.clone();
-            n.copy_place(full);
-            n
-        };
         let base = match &self.filter {
-            Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| empty(&full))),
-            None => full.clone(),
+            Some(f) => Arc::new(filter_tree(&full, f).unwrap_or_else(|| empty_like(&full))),
+            None => full,
+        };
+        if let Some(old) = self.cat_base.replace(base) {
+            release_tree(old);
+        }
+        self.base_gen += 1;
+        self.show_picked();
+    }
+
+    /// The picked category changed: the displayed tree is made again from
+    /// the filtered one, which stays (as does its category breakdown).
+    fn repick(&mut self) {
+        if self.cat_base.is_none() {
+            return self.rebuild_view_tree();
+        }
+        self.tree_gen += 1;
+        self.show_picked();
+    }
+
+    /// Shows `cat_base` with the picked category applied, keeping each view
+    /// in the zoom history on the same folder (or its nearest remaining
+    /// parent).
+    fn show_picked(&mut self) {
+        let Some(base) = self.cat_base.clone() else {
+            return;
         };
         let new_root = match &self.pick {
             Some(pick) => {
                 let cats = self.cats.clone();
-                Arc::new(
-                    filter_tree_by(&base, &|n: &Node| cats.pick_matches(pick, &n.name))
-                        .unwrap_or_else(|| empty(&full)),
-                )
+                // A picked category: the one each file was given when it was
+                // scanned, if that was with these categories (much faster
+                // than reading every name again).
+                let stored = self
+                    .tree_cats
+                    .as_ref()
+                    .is_some_and(|c| Arc::ptr_eq(c, &cats));
+                let kept = match pick {
+                    Pick::Category(c) if stored && cat_byte(*c) != NO_CAT => {
+                        let byte = cat_byte(*c);
+                        filter_tree_by(&base, &|n: &Node| n.cat == byte)
+                    }
+                    _ => filter_tree_by(&base, &|n: &Node| cats.pick_matches(pick, &n.name)),
+                };
+                Arc::new(kept.unwrap_or_else(|| empty_like(&base)))
             }
-            None => base.clone(),
+            None => base,
         };
-        self.cat_base = Some(base);
         if let Some(old) = &self.root {
             self.view_stack = self
                 .view_stack
@@ -713,8 +750,9 @@ impl DiskScanApp {
                 .collect();
             self.view_stack.dedup();
         }
-        self.root = Some(new_root);
-        self.cat_breakdown_for = None;
+        if let Some(old) = self.root.replace(new_root) {
+            release_tree(old);
+        }
         self.selection = None; // child indices may have changed
     }
 
@@ -842,11 +880,16 @@ impl DiskScanApp {
     /// messages are dropped, and the live tree is freed (its memory
     /// returned).
     fn scan_ended(&mut self) {
+        self.scan_ended_freeing(());
+    }
+
+    /// `scan_ended`, also freeing `retired` (the tree the scan replaced) with
+    /// the live tree, before the memory is returned to the system.
+    fn scan_ended_freeing<T: Send + 'static>(&mut self, retired: T) {
         self.scanning = false;
         self.scan_rx = None;
-        self.partial_root = empty_node();
-        self.live_tree = None;
-        after_tree_dropped();
+        let partial = std::mem::replace(&mut self.partial_root, empty_node());
+        free_in_background((partial, self.live_tree.take(), retired));
     }
 
     /// Drains completed on-demand MIME lookups into the cache.
@@ -1057,7 +1100,9 @@ impl DiskScanApp {
     /// The scan finished with the tree `node`, after `secs` seconds;
     /// `counted_at` is where each file with several hard links was counted.
     fn scan_done(&mut self, mut node: Node, secs: f64, counted_at: Vec<((u64, u64), PathBuf)>) {
-        self.live_tree = None;
+        // Freed with the tree it replaces, when the scan has ended.
+        let live = self.live_tree.take();
+        let mut retired = None;
         self.colored_at = Some(Instant::now());
         let scan_cats = self.scan_cats.take();
         match &self.graft {
@@ -1090,19 +1135,39 @@ impl DiskScanApp {
         if self.graft.is_some() {
             self.finish_graft(node);
         } else {
-            self.full_root = Some(Arc::new(node));
+            retired = self.full_root.replace(Arc::new(node));
             self.rebuild_view_tree();
         }
         self.status = self
             .status_after_rescan
             .take()
             .unwrap_or_else(|| trf("STATUS_SCAN_COMPLETED", &[&format!("{secs:.1}")]));
-        self.scan_ended();
+        self.scan_ended_freeing((live, retired));
     }
+}
+
+/// An empty folder in `n`'s place: what a filter or pick leaves when
+/// nothing in `n` matches.
+fn empty_like(n: &Node) -> Node {
+    let mut e = empty_node();
+    e.name = n.name.clone();
+    e.copy_place(n);
+    e
 }
 
 impl eframe::App for DiskScanApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.frame_ui(ui);
+    }
+
+    fn on_exit(&mut self) {
+        self.save_config_now();
+    }
+}
+
+impl DiskScanApp {
+    /// One frame of the whole app.
+    fn frame_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         category::COLOR_BLIND_SAFE.store(
             self.settings.color_blind_safe,
@@ -1376,10 +1441,6 @@ impl eframe::App for DiskScanApp {
         self.confirm_dialog(&ctx);
         self.transfer_ui(&ctx);
     }
-
-    fn on_exit(&mut self) {
-        self.save_config_now();
-    }
 }
 
 /// Hides one harmless panic: with no accessibility service running, the
@@ -1458,4 +1519,456 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+
+    /// The files left by picking each category: the same whether the
+    /// categories the scan stored are used or every name is read again; and
+    /// the stored ones are what's used when the scan had these categories.
+    #[test]
+    fn stored_categories_pick_the_same_files() {
+        let names = [
+            "/t/a/x.mkv",
+            "/t/a/y.txt",
+            "/t/a/b/z.JPG",
+            "/t/q.mp3",
+            "/t/r.rs",
+            "/t/none",
+            "/t/c/d/e.eml",
+            "/t/c/f.zip",
+        ];
+        let tree = |cats: &CategoryModel, misfiled: bool| {
+            let file = |p: &str| {
+                let mut n = test_node(p, 10, false, vec![]);
+                n.cat = cat_byte(cats.of_name(&n.name));
+                // Stored as something its name doesn't say.
+                if misfiled && p.ends_with("y.txt") {
+                    n.cat = cat_byte(cats.of_name("v.mkv"));
+                }
+                n
+            };
+            let d = test_node("/t/c/d", 10, true, vec![file(names[6])]);
+            let c = test_node("/t/c", 20, true, vec![d, file(names[7])]);
+            let b = test_node("/t/a/b", 10, true, vec![file(names[2])]);
+            let a = test_node("/t/a", 30, true, vec![file(names[0]), file(names[1]), b]);
+            let rest = names[3..6].iter().map(|p| file(p));
+            test_node("/t", 80, true, [a, c].into_iter().chain(rest).collect())
+        };
+        let files = |app: &DiskScanApp| {
+            fn walk(n: &Node, out: &mut Vec<PathBuf>) {
+                for c in n.children.iter() {
+                    if c.is_dir {
+                        walk(c, out);
+                    } else {
+                        out.push(c.path());
+                    }
+                }
+            }
+            let mut out = Vec::new();
+            walk(app.root.as_ref().unwrap(), &mut out);
+            out.sort();
+            out
+        };
+        let picked = |misfiled: bool, stored: bool, c: Category| {
+            let mut app = DiskScanApp::default();
+            app.full_root = Some(Arc::new(tree(&app.cats, misfiled)));
+            app.tree_cats = stored.then(|| app.cats.clone());
+            app.pick = Some(Pick::Category(c));
+            app.rebuild_view_tree();
+            files(&app)
+        };
+        let cats = CategoryModel::defaults();
+        for c in 0..=cats.other().0 {
+            assert_eq!(
+                picked(false, true, Category(c)),
+                picked(false, false, Category(c))
+            );
+        }
+        let video = cats.of_name("v.mkv");
+        assert_eq!(
+            picked(true, true, video),
+            [PathBuf::from("/t/a/x.mkv"), PathBuf::from("/t/a/y.txt")]
+        );
+        assert_eq!(picked(true, false, video), [PathBuf::from("/t/a/x.mkv")]);
+    }
+
+    /// Changing only the pick keeps the filtered tree and its category
+    /// breakdown, and shows what a full rebuild would.
+    #[test]
+    fn a_new_pick_keeps_the_filtered_tree() {
+        let file = |p: &str| test_node(p, 10, false, vec![]);
+        let tree = || {
+            let a = test_node(
+                "/t/a",
+                30,
+                true,
+                vec![file("/t/a/ax.mkv"), file("/t/a/ay.txt"), file("/t/a/b.mkv")],
+            );
+            test_node("/t", 50, true, vec![a, file("/t/a1.txt"), file("/t/c.mkv")])
+        };
+        let shown = |app: &DiskScanApp| {
+            fn walk(n: &Node, out: &mut Vec<PathBuf>) {
+                out.push(n.path());
+                for c in n.children.iter() {
+                    walk(c, out);
+                }
+            }
+            let mut out = Vec::new();
+            walk(app.root.as_ref().unwrap(), &mut out);
+            out.sort();
+            out
+        };
+        let mut app = DiskScanApp {
+            full_root: Some(Arc::new(tree())),
+            ..DiskScanApp::default()
+        };
+        app.filter_form.name = "a*".into();
+        app.apply_filter_form();
+        let root = app.root.clone().unwrap();
+        app.refresh_cat_breakdown(&root);
+        let (base, made_for) = (app.cat_base.clone().unwrap(), app.cat_breakdown_for.clone());
+        for pick in [
+            Some(app.cats.of_name("x.mkv")),
+            Some(app.cats.of_name("x.txt")),
+            None,
+        ] {
+            app.pick = pick.map(Pick::Category);
+            app.repick();
+            assert!(
+                Arc::ptr_eq(&base, app.cat_base.as_ref().unwrap()),
+                "base kept"
+            );
+            let root = app.root.clone().unwrap();
+            app.refresh_cat_breakdown(&root);
+            assert_eq!(app.cat_breakdown_for, made_for, "breakdown kept");
+
+            let mut fresh = DiskScanApp {
+                full_root: Some(Arc::new(tree())),
+                ..DiskScanApp::default()
+            };
+            fresh.filter_form.name = "a*".into();
+            fresh.pick = app.pick.clone();
+            fresh.apply_filter_form();
+            assert_eq!(shown(&app), shown(&fresh));
+        }
+    }
+}
+
+/// Frame times of the whole app on a big tree while the user interacts:
+/// hovering, sliders, zoom, filters, picks, the table and a live scan. Run
+/// with `cargo test --release frame_bench -- --ignored --nocapture`;
+/// $SPACESCAN_FILES sets the tree's size (default 500,000 files), and
+/// $SPACESCAN_BENCH a folder to scan live meanwhile.
+#[cfg(test)]
+mod frame_bench {
+    use super::*;
+    use std::time::Duration;
+
+    /// A tree like a big home folder: ten top folders, each with folders of
+    /// folders of 50 files of mixed kinds, sizes and ages, `files` in all,
+    /// sorted the way a scan sorts them.
+    fn synthetic_tree(files: usize, cats: &CategoryModel) -> Node {
+        const EXTS: [&str; 10] = [
+            "mkv", "jpg", "txt", "rs", "zip", "mp3", "pdf", "eml", "bin", "json",
+        ];
+        const PER_FOLDER: usize = 50;
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let mut random = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let now = now_secs();
+        let folder = |path: &str, mut children: Vec<Node>| {
+            scan::sort_largest_first(&mut children);
+            let mut n = test_node(path, 0, true, Vec::new());
+            n.size = children.iter().map(|c| c.size).sum();
+            n.file_count = children.iter().map(|c| c.file_count).sum();
+            n.children = children.into();
+            (n.mode, n.mtime, n.ctime) = (0o40755, now, now);
+            n
+        };
+        let leaves = files.div_ceil(PER_FOLDER);
+        let subs = leaves.div_ceil(10 * 10).max(1);
+        let mut tops = Vec::new();
+        for t in 0..10 {
+            let mut mids = Vec::new();
+            for m in 0..10 {
+                let mut leaf_folders = Vec::new();
+                for s in 0..subs {
+                    let mut kids = Vec::new();
+                    for f in 0..PER_FOLDER {
+                        let r = random();
+                        let ext = EXTS[(r % 10) as usize];
+                        let path = format!("/bench/t{t}/m{m}/s{s}/f{f}.{ext}");
+                        let mut n = test_node(&path, (r >> 8) % (1 << 24), false, vec![]);
+                        // Classified as a scan does.
+                        n.cat = cat_byte(cats.of_name(&n.name));
+                        n.ctime = now - ((r >> 40) % (3 * 365 * 86_400)) as i64;
+                        (n.mtime, n.mode) = (n.ctime, 0o100644);
+                        kids.push(n);
+                    }
+                    leaf_folders.push(folder(&format!("/bench/t{t}/m{m}/s{s}"), kids));
+                }
+                mids.push(folder(&format!("/bench/t{t}/m{m}"), leaf_folders));
+            }
+            tops.push(folder(&format!("/bench/t{t}"), mids));
+        }
+        folder("/bench", tops)
+    }
+
+    /// Frame times: the app's work, and turning its shapes into triangles.
+    struct Times {
+        run: Vec<Duration>,
+        tessellate: Vec<Duration>,
+    }
+
+    /// Draws `warm` frames, then `n` timed ones, of the whole app in a
+    /// 1600 × 1000 window, after `before` has changed the app (or given
+    /// input events) for each.
+    fn frames(
+        app: &mut DiskScanApp,
+        ctx: &egui::Context,
+        warm: usize,
+        n: usize,
+        mut before: impl FnMut(&mut DiskScanApp, usize) -> Vec<egui::Event>,
+    ) -> Times {
+        let mut times = Times {
+            run: Vec::new(),
+            tessellate: Vec::new(),
+        };
+        for i in 0..warm + n {
+            let events = before(app, i);
+            // Nothing is ever saved: the settings count as saved as they are.
+            app.saved_config = Some(app.current_config());
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1600.0, 1000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let t = Instant::now();
+            let out = headless_frame(ctx, input, |ui| app.frame_ui(ui));
+            let run = t.elapsed();
+            let t = Instant::now();
+            std::hint::black_box(ctx.tessellate(out.shapes, out.pixels_per_point));
+            // The first frames settle the layout; they aren't counted.
+            if i >= warm {
+                times.run.push(run);
+                times.tessellate.push(t.elapsed());
+            }
+        }
+        times
+    }
+
+    fn report(name: &str, t: &Times) {
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        let stats = |v: &[Duration]| {
+            let mut v = v.to_vec();
+            v.sort();
+            let at = |q: f64| ms(v[((v.len() - 1) as f64 * q) as usize]);
+            (at(0.5), at(0.95), ms(*v.last().unwrap()))
+        };
+        let total: Vec<Duration> = t
+            .run
+            .iter()
+            .zip(&t.tessellate)
+            .map(|(a, b)| *a + *b)
+            .collect();
+        let (med, p95, max) = stats(&total);
+        let (tess, _, _) = stats(&t.tessellate);
+        eprintln!(
+            "{name:<34} median {med:>7.1} ms   p95 {p95:>7.1} ms   max {max:>7.1} ms   (tessellate {tess:>5.1} ms)"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn frame_bench() {
+        let files = std::env::var("SPACESCAN_FILES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(500_000);
+        let t = Instant::now();
+        let mut app = DiskScanApp::default();
+        let tree = synthetic_tree(files, &app.cats);
+        eprintln!(
+            "tree: {} files in {} top folders, made in {:?}",
+            tree.file_count,
+            tree.children.len(),
+            t.elapsed()
+        );
+        let ctx = egui::Context::default();
+        // As after a scan with the categories in use.
+        app.tree_cats = Some(app.cats.clone());
+        app.full_root = Some(Arc::new(tree));
+        app.rebuild_view_tree();
+        let cats = app.cats.clone();
+        let center = Pos2::new(800.0, 520.0);
+        let circle = |i: usize| {
+            let a = i as f32 * 0.21;
+            vec![egui::Event::PointerMoved(
+                center + Vec2::new(a.cos(), a.sin()) * (120.0 + (i % 7) as f32 * 40.0),
+            )]
+        };
+        let n = 40;
+
+        report("chart, still", &frames(&mut app, &ctx, 3, n, |_, _| vec![]));
+        report(
+            "chart, hover",
+            &frames(&mut app, &ctx, 3, n, |_, i| circle(i)),
+        );
+        report(
+            "chart, depth slider",
+            &frames(&mut app, &ctx, 3, n, |a, i| {
+                a.settings.max_render_depth = 3 + i % 10;
+                vec![]
+            }),
+        );
+        app.settings.max_render_depth = Settings::default().max_render_depth;
+        report(
+            "chart, smallest slice slider",
+            &frames(&mut app, &ctx, 3, n, |a, i| {
+                a.settings.min_segment_angle_deg = 0.1 + (i % 40) as f32 * 0.1;
+                vec![]
+            }),
+        );
+        app.settings.min_segment_angle_deg = Settings::default().min_segment_angle_deg;
+        report(
+            "chart, zoom and pan",
+            &frames(&mut app, &ctx, 3, n, |a, i| {
+                a.chart_scale = 1.0 + (i % 30) as f32 * 0.1;
+                a.chart_offset = Vec2::new((i % 9) as f32 * 20.0, 0.0);
+                vec![]
+            }),
+        );
+        (app.chart_scale, app.chart_offset) = (1.0, Vec2::ZERO);
+        report(
+            "chart, filter applied",
+            &frames(&mut app, &ctx, 3, n, |a, i| {
+                a.filter_form.name = ["*.mkv", "*.txt", "f1*"][i % 3].to_string();
+                a.apply_filter_form();
+                vec![]
+            }),
+        );
+        app.filter_form = FilterForm::default();
+        app.apply_filter_form();
+        report(
+            "chart, category picked",
+            &frames(&mut app, &ctx, 3, n, |a, i| {
+                a.pick = Some(Pick::Category(Category(i % (cats.other().0 + 1))));
+                a.repick();
+                vec![]
+            }),
+        );
+        app.pick = None;
+        app.repick();
+
+        app.summary_view = true;
+        report("table, still", &frames(&mut app, &ctx, 3, n, |_, _| vec![]));
+        let key = |k: egui::Key| egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        report(
+            "table, cursor moving",
+            &frames(&mut app, &ctx, 3, n, |_, _| vec![key(egui::Key::ArrowDown)]),
+        );
+        app.table.flat = true;
+        for all in [false, true] {
+            app.settings.flat_all = all;
+            let rows = if all { "all files" } else { "first 1,000" };
+            report(
+                &format!("table, flat list ({rows})"),
+                &frames(&mut app, &ctx, 3, n, |_, _| vec![]),
+            );
+            report(
+                &format!("table, flat list ({rows}) re-sorted"),
+                &frames(&mut app, &ctx, 3, n, |a, i| {
+                    a.contents_sort.column = [SortColumn::Size, SortColumn::Name][i % 2];
+                    vec![]
+                }),
+            );
+        }
+        // How long a re-sorted list of every file takes to show, sorted on
+        // another thread, with frames at 60 a second meanwhile.
+        app.settings.flat_all = true;
+        for column in [SortColumn::Name, SortColumn::Size] {
+            app.contents_sort.column = column;
+            let started = Instant::now();
+            let mut slowest = Duration::ZERO;
+            let mut i = 0;
+            loop {
+                let frame_start = Instant::now();
+                let t = frames(&mut app, &ctx, 0, 1, |_, _| vec![]);
+                slowest = slowest.max(t.run[0] + t.tessellate[0]);
+                i += 1;
+                if !app.table.sorting() || i > 10_000 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(16).saturating_sub(frame_start.elapsed()));
+            }
+            eprintln!(
+                "table, all files re-sorted by {column:?}: shown after {:.0} ms, {i} frames, slowest {:.1} ms",
+                started.elapsed().as_secs_f64() * 1000.0,
+                slowest.as_secs_f64() * 1000.0
+            );
+        }
+        app.table.flat = false;
+        app.settings.flat_all = false;
+        app.contents_sort.column = SortColumn::Size;
+
+        // A live scan of a real folder, frames paced at 60 a second like
+        // the window's while the pointer moves: those that read the live
+        // tree (every 100 ms) are reported apart.
+        if let Some(dir) = std::env::var_os("SPACESCAN_BENCH") {
+            for summary in [false, true] {
+                app.summary_view = summary;
+                app.start_scan(PathBuf::from(&dir));
+                let blank = || Times {
+                    run: Vec::new(),
+                    tessellate: Vec::new(),
+                };
+                let (mut reads, mut others) = (blank(), blank());
+                let started = Instant::now();
+                let mut i = 0;
+                while app.scanning && started.elapsed() < Duration::from_secs(300) {
+                    let frame_start = Instant::now();
+                    let read_before = app.partial_gen;
+                    let t = frames(&mut app, &ctx, 0, 1, |_, j| circle(i + j));
+                    let to = if app.partial_gen != read_before {
+                        &mut reads
+                    } else {
+                        &mut others
+                    };
+                    to.run.extend(t.run);
+                    to.tessellate.extend(t.tessellate);
+                    i += 1;
+                    let left = Duration::from_millis(16).saturating_sub(frame_start.elapsed());
+                    std::thread::sleep(left);
+                }
+                let view = if summary { "table" } else { "chart" };
+                let secs = started.elapsed().as_secs_f64();
+                eprintln!("live scan, {view}: {secs:.1} s, {i} frames");
+                if !reads.run.is_empty() {
+                    report(
+                        &format!("  frames reading the live tree ({})", reads.run.len()),
+                        &reads,
+                    );
+                }
+                if !others.run.is_empty() {
+                    report(&format!("  other frames ({})", others.run.len()), &others);
+                }
+            }
+        }
+    }
 }

@@ -180,6 +180,7 @@ TABLE_TAG_FOLDER_COUNTS=%s, %s
 TABLE_TAG_FLAT_SOME=primeiros %s de %s arquivos de todas as subpastas
 TABLE_TAG_FLAT_ON_FINISH=lista plana ao terminar a análise
 TABLE_TAG_SCANNING=tamanhos parciais · abrir pastas, excluir e mover para a lixeira aguardam o fim da análise
+TABLE_TAG_SORTING=ordenando…
 TABLE_TAG_DOTFILES_HIDDEN=arquivos ocultos escondidos (%s)
 TABLE_TAG_MARKED=%s marcados (%s)
 TABLE_JUMP=Ir para:

@@ -180,6 +180,7 @@ TABLE_TAG_FOLDER_COUNTS=%s，%s
 TABLE_TAG_FLAT_SOME=前 %s 个（共 %s 个文件，来自所有子文件夹）
 TABLE_TAG_FLAT_ON_FINISH=扫描完成后显示平铺列表
 TABLE_TAG_SCANNING=当前大小 · 打开文件夹、删除和移到回收站需等待扫描完成
+TABLE_TAG_SORTING=正在排序…
 TABLE_TAG_DOTFILES_HIDDEN=已隐藏点文件 (%s)
 TABLE_TAG_MARKED=已标记 %s 项 (%s)
 TABLE_JUMP=跳转到：

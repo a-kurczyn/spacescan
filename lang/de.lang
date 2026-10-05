@@ -180,6 +180,7 @@ TABLE_TAG_FOLDER_COUNTS=%s, %s
 TABLE_TAG_FLAT_SOME=erste %s von %s Dateien aus allen Unterordnern
 TABLE_TAG_FLAT_ON_FINISH=flache Liste nach dem Durchsuchen
 TABLE_TAG_SCANNING=vorläufige Größen · Ordner öffnen, Löschen und Papierkorb warten auf das Ende des Durchsuchens
+TABLE_TAG_SORTING=wird sortiert…
 TABLE_TAG_DOTFILES_HIDDEN=versteckte Dateien ausgeblendet (%s)
 TABLE_TAG_MARKED=%s markiert (%s)
 TABLE_JUMP=Springen zu:

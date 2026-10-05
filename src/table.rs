@@ -87,7 +87,7 @@ impl SortColumn {
 }
 
 /// Everything the table's row order depends on.
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 struct OrderKey {
     /// Bumped on every change to the displayed tree (see `tree_gen`), or,
     /// for the live table during a scan, on every refresh (`live_gen`).
@@ -201,11 +201,60 @@ struct RowOrder {
     flat_files: u64,
     /// The folder's own contents: how many of the listed rows are folders.
     folders: u64,
-    /// Width of the longest name or path in the rows, once measured.
+    /// Width of the longest name or path in the rows, once measured, and
+    /// the rows it's measured on (see `longest_rows`).
     name_width: Option<f32>,
+    longest: Vec<usize>,
     /// The marked rows' total size, and the marks it's for.
     marked_size: Option<(HashSet<PathBuf>, u64)>,
+    /// Rows shown while the ones for a new key are worked out on another
+    /// thread (see `order_for`).
+    pending: bool,
 }
+
+impl RowOrder {
+    /// What the table shows while the rows for `key` are worked out: the
+    /// rows shown so far, if they're of the same tree and folder, else none.
+    fn waiting(shown: Option<RowOrder>, key: OrderKey) -> RowOrder {
+        match shown {
+            Some(mut o)
+                if o.key.tree_gen == key.tree_gen
+                    && o.key.view == key.view
+                    && o.key.live == key.live =>
+            {
+                o.pending = true;
+                o
+            }
+            _ => RowOrder {
+                rows: match key.flat {
+                    Some(_) => Rows::Files(FlatRows {
+                        folders: Vec::new(),
+                        files: Vec::new(),
+                    }),
+                    None => Rows::Children(Vec::new()),
+                },
+                shown_size: 0,
+                shown_files: 0,
+                dotfile_size: 0,
+                flat_files: 0,
+                folders: 0,
+                name_width: None,
+                longest: Vec::new(),
+                marked_size: None,
+                pending: true,
+                key,
+            },
+        }
+    }
+}
+
+/// Rows being worked out on another thread (they carry their key).
+struct Sorting {
+    rows: Receiver<RowOrder>,
+}
+
+/// Flat lists of more files than this are sorted on another thread.
+const SORT_APART: u64 = 200_000;
 
 /// The Name column's text for `node`: its name, or in the flat list its
 /// full path.
@@ -217,26 +266,32 @@ fn row_text(node: &Node, flat: bool) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// Width of the longest name in `rows`. Only the longest names are
-/// measured, so huge folders stay fast.
-fn widest_name(ui: &egui::Ui, rows: &Rows, view: &Node, flat: bool) -> f32 {
+/// The rows with the longest names in `rows` (paths, in the flat list),
+/// the only ones whose width is measured, so huge folders stay fast.
+fn longest_rows(rows: &Rows, view: &Node, flat: bool) -> Vec<usize> {
     const MEASURED: usize = 64;
     // Length in bytes: quick to get, and close enough to pick them.
     let len = |n: &Node| {
         if flat { n.path_len() } else { n.name.len() }
     };
     let mut by_len: Vec<(usize, usize)> = (0..rows.len())
+        .into_par_iter()
         .map(|i| (len(rows.node(view, i)), i))
         .collect();
     if by_len.len() > MEASURED {
         by_len.select_nth_unstable_by(MEASURED, |a, b| b.cmp(a));
         by_len.truncate(MEASURED);
     }
+    by_len.into_iter().map(|(_, i)| i).collect()
+}
+
+/// Width of the longest name of rows `longest` (see `longest_rows`).
+fn widest_name(ui: &egui::Ui, longest: &[usize], rows: &Rows, view: &Node, flat: bool) -> f32 {
     let font = egui::TextStyle::Body.resolve(ui.style());
     let color = ui.visuals().text_color();
-    by_len
+    longest
         .iter()
-        .map(|&(_, i)| {
+        .map(|&i| {
             let text = row_text(rows.node(view, i), flat).into_owned();
             ui.painter()
                 .layout_no_wrap(text, font.clone(), color)
@@ -260,9 +315,61 @@ fn find_cursor(
     if let Some(i) = pos.get().filter(|&i| at(i)) {
         return Some(i);
     }
-    let found = (0..n).find(|&i| at(i));
+    // Where it is in the tree, then which row that is: numbers compared,
+    // not paths, so a re-sorted list of millions finds it at once.
+    let found = place_in(view, cursor).and_then(|(folder, child)| match rows {
+        Rows::Children(idx) if folder.is_empty() => idx.iter().position(|&i| i == child),
+        Rows::Children(_) => None,
+        Rows::Files(flat) => {
+            let f = flat.folders.iter().position(|p| *p == folder)?;
+            flat.files
+                .iter()
+                .position(|&(fo, ch)| fo as usize == f && ch as usize == child)
+        }
+    });
     pos.set(found);
     found
+}
+
+/// Where `path` is under `view`: the child-index path of its folder from
+/// `view`, and its index in that folder; None if it isn't there.
+fn place_in(view: &Node, path: &Path) -> Option<(Vec<usize>, usize)> {
+    let parts = rel_parts(&view.path(), path)?;
+    let (last, folders) = parts.split_last()?;
+    let mut n = view;
+    let mut at = Vec::with_capacity(folders.len());
+    for name in folders {
+        let i = child_named(n, name)?;
+        at.push(i);
+        n = &n.children[i];
+    }
+    Some((at, child_named(n, last)?))
+}
+
+/// Bits of a row's value in a compact sort key: enough for mode, owner and
+/// group together.
+const VALUE_BITS: u32 = 76;
+
+/// `c`'s value for sorting by `sort` (any column but Name), in `VALUE_BITS`
+/// bits, flipped for a descending sort, so smaller always comes first.
+/// Sorting these as plain numbers is much faster than comparing nodes.
+fn sort_value(c: &Node, sort: SortState) -> u128 {
+    let signed = |v: i64| (v as u64 ^ (1 << 63)) as u128;
+    let v = match sort.column {
+        SortColumn::Size => c.size as u128,
+        SortColumn::Files => c.file_count as u128,
+        SortColumn::Modified => signed(c.mtime),
+        SortColumn::Changed => signed(c.ctime),
+        SortColumn::Perms => {
+            ((c.mode & 0o7777) as u128) << 64 | (c.uid as u128) << 32 | c.gid as u128
+        }
+        SortColumn::Name => 0,
+    };
+    if sort.ascending {
+        v
+    } else {
+        ((1 << VALUE_BITS) - 1) - v
+    }
 }
 
 /// Files of a flat list: the files under `view`, leaving out dot-named
@@ -288,7 +395,8 @@ fn flat_files(
         hidden: &'h HashSet<PathBuf>,
         /// Index paths of the folders holding files, from `view`.
         folders: Vec<Vec<usize>>,
-        files: Vec<Found<'a>>,
+        /// The files found, folder by folder.
+        files: Vec<Vec<Found<'a>>>,
         size: u64,
         dot_size: u64,
     }
@@ -309,9 +417,10 @@ fn flat_files(
             } else {
                 let folder = *folder.get_or_insert_with(|| {
                     w.folders.push(at.clone());
+                    w.files.push(Vec::new());
                     (w.folders.len() - 1) as u32
                 });
-                w.files.push(Found {
+                w.files[folder as usize].push(Found {
                     node: c,
                     folder,
                     child: i as u32,
@@ -329,25 +438,11 @@ fn flat_files(
         dot_size: 0,
     };
     walk(&mut w, view, &mut Vec::new(), false);
-    let count = w.files.len() as u64;
+    // The order equal ones keep: folder by folder (in the order each
+    // folder's first file was met), each folder's files in its own order.
+    let files: Vec<Found> = std::mem::take(&mut w.files).into_iter().flatten().collect();
+    let count = files.len() as u64;
 
-    // Ties keep the order the files were found in.
-    let cmp = |a: &Found, b: &Found| {
-        let (x, y) = (a.node, b.node);
-        let by = match sort.column {
-            SortColumn::Size => x.size.cmp(&y.size),
-            SortColumn::Files => x.file_count.cmp(&y.file_count),
-            SortColumn::Modified => x.mtime.cmp(&y.mtime),
-            SortColumn::Changed => x.ctime.cmp(&y.ctime),
-            SortColumn::Perms => {
-                (x.mode & 0o7777, x.uid, x.gid).cmp(&(y.mode & 0o7777, y.uid, y.gid))
-            }
-            SortColumn::Name => natural_cmp(&x.name, &y.name),
-        };
-        let by = if sort.ascending { by } else { by.reverse() };
-        by.then((a.folder, a.child).cmp(&(b.folder, b.child)))
-    };
-    let mut files = w.files;
     let files: Vec<(u32, u32)> = if sort.column == SortColumn::Name {
         // Name keys are built once per file, then used to pick and sort
         // (much faster on long lists than building them at every comparison).
@@ -367,18 +462,130 @@ fn flat_files(
         keyed.par_sort_unstable_by(by_key);
         keyed.into_iter().map(|k| (k.2, k.3)).collect()
     } else {
-        if files.len() > limit {
-            files.select_nth_unstable_by(limit, cmp);
-            files.truncate(limit);
+        // One u128 per file: its value (see `sort_value`) | its place in
+        // `files` (32 bits), so equal ones keep that order.
+        let mut keyed: Vec<u128> = files
+            .par_iter()
+            .enumerate()
+            .map(|(i, f)| sort_value(f.node, sort) << 32 | i as u128)
+            .collect();
+        if keyed.len() > limit {
+            keyed.select_nth_unstable(limit);
+            keyed.truncate(limit);
         }
-        files.par_sort_unstable_by(cmp);
-        files.iter().map(|f| (f.folder, f.child)).collect()
+        keyed.par_sort_unstable();
+        keyed
+            .iter()
+            .map(|k| {
+                let f = &files[(k & 0xFFFF_FFFF) as usize];
+                (f.folder, f.child)
+            })
+            .collect()
     };
     let rows = FlatRows {
         folders: w.folders,
         files,
     };
     (rows, count, w.size, w.dot_size)
+}
+
+/// Filters and sorts `view_node`'s children, or for the flat list all
+/// the files under it, for the table (see `OrderKey`), leaving out
+/// `hidden` items.
+fn order_rows(view_node: &Node, key: OrderKey, hidden: &HashSet<PathBuf>) -> RowOrder {
+    if let Some(limit) = key.flat {
+        let (rows, count, size, dot_size) =
+            flat_files(view_node, key.sort, key.show_dotfiles, hidden, limit);
+        let rows = Rows::Files(rows);
+        return RowOrder {
+            longest: longest_rows(&rows, view_node, true),
+            rows,
+            shown_size: size,
+            shown_files: count,
+            dotfile_size: dot_size,
+            flat_files: count,
+            folders: 0,
+            name_width: None,
+            marked_size: None,
+            pending: false,
+            key,
+        };
+    }
+    let children = &view_node.children;
+    let mut idx: Vec<usize> = (0..children.len())
+        .filter(|&i| {
+            let c = &children[i];
+            (key.show_dotfiles || !c.name.starts_with('.')) && !c.is_in(hidden)
+        })
+        .collect();
+    let cs = key.sort;
+    // Sort keys are built once into compact arrays, then sorted (much faster
+    // on huge folders than comparing nodes). Folders-first puts group 0
+    // (folders) before 1; the index breaks ties, so the order is stable.
+    let group = |c: &Node| u8::from(key.dirs_first && !c.is_dir);
+    if cs.column == SortColumn::Name {
+        // Natural, case-insensitive order (see natural_key).
+        let mut keyed: Vec<(u8, Vec<u8>, &str, u32)> = idx
+            .par_iter()
+            .map(|&i| {
+                (
+                    group(&children[i]),
+                    natural_key(&children[i].name),
+                    &*children[i].name,
+                    i as u32,
+                )
+            })
+            .collect();
+        keyed.par_sort_unstable_by(|a, b| {
+            let by_name = a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2));
+            let by_name = if cs.ascending {
+                by_name
+            } else {
+                by_name.reverse()
+            };
+            a.0.cmp(&b.0).then(by_name).then(a.3.cmp(&b.3))
+        });
+        idx = keyed.into_iter().map(|(_, _, _, i)| i as usize).collect();
+    } else {
+        // One u128 per row: group (bit 108) | value (see `sort_value`) |
+        // index (32 bits).
+        let mut keyed: Vec<u128> = idx
+            .iter()
+            .map(|&i| {
+                let c = &children[i];
+                (group(c) as u128) << (VALUE_BITS + 32) | sort_value(c, cs) << 32 | i as u128
+            })
+            .collect();
+        keyed.par_sort_unstable();
+        idx = keyed
+            .into_iter()
+            .map(|k| (k & 0xFFFF_FFFF) as usize)
+            .collect();
+    }
+    let shown_size = idx
+        .iter()
+        .map(|&i| children[i].size)
+        .fold(0u64, u64::saturating_add);
+    let shown_files = idx.iter().map(|&i| children[i].file_count).sum();
+    let folders = idx.iter().filter(|&&i| children[i].is_dir).count() as u64;
+    let rows = Rows::Children(idx);
+    RowOrder {
+        longest: longest_rows(&rows, view_node, false),
+        rows,
+        shown_size,
+        shown_files,
+        dotfile_size: children
+            .iter()
+            .filter(|c| c.name.starts_with('.'))
+            .map(|c| c.size)
+            .fold(0u64, u64::saturating_add),
+        folders,
+        flat_files: 0,
+        name_width: None,
+        marked_size: None,
+        pending: false,
+        key,
+    }
 }
 
 /// A rescan of one folder ("r"), to be spliced back into the full tree
@@ -402,6 +609,8 @@ pub(crate) struct TableState {
     row_geometry: Option<RowGeometry>,
     /// Row order as last computed (see `OrderKey`).
     order: Option<RowOrder>,
+    /// Rows being sorted on another thread (see `order_for`).
+    sorting: Option<Sorting>,
     /// Scroll the table to the cursor row on the next draw.
     pub scroll_pending: bool,
     /// Rows that fit on screen, for PageUp/PageDown.
@@ -430,11 +639,20 @@ pub(crate) struct TableState {
     pub(crate) show_help: bool,
 }
 
+impl TableState {
+    /// The rows shown are waiting for a sort on another thread.
+    #[cfg(test)]
+    pub(crate) fn sorting(&self) -> bool {
+        self.order.as_ref().is_some_and(|o| o.pending)
+    }
+}
+
 impl Default for TableState {
     fn default() -> Self {
         TableState {
             cursor: None,
             order: None,
+            sorting: None,
             cursor_pos: Default::default(),
             table_id: Default::default(),
             row_geometry: None,
@@ -637,12 +855,13 @@ impl DiskScanApp {
             }),
         };
         let order = match self.table.order.take() {
-            Some(o) if o.key == key => o,
-            _ => self.row_order(view_node, key),
+            Some(o) if o.key == key && !o.pending => o,
+            shown => self.order_for(view_node, key, shown, ui.ctx()),
         };
         let mut order = order;
         let name_width = *order.name_width.get_or_insert_with(|| {
-            widest_name(ui, &order.rows, view_node, order.key.flat.is_some())
+            let flat = order.key.flat.is_some();
+            widest_name(ui, &order.longest, &order.rows, view_node, flat)
         });
         // The marked rows' total size, worked out again only when the marks
         // or the rows change.
@@ -675,6 +894,8 @@ impl DiskScanApp {
             .and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.rows));
         let cursor_row = match found {
             Some(i) => Some(i),
+            // The rows are still being worked out: the cursor waits for them.
+            None if order.pending => None,
             None => {
                 self.table.cursor = (n_rows > 0).then(|| row(0).path());
                 let first = self.table.cursor.is_some().then_some(0);
@@ -746,7 +967,8 @@ impl DiskScanApp {
                         ]
                     )
                 ));
-                if self.table.flat {
+                // (While the flat list is sorted, "sorting…" says so.)
+                if self.table.flat && !order.pending {
                     ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
                 }
             }
@@ -796,6 +1018,9 @@ impl DiskScanApp {
             }
             if self.scanning {
                 ui.weak(format!("· {}", tr("TABLE_TAG_SCANNING")));
+            }
+            if order.pending {
+                ui.weak(format!("· {}", tr("TABLE_TAG_SORTING")));
             }
         });
         if let Some(query) = &mut self.table.jump {
@@ -1201,110 +1426,58 @@ impl DiskScanApp {
         }
     }
 
-    /// Filters and sorts `view_node`'s children, or for the flat list all
-    /// the files under it, for the table (see `OrderKey`), refreshing the
-    /// row list the keys work on.
+    /// The rows for `key` (see `order_rows`), worked out at once.
     fn row_order(&mut self, view_node: &Node, key: OrderKey) -> RowOrder {
-        if let Some(limit) = key.flat {
-            let (rows, count, size, dot_size) =
-                flat_files(view_node, key.sort, key.show_dotfiles, &self.hidden, limit);
-            return RowOrder {
-                rows: Rows::Files(rows),
-                shown_size: size,
-                shown_files: count,
-                dotfile_size: dot_size,
-                flat_files: count,
-                folders: 0,
-                name_width: None,
-                marked_size: None,
-                key,
-            };
+        order_rows(view_node, key, &self.hidden)
+    }
+
+    /// The rows for `key`, in place of `shown`. Worked out at once, except
+    /// a flat list of many files (`SORT_APART`): that's sorted on another
+    /// thread, one list at a time, while `shown` stays (see
+    /// `RowOrder::waiting`), so the window never waits for it.
+    fn order_for(
+        &mut self,
+        view_node: &Node,
+        key: OrderKey,
+        shown: Option<RowOrder>,
+        ctx: &egui::Context,
+    ) -> RowOrder {
+        if let Some(job) = &self.table.sorting {
+            match job.rows.try_recv() {
+                Ok(order) => {
+                    self.table.sorting = None;
+                    if order.key == key {
+                        return order;
+                    }
+                }
+                // A newer key waits for it: one sort at a time.
+                Err(TryRecvError::Empty) => return RowOrder::waiting(shown, key),
+                Err(TryRecvError::Disconnected) => self.table.sorting = None,
+            }
         }
-        let children = &view_node.children;
-        let hidden = &self.hidden;
-        let mut idx: Vec<usize> = (0..children.len())
-            .filter(|&i| {
-                let c = &children[i];
-                (key.show_dotfiles || !c.name.starts_with('.')) && !c.is_in(hidden)
-            })
-            .collect();
-        let cs = key.sort;
-        // Sort keys are built once into compact arrays, then sorted (much faster
-        // on huge folders than comparing nodes). Folders-first puts group 0
-        // (folders) before 1; the index breaks ties, so the order is stable.
-        let group = |c: &Node| u8::from(key.dirs_first && !c.is_dir);
-        if cs.column == SortColumn::Name {
-            // Natural, case-insensitive order (see natural_key).
-            let mut keyed: Vec<(u8, Vec<u8>, &str, u32)> = idx
-                .par_iter()
-                .map(|&i| {
-                    (
-                        group(&children[i]),
-                        natural_key(&children[i].name),
-                        &*children[i].name,
-                        i as u32,
-                    )
-                })
-                .collect();
-            keyed.par_sort_unstable_by(|a, b| {
-                let by_name = a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2));
-                let by_name = if cs.ascending {
-                    by_name
-                } else {
-                    by_name.reverse()
-                };
-                a.0.cmp(&b.0).then(by_name).then(a.3.cmp(&b.3))
-            });
-            idx = keyed.into_iter().map(|(_, _, _, i)| i as usize).collect();
-        } else {
-            // One u128 per row: group (bit 108) | value (76 bits, enough for
-            // mode+uid+gid) | index (32 bits). Descending flips the value.
-            const VALUE_BITS: u32 = 76;
-            const VALUE_MAX: u128 = (1 << VALUE_BITS) - 1;
-            let signed = |v: i64| (v as u64 ^ (1 << 63)) as u128;
-            let mut keyed: Vec<u128> = idx
-                .iter()
-                .map(|&i| {
-                    let c = &children[i];
-                    let v = match cs.column {
-                        SortColumn::Size => c.size as u128,
-                        SortColumn::Files => c.file_count as u128,
-                        SortColumn::Modified => signed(c.mtime),
-                        SortColumn::Changed => signed(c.ctime),
-                        SortColumn::Perms => {
-                            ((c.mode & 0o7777) as u128) << 64
-                                | (c.uid as u128) << 32
-                                | c.gid as u128
-                        }
-                        SortColumn::Name => 0,
-                    };
-                    let v = if cs.ascending { v } else { VALUE_MAX - v };
-                    (group(c) as u128) << (VALUE_BITS + 32) | v << 32 | i as u128
-                })
-                .collect();
-            keyed.par_sort_unstable();
-            idx = keyed
-                .into_iter()
-                .map(|k| (k & 0xFFFF_FFFF) as usize)
-                .collect();
-        }
-        RowOrder {
-            shown_size: idx
-                .iter()
-                .map(|&i| children[i].size)
-                .fold(0u64, u64::saturating_add),
-            shown_files: idx.iter().map(|&i| children[i].file_count).sum(),
-            dotfile_size: children
-                .iter()
-                .filter(|c| c.name.starts_with('.'))
-                .map(|c| c.size)
-                .fold(0u64, u64::saturating_add),
-            folders: idx.iter().filter(|&&i| children[i].is_dir).count() as u64,
-            rows: Rows::Children(idx),
-            flat_files: 0,
-            name_width: None,
-            marked_size: None,
-            key,
+        let big = key.flat.is_some() && !key.live && view_node.file_count > SORT_APART;
+        let Some(root) = self.root.clone().filter(|_| big) else {
+            return self.row_order(view_node, key);
+        };
+        let (tx, rows) = channel();
+        let (job_key, hidden, ctx) = (key.clone(), self.hidden.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let order = order_rows(get_node(&root, &job_key.view), job_key, &hidden);
+            // The tree is let go before the rows are handed over (see
+            // `finish_sorting`).
+            drop(root);
+            let _ = tx.send(order);
+            ctx.request_repaint();
+        });
+        self.table.sorting = Some(Sorting { rows });
+        RowOrder::waiting(shown, key)
+    }
+
+    /// Waits for a list being sorted on another thread, which holds the
+    /// tree: before the tree is changed in place, so that copies nothing.
+    pub(crate) fn finish_sorting(&mut self) {
+        if let Some(job) = self.table.sorting.take() {
+            let _ = job.rows.recv();
         }
     }
 
@@ -1833,13 +2006,18 @@ impl DiskScanApp {
             sort_tree_by_measure(&mut node, true);
         }
         // Nothing else holds the tree, so it's changed in place, not copied.
-        self.root = None;
-        self.cat_base = None;
+        self.finish_sorting();
+        for tree in [self.root.take(), self.cat_base.take()]
+            .into_iter()
+            .flatten()
+        {
+            release_tree(tree);
+        }
         let Some(mut full) = self.full_root.take() else {
             return false;
         };
         if full.path_is(&g.target) {
-            full = Arc::new(node);
+            release_tree(std::mem::replace(&mut full, Arc::new(node)));
         } else {
             let tree = Arc::make_mut(&mut full);
             replace_in_tree(tree, &g.target, node);
@@ -2091,6 +2269,123 @@ mod flat_tests {
         (0..rows.len())
             .map(|i| rows.node(view, i).name.to_string())
             .collect()
+    }
+
+    /// A tree with more files than are sorted at once: `SORT_APART` + 1000
+    /// files in 100 folders, of many sizes.
+    fn big_tree() -> Node {
+        let per = (SORT_APART as usize + 1000) / 100;
+        let folders: Vec<Node> = (0..100)
+            .map(|d| {
+                let files: Vec<Node> = (0..per)
+                    .map(|f| {
+                        file(
+                            &format!("/b/d{d}/f{f}"),
+                            ((d * 7919 + f * 104_729) % 99_991) as u64,
+                        )
+                    })
+                    .collect();
+                let mut folder = test_node(&format!("/b/d{d}"), 0, true, files);
+                folder.file_count = per as u64;
+                folder
+            })
+            .collect();
+        let mut top = test_node("/b", 0, true, folders);
+        top.file_count = (100 * per) as u64;
+        top
+    }
+
+    /// Draws frames until the table's rows are no longer being worked out
+    /// on another thread.
+    fn draw_until_sorted(app: &mut DiskScanApp) {
+        let start = Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(60) {
+            draw(app);
+            if app.table.order.as_ref().is_some_and(|o| !o.pending) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the rows were never sorted");
+    }
+
+    /// A flat list of more files than `SORT_APART` is sorted on another
+    /// thread: meanwhile the rows shown so far stay (marked as waiting) and
+    /// the cursor with them; then the rows are exactly those of a sort
+    /// done at once.
+    #[test]
+    fn big_flat_lists_sort_apart() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        app.full_root = Some(Arc::new(big_tree()));
+        app.rebuild_view_tree();
+        app.table.flat = true;
+        // Every file listed, so the cursor's stays in the list.
+        app.settings.flat_all = true;
+        draw(&mut app);
+        assert!(app.table.order.as_ref().unwrap().pending, "sorted apart");
+        draw_until_sorted(&mut app);
+        let rows = |app: &DiskScanApp| {
+            let (view, rows) = app.listed().unwrap();
+            (0..rows.len())
+                .map(|i| rows.node(view, i).path())
+                .collect::<Vec<_>>()
+        };
+        let by_size = rows(&app);
+        assert_eq!(by_size.len(), SORT_APART as usize + 1000);
+        app.table.cursor = Some(by_size[3].clone());
+
+        app.contents_sort = SortState {
+            column: SortColumn::Name,
+            ascending: true,
+        };
+        draw(&mut app);
+        let order = app.table.order.as_ref().unwrap();
+        assert!(order.pending);
+        assert_eq!(rows(&app), by_size, "the rows shown so far stay");
+        assert_eq!(app.table.cursor, Some(by_size[3].clone()));
+        draw_until_sorted(&mut app);
+        let root = app.root.clone().unwrap();
+        let key = app.table.order.as_ref().unwrap().key.clone();
+        let at_once = order_rows(&root, key, &HashSet::new());
+        let Rows::Files(want) = at_once.rows else {
+            panic!("a flat list")
+        };
+        let want: Vec<PathBuf> = (0..want.files.len())
+            .map(|i| want.node(&root, i).path())
+            .collect();
+        assert_eq!(rows(&app), want);
+        assert_eq!(
+            app.table.cursor,
+            Some(by_size[3].clone()),
+            "the cursor stays"
+        );
+    }
+
+    /// Deleting while a list is sorted on another thread (which holds the
+    /// tree) still changes the tree in place: it waits for the sort.
+    #[test]
+    fn deletes_wait_for_a_sort_apart() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        app.full_root = Some(Arc::new(big_tree()));
+        app.rebuild_view_tree();
+        app.table.flat = true;
+        draw(&mut app);
+        assert!(app.table.sorting.is_some());
+        let before = Arc::as_ptr(app.full_root.as_ref().unwrap());
+        app.drop_from_tree(&[PathBuf::from("/b/d0/f0")]);
+        assert_eq!(
+            Arc::as_ptr(app.full_root.as_ref().unwrap()),
+            before,
+            "not copied"
+        );
+        let d0 = &app.full_root.as_ref().unwrap().children[0];
+        assert!(!d0.children.iter().any(|c| &*c.name == "f0"), "deleted");
     }
 
     /// The marked rows' total follows every change to the marks and to the

@@ -631,10 +631,13 @@ impl DiskScanApp {
         self.table_forget(gone);
         let Some(root) = self.root.take() else { return };
         let view_paths = self.view_paths(&root);
-        drop(root);
+        release_tree(root);
+        self.finish_sorting();
         // The last other hold on the tree, so it's changed in place, not
         // copied first (rebuild_view_tree sets it again).
-        self.cat_base = None;
+        if let Some(base) = self.cat_base.take() {
+            release_tree(base);
+        }
         if let Some(full) = &mut self.full_root {
             let full = Arc::make_mut(full);
             remove_all_from_tree(full, gone);

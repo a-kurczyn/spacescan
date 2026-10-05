@@ -184,6 +184,7 @@ TABLE_TAG_FOLDER_COUNTS=%s, %s
 TABLE_TAG_FLAT_SOME=primeros %s de %s archivos de todas las subcarpetas
 TABLE_TAG_FLAT_ON_FINISH=lista plana al terminar el escaneo
 TABLE_TAG_SCANNING=tamaños hasta ahora · abrir carpetas, borrar y la papelera esperan a que termine el escaneo
+TABLE_TAG_SORTING=ordenando…
 TABLE_TAG_DOTFILES_HIDDEN=archivos ocultos sin mostrar (%s)
 TABLE_TAG_MARKED=%s marcados (%s)
 TABLE_JUMP=Ir a:

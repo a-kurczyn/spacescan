@@ -180,6 +180,7 @@ TABLE_TAG_FOLDER_COUNTS=%s, %s
 TABLE_TAG_FLAT_SOME=primi %s di %s file di tutte le sottocartelle
 TABLE_TAG_FLAT_ON_FINISH=elenco piatto al termine dell'analisi
 TABLE_TAG_SCANNING=dimensioni parziali · aprire cartelle, eliminare e cestinare attendono la fine dell'analisi
+TABLE_TAG_SORTING=ordinamento…
 TABLE_TAG_DOTFILES_HIDDEN=file nascosti celati (%s)
 TABLE_TAG_MARKED=%s selezionati (%s)
 TABLE_JUMP=Vai a:

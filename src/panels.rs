@@ -764,7 +764,7 @@ impl DiskScanApp {
                         });
                         if clear_category {
                             self.pick = None;
-                            self.rebuild_view_tree();
+                            self.repick();
                         }
                     }
                     ui.add_space(6.0);
@@ -1160,7 +1160,7 @@ impl DiskScanApp {
     /// filter, so every category stays visible (and clickable) while one is
     /// picked.
     pub(crate) fn refresh_cat_breakdown(&mut self, view_node: &Node) {
-        let key = (view_node.path(), self.tree_gen);
+        let key = (view_node.path(), self.base_gen, measure_files());
         if self.cat_breakdown_for.as_ref() != Some(&key) {
             let base = self
                 .cat_base
@@ -1182,7 +1182,7 @@ impl DiskScanApp {
         // and the table must not mix it with the rebuilt one.
         if let Some(cat) = self.pick_pending.take() {
             self.pick = cat;
-            self.rebuild_view_tree();
+            self.repick();
             ui.ctx().request_repaint();
         }
     }
@@ -1940,7 +1940,10 @@ impl DiskScanApp {
                 .tree_cats
                 .as_ref()
                 .is_some_and(|c| Arc::ptr_eq(c, &self.cats));
-            self.looks = Some((self.tree_gen, Looks::build(root, &self.cats, stored)));
+            let looks = Looks::build(root, &self.cats, stored);
+            if let Some(old) = self.looks.replace((self.tree_gen, looks)) {
+                drop_in_background(old);
+            }
         }
         let now = now_secs();
         if self.color_fade() < 1.0 {
@@ -2255,7 +2258,7 @@ impl DiskScanApp {
             });
         if clear_category {
             self.pick = None;
-            self.rebuild_view_tree();
+            self.repick();
         }
     }
 

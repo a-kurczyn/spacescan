@@ -1104,6 +1104,19 @@ pub(crate) fn resort_above(root: &mut Node, changed: &[PathBuf]) {
     }
 }
 
+/// The threads the app's scans run on, apart from the rest of its parallel
+/// work: a scan keeps all of them busy, and work the window starts meanwhile
+/// (sorting the live table's rows, say) would otherwise wait behind it.
+pub(crate) fn scan_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .thread_name(|i| format!("scan-{i}"))
+            .build()
+            .expect("the scan threads start")
+    })
+}
+
 pub(crate) fn scan_dir(path: &Path, ctx: &ScanCtx) -> Node {
     let mut root = scan_dir_in(
         path,
@@ -1748,7 +1761,7 @@ mod memory {
         for i in 2..=6 {
             let new = Arc::new(scan());
             tree = new; // the old tree is dropped here
-            after_tree_dropped();
+            return_freed_memory();
             std::thread::sleep(std::time::Duration::from_millis(500));
             eprintln!("scan {i}: {} MB", rss_mb());
         }
@@ -1757,14 +1770,40 @@ mod memory {
 }
 
 /// Returns freed memory to the system after a scanned tree is dropped
-/// (glibc otherwise keeps it). Runs on a background thread.
-pub(crate) fn after_tree_dropped() {
+/// (glibc otherwise keeps it).
+fn return_freed_memory() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     // SAFETY: malloc_trim has no preconditions; it only releases free
     // heap memory.
-    std::thread::spawn(|| unsafe {
+    unsafe {
         libc::malloc_trim(0);
+    }
+}
+
+/// Frees `value` (a tree, slice looks) on another thread, so the window
+/// doesn't wait while millions of entries are freed.
+pub(crate) fn drop_in_background<T: Send + 'static>(value: T) {
+    std::thread::spawn(move || drop(value));
+}
+
+/// Like `drop_in_background`, then returns the freed memory to the system.
+/// Only when a scan ends: returning memory locks the allocator for a while
+/// on a big heap, so it's never done while the user is changing things.
+pub(crate) fn free_in_background<T: Send + 'static>(value: T) {
+    std::thread::spawn(move || {
+        drop(value);
+        return_freed_memory();
     });
+}
+
+/// Lets go of `tree`: at once if something else still holds it (only a
+/// count goes down), else freed on another thread. Either way this hold is
+/// gone when the call returns, so an `Arc::make_mut` right after on another
+/// hold of the same tree copies nothing.
+pub(crate) fn release_tree(tree: Arc<Node>) {
+    if let Ok(only) = Arc::try_unwrap(tree) {
+        drop_in_background(only);
+    }
 }
 
 #[cfg(test)]

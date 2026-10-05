@@ -180,6 +180,7 @@ TABLE_TAG_FOLDER_COUNTS=%s, %s
 TABLE_TAG_FLAT_SOME=처음 %s개 (모든 하위 폴더의 파일 총 %s개 중)
 TABLE_TAG_FLAT_ON_FINISH=검사가 끝나면 평면 목록
 TABLE_TAG_SCANNING=현재까지의 크기 · 폴더 열기, 삭제, 휴지통은 검사가 끝난 뒤
+TABLE_TAG_SORTING=정렬 중…
 TABLE_TAG_DOTFILES_HIDDEN=점 파일 숨김 (%s)
 TABLE_TAG_MARKED=%s개 표시함 (%s)
 TABLE_JUMP=이동:

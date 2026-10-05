@@ -39,9 +39,9 @@ SM-79 (invisible characters made names look the same).
 - [x] SM-80 (QA on 2f72acf): a shown path could open a sibling really named
       like the escape text; the path bar now reads escapes first, then the
       text as typed.
-- [ ] S4 for the user to decide (not fixed unless asked): a move that can't
-      remove a source in a read-only folder says "don't have permission to
-      read or enter that folder"; it was the removal that was refused.
+- [x] Decided by the user: the S4 wording for a move that can't remove a
+      source in a read-only folder is SM-81, deferred (don't fix now).
+      Copied paths stay the real path (not escaped).
 
 Safety
 - [x] 1.1 Cross-drive move: make copies durable before deleting sources
@@ -75,22 +75,43 @@ Small cleanups
 - [x] `[lints]` table in Cargo.toml locking in current good practice.
 - [x] Test: every translation key used in the code exists in en.lang.
 
-## Batch 2: measure, then the bigger real-time work (after QA GO)
+## Batch 2: measure, then the bigger real-time work (done)
 
-- [ ] N5 Frame-time benchmark (ignored test): chart, table and category bar
-      on a big synthetic tree while sliders, zoom and filters change; reports
-      median and worst frame times.
-- [ ] Measure as a parameter instead of the global flag (groundwork for N1).
-- [ ] N1 Applying a filter or pick off the UI thread (keep showing the old
-      view until the new one is ready; latest wins). ~20 ms at 360k files,
-      est. ~0.2 s at 4M.
-- [ ] 2.6 Live extension totals kept in the live tree instead of one message
-      per folder.
-- [ ] 2.4 Chart: fewer per-frame allocations, all slices in one mesh; a
-      layout cache only if the benchmark calls for it.
+QA GO on 1c9c357. Measured with the new frame benchmark (`SPACESCAN_FILES=4000000
+SPACESCAN_BENCH=/ cargo test --release frame_bench -- --ignored --nocapture`),
+synthetic 4M-file tree, whole frames (UI + tessellation):
+
+| Frame                              | before batch 2 | after |
+|------------------------------------|----------------|-------|
+| chart: still, hover, sliders, zoom | 4–8 ms         | same  |
+| filter applied                     | 18–27 ms       | 22–30 ms (noise) |
+| category picked                    | 44–51 ms       | 17–24 ms |
+| flat list (first 1,000) re-sorted  | 190–450 ms     | 0.4 ms (sorted apart: shown after 0.3–1.3 s) |
+| flat list (all files) re-sorted    | 0.7–1.3 s      | 0.3 ms (same)  |
+| live scan of /, table view frames  | up to 0.5–0.9 s | under 26 ms (one ~110 ms frame at scan end) |
+
+- [x] N5 Frame-time benchmark (`frame_bench`, ignored test in main.rs).
+- [x] Flat list: numeric sorts by compact keys; files gathered folder by
+      folder (ties keep their found order); cursor found by tree position;
+      longest names picked in parallel.
+- [x] Flat lists over 200,000 files sorted on another thread (one at a
+      time); the rows shown stay, marked "sorting…"; tree edits in place
+      (delete, measure, folder rescan) wait for it, so they copy nothing.
+- [x] Category pick: stored categories from the scan; a pick reuses the
+      filtered tree and its breakdown (`repick`).
+- [x] Big trees freed on another thread; memory returned only at scan end
+      (returning it locks the allocator for a while).
+- [x] Scans run on their own thread pool: the window's parallel work (sorting
+      the live table) no longer queues behind a scan (the 0.5–0.9 s stalls).
+- [x] Skipped on the numbers: N1 background rebuild of the view tree (picks
+      and filters are 1–2 frames at 4M), 2.6 live extension messages (live
+      frames under 26 ms), 2.4 chart allocations (chart frames ~5 ms).
+      "Measure as a parameter" moves to batch 3 (cleanup, not needed now).
 
 ## Batch 3: architecture and readability (after QA GO)
 
+- [ ] Measure (bytes or files) passed as a parameter instead of the global
+      flag.
 - [ ] `cfg!(test)` switches replaced by settings passed in at creation.
 - [ ] Split scan.rs (tree, formatting, filesystem helpers, scanning).
 - [ ] One path-to-node lookup (find_node, find_by_path, index_path_to).

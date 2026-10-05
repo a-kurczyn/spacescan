@@ -415,7 +415,7 @@ impl Config {
 
 impl DiskScanApp {
     /// The configuration as it stands right now.
-    fn current_config(&self) -> Config {
+    pub(crate) fn current_config(&self) -> Config {
         Config {
             language: current_lang_code(),
             chart: self.settings.clone(),
