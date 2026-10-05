@@ -1972,3 +1972,47 @@ mod frame_bench {
         }
     }
 }
+
+/// Resident memory across rescans ("r") of the scanned folder, the way the
+/// app does them (SM-19). Run with `SPACESCAN_MEM_TREE=<folder> cargo test
+/// --release app_rescan_memory -- --ignored --nocapture`.
+#[cfg(test)]
+mod rescan_memory {
+    use super::*;
+
+    fn rss_mb() -> u64 {
+        let statm = std::fs::read_to_string("/proc/self/statm").unwrap();
+        let pages: u64 = statm.split_whitespace().nth(1).unwrap().parse().unwrap();
+        pages * 4096 / (1 << 20)
+    }
+
+    #[test]
+    #[ignore]
+    fn app_rescan_memory() {
+        let dir = std::env::var_os("SPACESCAN_MEM_TREE").unwrap_or_else(|| "/usr".into());
+        let mut app = DiskScanApp::default();
+        // Until the scan has ended and the app is idle (freeing done).
+        let wait = |app: &mut DiskScanApp| {
+            while app.scanning {
+                app.poll_scan();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        };
+        eprintln!("start: {} MB", rss_mb());
+        app.start_scan(PathBuf::from(&dir));
+        wait(&mut app);
+        let first = rss_mb();
+        let files = app.full_root.as_ref().map_or(0, |r| r.file_count);
+        eprintln!("scan: {first} MB ({files} files)");
+        for i in 1..=6 {
+            app.rescan_current();
+            wait(&mut app);
+            let now = rss_mb();
+            eprintln!(
+                "rescan {i}: {now} MB ({:+.0}%)",
+                (now as f64 / first as f64 - 1.0) * 100.0
+            );
+        }
+    }
+}

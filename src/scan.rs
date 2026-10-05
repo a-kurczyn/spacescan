@@ -1780,18 +1780,33 @@ fn return_freed_memory() {
     }
 }
 
+/// How many values `drop_in_background` is still freeing.
+static FREEING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Frees `value` (a tree, slice looks) on another thread, so the window
 /// doesn't wait while millions of entries are freed.
 pub(crate) fn drop_in_background<T: Send + 'static>(value: T) {
-    std::thread::spawn(move || drop(value));
+    use std::sync::atomic::Ordering::SeqCst;
+    FREEING.fetch_add(1, SeqCst);
+    std::thread::spawn(move || {
+        drop(value);
+        FREEING.fetch_sub(1, SeqCst);
+    });
 }
 
-/// Like `drop_in_background`, then returns the freed memory to the system.
+/// Like `drop_in_background`, then returns the freed memory to the system,
+/// once every other value being freed in the background is freed too (a
+/// tree replaced by a rescan, say), so none of it stays with the app.
 /// Only when a scan ends: returning memory locks the allocator for a while
 /// on a big heap, so it's never done while the user is changing things.
 pub(crate) fn free_in_background<T: Send + 'static>(value: T) {
+    use std::sync::atomic::Ordering::SeqCst;
     std::thread::spawn(move || {
         drop(value);
+        let start = std::time::Instant::now();
+        while FREEING.load(SeqCst) > 0 && start.elapsed() < std::time::Duration::from_secs(30) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         return_freed_memory();
     });
 }

@@ -8,7 +8,9 @@ check the status marks, `git log`, and the QA tracker (QA_FINDINGS.md).
 - Work batch by batch, in the order below. Unit-test every change myself
   (`cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`), and
   check user-visible changes in the running app.
-- After each batch: commit, install the release build to
+- Since 2026-10-05 (user decision): finish ALL remaining work (SM-19, batch 3
+  including the large refactors), then ONE handoff to QA. Before that:
+  commit, install the release build to
   `~/.local/bin/spacescan`, then tell the QA agent (spacescan-qa-52) what
   changed, in behavior terms only (no code), and **wait for its GO / NO GO
   before starting the next batch**.
@@ -108,7 +110,14 @@ synthetic 4M-file tree, whole frames (UI + tessellation):
       frames under 26 ms), 2.4 chart allocations (chart frames ~5 ms).
       "Measure as a parameter" moves to batch 3 (cleanup, not needed now).
 
-## Batch 3: architecture and readability (after QA GO)
+## SM-19 reopened on 561f406 (fixed, not yet handed to QA)
+
+- [x] Memory after "r" rescans: the end-of-scan memory return now waits for
+      the trees freed in the background. `app_rescan_memory` (ignored test,
+      main.rs) on /usr: 561f406 +56..+79 %, fixed +34..+54 %, 1c9c357
+      +34..+57 % (same as before batch 2).
+
+## Batch 3: architecture and readability
 
 - [ ] SM-81 (S4, the user wants it in this batch): a move to another
       filesystem that can't remove a source in a read-only folder must say
