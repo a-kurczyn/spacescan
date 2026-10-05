@@ -334,16 +334,9 @@ fn find_cursor(
 /// Where `path` is under `view`: the child-index path of its folder from
 /// `view`, and its index in that folder; None if it isn't there.
 fn place_in(view: &Node, path: &Path) -> Option<(Vec<usize>, usize)> {
-    let parts = rel_parts(&view.path(), path)?;
-    let (last, folders) = parts.split_last()?;
-    let mut n = view;
-    let mut at = Vec::with_capacity(folders.len());
-    for name in folders {
-        let i = child_named(n, name)?;
-        at.push(i);
-        n = &n.children[i];
-    }
-    Some((at, child_named(n, last)?))
+    let mut at = find_index_path(view, path)?;
+    let child = at.pop()?;
+    Some((at, child))
 }
 
 /// Bits of a row's value in a compact sort key: enough for mode, owner and

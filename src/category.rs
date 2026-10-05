@@ -468,19 +468,6 @@ pub(crate) fn category_rows(totals: &ExtTotals, model: &CategoryModel) -> Vec<Ca
     rows
 }
 
-/// The folder at `path` inside `root`, if it's there.
-pub(crate) fn find_by_path<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
-    let root_path = root.path();
-    let rel = path.strip_prefix(&root_path).ok()?;
-    let mut n = root;
-    let mut cur = root.path();
-    for comp in rel.components() {
-        cur.push(comp);
-        n = n.children.iter().find(|c| c.path_is(&cur))?;
-    }
-    Some(n)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,10 +618,10 @@ mod tests {
             vec![("mkv".to_string(), 100, 1), ("mp4".to_string(), 50, 1)]
         );
         assert_eq!(
-            find_by_path(&tree, Path::new("/r/d")).map(|n| n.children.len()),
+            find_node(&tree, Path::new("/r/d")).map(|n| n.children.len()),
             Some(3)
         );
-        assert!(find_by_path(&tree, Path::new("/r/x")).is_none());
+        assert!(find_node(&tree, Path::new("/r/x")).is_none());
     }
 
     #[test]

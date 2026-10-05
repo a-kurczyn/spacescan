@@ -9,7 +9,7 @@
 //! folders it copies. Links are copied as links, never followed.
 
 use super::*;
-use crate::delete::{find_node, mount_guard};
+use crate::delete::mount_guard;
 use crate::x11clip::NoAnswer;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::sync::atomic::{AtomicBool, Ordering};

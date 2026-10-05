@@ -1165,7 +1165,7 @@ impl DiskScanApp {
             let base = self
                 .cat_base
                 .as_deref()
-                .and_then(|b| find_by_path(b, &view_node.path()));
+                .and_then(|b| find_node(b, &view_node.path()));
             self.cat_breakdown = category_breakdown(base.unwrap_or(view_node), &self.cats);
             self.cat_breakdown_for = Some(key);
         }

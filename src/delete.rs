@@ -247,16 +247,6 @@ pub(crate) fn remove_all_from_tree(root: &mut Node, gone: &[PathBuf]) {
     }
 }
 
-/// The node at `path`, if it's in the tree.
-pub(crate) fn find_node<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
-    let mut n = root;
-    let root_path = root.path();
-    for name in rel_parts(&root_path, path)? {
-        n = &n.children[child_named(n, name)?];
-    }
-    Some(n)
-}
-
 impl DiskScanApp {
     /// Start of every frame: carries out a delete queued last frame and
     /// picks up a finished trash purge.

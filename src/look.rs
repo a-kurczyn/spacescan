@@ -22,8 +22,12 @@ pub(crate) struct Look {
     pub(crate) files: u64,
 }
 
-/// The look of every folder in a tree, keyed by the folder node's address
-/// (valid until the tree is rebuilt).
+/// The look of every folder in a tree, keyed by the folder node's address.
+/// Valid only for the tree it was built from: the app keeps it with the
+/// `tree_gen` it was built for, and every change to the shown tree (in place
+/// or not) must bump `tree_gen`, or a moved or freed folder's address could
+/// give another folder its colors. A node not found falls back to its own
+/// look (`of`), never to a wrong one of a live folder.
 pub(crate) struct Looks {
     folders: FxHashMap<usize, Look>,
 }

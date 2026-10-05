@@ -1543,21 +1543,29 @@ pub(crate) fn remap_index_path(old: &Node, new: &Node, idx: &[usize]) -> Vec<usi
     out
 }
 
-/// Child-index path from `root` down to `target`, if it's in the tree.
-pub(crate) fn index_path_to(root: &Node, target: &Path) -> Option<Vec<usize>> {
-    let root_path = root.path();
-    let rel = target.strip_prefix(&root_path).ok()?;
+/// Child-index path from `root` down to the node (file or folder) at
+/// `path`, if it's in the tree. Every lookup of a node by its path goes
+/// through this.
+pub(crate) fn find_index_path(root: &Node, path: &Path) -> Option<Vec<usize>> {
     let mut n = root;
     let mut out = Vec::new();
-    for comp in rel.components() {
-        let j = n
-            .children
-            .iter()
-            .position(|c| c.is_dir && c.disk_name() == comp.as_os_str())?;
-        out.push(j);
-        n = &n.children[j];
+    for name in rel_parts(&root.path(), path)? {
+        let i = child_named(n, name)?;
+        out.push(i);
+        n = &n.children[i];
     }
     Some(out)
+}
+
+/// The node (file or folder) at `path`, if it's in the tree.
+pub(crate) fn find_node<'a>(root: &'a Node, path: &Path) -> Option<&'a Node> {
+    find_index_path(root, path).map(|ip| get_node(root, &ip))
+}
+
+/// Child-index path from `root` down to the folder `target`, if it's in the
+/// tree (None for a file).
+pub(crate) fn index_path_to(root: &Node, target: &Path) -> Option<Vec<usize>> {
+    find_index_path(root, target).filter(|ip| get_node(root, ip).is_dir)
 }
 
 #[cfg(test)]
@@ -2416,13 +2424,9 @@ mod path_tests {
                 let at = root.path().join(c.disk_name());
                 assert!(c.path_is(&at), "{}", at.display());
                 assert_eq!(node_key(c), path_key(&at));
-                assert!(
-                    crate::delete::find_node(&root, &at).is_some(),
-                    "{}",
-                    at.display()
-                );
+                assert!(find_node(&root, &at).is_some(), "{}", at.display());
                 if c.is_dir {
-                    assert!(crate::category::find_by_path(&root, &at).is_some());
+                    assert!(find_node(&root, &at).is_some());
                     assert_eq!(index_path_to(&root, &at).map(|v| v.len()), Some(1));
                 }
             }
@@ -2464,7 +2468,7 @@ mod path_tests {
         for n in names.iter().chain([&odd]) {
             let disk = OsStr::from_bytes(n);
             let at = base.join(disk);
-            let found = crate::delete::find_node(&root, &at).unwrap();
+            let found = find_node(&root, &at).unwrap();
             assert_eq!(found.disk_name(), disk);
             let one: HashSet<PathBuf> = [at.clone()].into();
             let hits: Vec<_> = root.children.iter().filter(|c| c.is_in(&one)).collect();
