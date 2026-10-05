@@ -1044,6 +1044,29 @@ impl DiskScanApp {
         });
     }
 
+    /// A copy or move is running.
+    pub(crate) fn transferring(&self) -> bool {
+        self.transfer.job.is_some()
+    }
+
+    /// Before quitting: stops a running copy or move and waits, at most
+    /// `limit`, for it to remove the file it was writing.
+    pub(crate) fn stop_transfer(&mut self, limit: std::time::Duration) {
+        let Some(job) = self.transfer.job.take() else {
+            return;
+        };
+        job.cancel.store(true, Ordering::Relaxed);
+        // A worker waiting on a clash stops too.
+        let _ = job.answers.send(None);
+        let deadline = Instant::now() + limit;
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match job.reports.recv_timeout(left) {
+                Ok(Report::Done(_) | Report::Refused(_)) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    }
+
     /// Every frame: follows a copy or move, shows its progress and asks
     /// about name clashes.
     pub(crate) fn transfer_ui(&mut self, ctx: &egui::Context) {
@@ -1210,6 +1233,69 @@ impl DiskScanApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Closing the window while a copy runs asks first and keeps the window
+    /// open; quitting anyway stops the copy and waits for it to remove the
+    /// file it was writing. With nothing running, closing just closes.
+    #[test]
+    fn quitting_mid_copy_asks_then_cleans_up() {
+        let d = scratch("quit");
+        let part = d.join(".big.bin.spacescan-part0");
+        let ctx = egui::Context::default();
+        let mut app = DiskScanApp::default();
+        let close = |app: &mut DiskScanApp| {
+            let mut raw = egui::RawInput::default();
+            raw.viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .events
+                .push(egui::ViewportEvent::Close);
+            let out = ctx.run_ui(raw, |ui| app.guard_quit(ui.ctx()));
+            out.viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|v| v.commands.contains(&egui::ViewportCommand::CancelClose))
+        };
+        // Nothing running: the window closes.
+        assert!(!close(&mut app));
+        assert!(!app.quit_asked);
+
+        // A stand-in copy: writes its file until cancelled, then removes it.
+        let (report_tx, reports) = channel();
+        let (answers, _answer_rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let worker_part = part.clone();
+        std::fs::write(&part, b"half").unwrap();
+        std::thread::spawn(move || {
+            while !worker_cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let _ = std::fs::remove_file(&worker_part);
+            let _ = report_tx.send(Report::Done(Results {
+                cancelled: true,
+                ..Default::default()
+            }));
+        });
+        app.transfer.job = Some(Job {
+            mode: ClipMode::Copy,
+            target: d.clone(),
+            total: 1,
+            done: 0,
+            reports,
+            answers,
+            cancel,
+            clash: None,
+            issues: Vec::new(),
+        });
+        assert!(close(&mut app));
+        assert!(app.quit_asked);
+        assert!(part.exists());
+        app.stop_transfer(std::time::Duration::from_secs(5));
+        assert!(!part.exists());
+        assert!(!app.transferring());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d =

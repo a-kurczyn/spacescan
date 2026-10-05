@@ -279,6 +279,11 @@ impl DiskScanApp {
         }
     }
 
+    /// The trash is being emptied.
+    pub(crate) fn emptying_trash(&self) -> bool {
+        self.removal.purge_rx.is_some()
+    }
+
     pub(crate) fn delete_dialog_open(&self) -> bool {
         self.removal.confirm.is_some()
     }

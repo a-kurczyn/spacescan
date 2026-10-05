@@ -354,6 +354,10 @@ struct DiskScanApp {
     show_settings: bool,
     /// The About window is open.
     show_about: bool,
+    /// Asking whether to quit while work is running.
+    quit_asked: bool,
+    /// Quitting was confirmed: the next close goes through.
+    quit_confirmed: bool,
     path_input: String,
     path_input_focused: bool,
     contents_sort: SortState,
@@ -432,6 +436,8 @@ impl Default for DiskScanApp {
             saved_config: None,
             show_settings: false,
             show_about: false,
+            quit_asked: false,
+            quit_confirmed: false,
             path_input: String::new(),
             path_input_focused: false,
             cats: Arc::new(CategoryModel::defaults()),
@@ -774,10 +780,57 @@ impl DiskScanApp {
 
     /// Esc while scanning: stops the scan and goes back to the previous result,
     /// if any.
+    /// Work that quitting would cut short: a copy or move, or emptying the
+    /// trash. (A scan just stops; deletes finish within a frame.)
+    fn work_running(&self) -> bool {
+        self.transferring() || self.emptying_trash()
+    }
+
+    /// Closing the window (✕ or Ctrl+Q) while work runs asks first; quitting
+    /// anyway stops a copy or move cleanly, without leaving a half-written
+    /// file.
+    fn guard_quit(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested())
+            && self.work_running()
+            && !self.quit_confirmed
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.quit_asked = true;
+        }
+        if !self.quit_asked {
+            return;
+        }
+        let mut quit = false;
+        let modal = egui::Modal::new("quit_while_working".into()).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.heading(tr("QUIT_TITLE"));
+            ui.add(egui::Label::new(tr("QUIT_BODY")).wrap());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let keep = ui.button(tr("QUIT_KEEP"));
+                if ui.button(tr("QUIT_ANYWAY")).clicked() {
+                    quit = true;
+                }
+                keep.clicked()
+            })
+            .inner
+        });
+        if quit {
+            self.quit_asked = false;
+            self.quit_confirmed = true;
+            self.stop_transfer(std::time::Duration::from_secs(5));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if modal.inner || modal.should_close() {
+            self.quit_asked = false;
+        }
+    }
+
     /// Esc cancels the scan, unless it's closing a menu or window first.
     fn esc_cancels_scan(&mut self, ctx: &egui::Context) {
-        let closing_something =
-            self.show_about || self.table.show_help || egui::Popup::is_any_open(ctx);
+        let closing_something = self.show_about
+            || self.table.show_help
+            || self.quit_asked
+            || egui::Popup::is_any_open(ctx);
         if self.scanning && !closing_something && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.abort_scan();
         }
@@ -1240,6 +1293,7 @@ impl eframe::App for DiskScanApp {
             self.about_window(&ctx);
         }
         quit_on_ctrl_q(&ctx);
+        self.guard_quit(&ctx);
         // Not while the right-click menu is open (Esc still closes it).
         let menu_open = egui::Popup::is_any_open(&ctx);
         if self.root.is_some()
@@ -1250,6 +1304,7 @@ impl eframe::App for DiskScanApp {
             && !menu_open
             && !self.table.show_help
             && !self.show_about
+            && !self.quit_asked
         {
             if let Some(d) = ctx.input(arrow_nav) {
                 self.move_selection(d);

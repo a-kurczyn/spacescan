@@ -583,6 +583,7 @@ impl DiskScanApp {
             && !self.delete_dialog_open()
             && !self.table.show_help
             && !self.show_about
+            && !self.quit_asked
         {
             ctx.memory_mut(|m| {
                 if let Some(id) = m.focused() {
@@ -1404,7 +1405,7 @@ impl DiskScanApp {
             }
             return;
         }
-        if self.typing || self.delete_dialog_open() || self.show_about {
+        if self.typing || self.delete_dialog_open() || self.show_about || self.quit_asked {
             return;
         }
         use egui::Key;
