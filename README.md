@@ -28,7 +28,7 @@ plain-text, CSV or JSON reports from the command line.
   click a category or extension to show only those files (Ctrl+click picks
   several extensions).
 
-  ![SpaceScan table view: the category bar on the left, and on the right the flat list of the largest files from all folders](docs/table.png)
+  ![SpaceScan table view: the category bar on the left, the folder contents on the right](docs/table.png)
 
 - **Measure by bytes or by number of files.** Switch the whole app (chart,
   table, shares and colors) to count files instead of space, to find the
