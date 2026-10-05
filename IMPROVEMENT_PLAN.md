@@ -36,6 +36,9 @@ SM-79 (invisible characters made names look the same).
       default-ignorables, line/paragraph separators) shown as `\u{200B}`;
       emoji joiners and presentation selectors inside emoji kept. The path
       bar reads escapes back when the text as typed doesn't exist.
+- [x] SM-80 (QA on 2f72acf): a shown path could open a sibling really named
+      like the escape text; the path bar now reads escapes first, then the
+      text as typed.
 - [ ] S4 for the user to decide (not fixed unless asked): a move that can't
       remove a source in a read-only folder says "don't have permission to
       read or enter that folder"; it was the removal that was refused.

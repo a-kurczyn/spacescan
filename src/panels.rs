@@ -2735,10 +2735,12 @@ mod category_bar_tests {
     }
 }
 
-/// The path typed in the path bar: as typed if that exists (names may end
-/// in spaces), else without the spaces around it, else (when that doesn't
-/// exist either) with the escapes the app shows names with read back, so a
-/// shown path can be edited and opened. "~" and "~/…" mean the home
+/// The path typed in the path bar. Escapes are read first, the way the
+/// app shows names (`\u{200B}`, `\n`, `\xFF`, `\\`), so a path
+/// exactly as shown always opens the folder it was shown for, whatever its
+/// siblings are called; text that has no escapes, or doesn't exist read that
+/// way, is taken as typed. Either way, as typed if that exists (names may end
+/// in spaces), else without the spaces around it. "~" and "~/…" mean the home
 /// folder, as in a shell.
 pub(crate) fn typed_path(typed: &str) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
@@ -2748,18 +2750,19 @@ pub(crate) fn typed_path(typed: &str) -> PathBuf {
         _ => PathBuf::from(t),
     };
     let exists = |p: &Path| std::fs::symlink_metadata(p).is_ok();
-    let exact = expand(typed.as_ref());
-    if typed != typed.trim() && exists(&exact) {
-        return exact;
-    }
-    let trimmed = expand(typed.trim().as_ref());
-    if exists(&trimmed) {
-        return trimmed;
-    }
-    match unshow_os(typed.trim()).map(|real| expand(&real)) {
-        Some(p) if exists(&p) => p,
-        _ => trimmed,
-    }
+    let trimmed = typed.trim();
+    // Shown text first, then as typed; with the spaces around it first.
+    let candidates = [
+        (typed != trimmed).then(|| unshow_os(typed)).flatten(),
+        unshow_os(trimmed),
+        (typed != trimmed).then(|| typed.into()),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|t| expand(&t))
+        .find(|p| exists(p))
+        .unwrap_or_else(|| expand(trimmed.as_ref()))
 }
 
 #[cfg(test)]
@@ -2792,20 +2795,38 @@ mod typed_path_tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A shown path with escapes in it (as the path bar shows a folder with
-    /// an invisible character in its name) opens that folder.
+    /// Every path the app shows opens the folder it was shown for, also
+    /// next to a sibling really named like its escaped text (SM-80): a
+    /// zero-width space, a line break and a raw byte, each beside a folder
+    /// called by its escape. Typed with real characters (no backslash), a
+    /// folder opens too.
     #[test]
     fn shown_paths_open_their_folder() {
+        use std::os::unix::ffi::OsStrExt;
         let dir = std::env::temp_dir().join(format!("spacescan-shown-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let real = dir.join("p\u{200B}q");
-        std::fs::create_dir_all(&real).unwrap();
-        let shown = show_path(&real);
-        assert!(shown.ends_with("p\\u{200B}q"));
-        assert_eq!(typed_path(&shown), real);
-        assert_eq!(typed_path(&format!("  {shown} ")), real);
-        // Typed as it really is, it opens too.
-        assert_eq!(typed_path(&real.display().to_string()), real);
+        let names: [&[u8]; 6] = [
+            "p\u{200B}q".as_bytes(),
+            b"p\\u{200B}q",
+            b"n\nx",
+            b"n\\nx",
+            b"r\xFFs",
+            b"r\\xFFs",
+        ];
+        for name in names {
+            let real = dir.join(std::ffi::OsStr::from_bytes(name));
+            std::fs::create_dir_all(&real).unwrap();
+        }
+        for name in names {
+            let real = dir.join(std::ffi::OsStr::from_bytes(name));
+            let shown = show_path(&real);
+            assert_eq!(typed_path(&shown), real, "{shown}");
+            assert_eq!(typed_path(&format!("  {shown} ")), real, "{shown}");
+        }
+        for typed in ["p\u{200B}q", "n\nx"] {
+            let real = dir.join(typed);
+            assert_eq!(typed_path(&real.display().to_string()), real);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
