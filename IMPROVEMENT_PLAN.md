@@ -110,6 +110,11 @@ synthetic 4M-file tree, whole frames (UI + tessellation):
 
 ## Batch 3: architecture and readability (after QA GO)
 
+- [ ] SM-81 (S4, the user wants it in this batch): a move to another
+      filesystem that can't remove a source in a read-only folder must say
+      what failed (the copy was made, the original couldn't be removed
+      because its folder can't be changed, and it's still in place), not
+      "don't have permission to read or enter that folder". Status line as is.
 - [ ] Measure (bytes or files) passed as a parameter instead of the global
       flag.
 - [ ] `cfg!(test)` switches replaced by settings passed in at creation.
