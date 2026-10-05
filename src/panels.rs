@@ -44,6 +44,7 @@ fn tool_window(
         if ui.input(|i| i.viewport().close_requested()) {
             *open = false;
         }
+        quit_on_ctrl_q(ui.ctx());
         egui::CentralPanel::default().show(ui, |ui| add_contents(ui));
     });
 }
@@ -66,7 +67,10 @@ enum MenuPick {
 
 /// Opens `target` (a web address or a file) in the desktop's default app.
 fn open_link(target: &str) {
-    let _ = std::process::Command::new("xdg-open").arg(target).spawn();
+    if let Ok(mut child) = std::process::Command::new("xdg-open").arg(target).spawn() {
+        // Collected when it ends, so no finished process lingers.
+        std::thread::spawn(move || child.wait());
+    }
 }
 
 /// The licenses of the libraries SpaceScan is built with: the copy
@@ -2687,6 +2691,38 @@ mod typed_path_tests {
 #[cfg(test)]
 mod about_tests {
     use super::*;
+
+    /// Esc closes an open About or shortcuts window and leaves the scan
+    /// running; with nothing open it cancels the scan.
+    #[test]
+    fn esc_closes_windows_before_cancelling_a_scan() {
+        let ctx = egui::Context::default();
+        let mut app = DiskScanApp::default();
+        let esc = |app: &mut DiskScanApp| {
+            let raw = egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(raw, |ui| app.esc_cancels_scan(ui.ctx()));
+        };
+        app.scanning = true;
+        app.show_about = true;
+        esc(&mut app);
+        assert!(app.scanning);
+        app.show_about = false;
+        app.table.show_help = true;
+        esc(&mut app);
+        assert!(app.scanning);
+        app.table.show_help = false;
+        esc(&mut app);
+        assert!(!app.scanning);
+    }
 
     /// The installed licenses file wins (the AppImage's before the
     /// system's); with none, the project's page.

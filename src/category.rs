@@ -204,7 +204,9 @@ impl CategoryModel {
     fn load_from_file(write_missing: bool) -> (Self, Option<String>) {
         // Read-only, before the app first ran under its new name: the old
         // settings folder's file.
-        let dir = if !write_missing && std::fs::symlink_metadata(config_dir()).is_err() {
+        let new_missing = std::fs::symlink_metadata(config_dir())
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        let dir = if !write_missing && new_missing {
             config::old_config_dir()
         } else {
             config_dir()

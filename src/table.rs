@@ -578,7 +578,11 @@ impl DiskScanApp {
     /// Start of every frame: keeps keyboard focus off the table's buttons,
     /// so a clicked header doesn't also react to Enter or Space.
     pub(crate) fn table_frame_start(&mut self, ctx: &egui::Context) {
-        if self.summary_view && !self.typing && !self.delete_dialog_open() && !self.table.show_help
+        if self.summary_view
+            && !self.typing
+            && !self.delete_dialog_open()
+            && !self.table.show_help
+            && !self.show_about
         {
             ctx.memory_mut(|m| {
                 if let Some(id) = m.focused() {

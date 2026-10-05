@@ -767,6 +767,15 @@ impl DiskScanApp {
 
     /// Esc while scanning: stops the scan and goes back to the previous result,
     /// if any.
+    /// Esc cancels the scan, unless it's closing a menu or window first.
+    fn esc_cancels_scan(&mut self, ctx: &egui::Context) {
+        let closing_something =
+            self.show_about || self.table.show_help || egui::Popup::is_any_open(ctx);
+        if self.scanning && !closing_something && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.abort_scan();
+        }
+    }
+
     fn abort_scan(&mut self) {
         if let Some(cancel) = &self.cancel_flag {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1096,9 +1105,7 @@ impl eframe::App for DiskScanApp {
         self.poll_mime();
         self.removal_frame_start(&ctx);
         self.table_frame_start(&ctx);
-        if self.scanning && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.abort_scan();
-        }
+        self.esc_cancels_scan(&ctx);
         // While scanning, redraw 4 times a second (each frame takes CPU from the
         // scan), or at once while messages are waiting.
         if scan_backlog || !self.mime_inflight.is_empty() {
@@ -1209,14 +1216,23 @@ impl eframe::App for DiskScanApp {
         }
         // Opened from the main menu in any view, or with "?" in the table.
         if self.table.show_help {
-            self.help_overlay(&ctx);
+            // "?" closes it in any view (the table checks it with its own keys).
+            if !self.summary_view
+                && ctx.input(|i| {
+                    i.events
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::Text(t) if t == "?"))
+                })
+            {
+                self.table.show_help = false;
+            } else {
+                self.help_overlay(&ctx);
+            }
         }
         if self.show_about {
             self.about_window(&ctx);
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
+        quit_on_ctrl_q(&ctx);
         // Not while the right-click menu is open (Esc still closes it).
         let menu_open = egui::Popup::is_any_open(&ctx);
         if self.root.is_some()
@@ -1294,6 +1310,13 @@ fn quiet_accessibility_panic() {
         }
         default(info);
     }));
+}
+
+/// Ctrl+Q in any of the app's windows closes the app.
+pub(crate) fn quit_on_ctrl_q(ctx: &egui::Context) {
+    if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+    }
 }
 
 /// Scanning or deleting folder chains past the kernel's path length limit

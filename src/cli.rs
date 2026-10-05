@@ -222,6 +222,9 @@ fn print_out(text: &str) -> Run {
 static STDOUT_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Runs at load time, before Rust's runtime starts.
+// SAFETY: the loader calls it once, before `main`, with C arguments it
+// ignores; it only calls fcntl and stores an atomic, nothing that needs
+// Rust's runtime.
 #[used]
 #[unsafe(link_section = ".init_array")]
 static CHECK_STDOUT: extern "C" fn() = {

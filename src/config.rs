@@ -158,45 +158,83 @@ fn copy_config(old: &Path, new: &Path) -> Vec<NotCopied> {
         Err(e) if e.kind() == NotFound => {}
         Err(e) => miss(&old.join("lang"), Unreadable::Io(e)),
     }
+    // Copied into a folder beside the new one, which takes the new name
+    // only when complete: a copy cut short is never taken for a finished one.
+    let mut part_name = std::ffi::OsString::from(".");
+    part_name.push(new.file_name().unwrap_or_default());
+    part_name.push(".copying");
+    let part = new.with_file_name(part_name);
+    let _ = std::fs::remove_dir_all(&part);
+    let mut copied = 0;
     for file in files {
         let from = old.join(&file);
-        let bytes = match read_small_bytes(&from) {
-            Ok(Some(bytes)) => bytes,
+        let (bytes, mode) = match read_small_bytes(&from) {
+            Ok(Some(found)) => found,
             Ok(None) => continue,
             Err(why) => {
                 miss(&from, why);
                 continue;
             }
         };
-        let to = new.join(&file);
-        let written = std::fs::create_dir_all(to.parent().unwrap_or(new))
-            .and_then(|()| std::fs::write(&to, bytes));
-        if let Err(e) = written {
-            miss(&to, Unreadable::Io(e));
+        let to = part.join(&file);
+        // The same permissions, but always writable by the user, so the app
+        // can save its settings.
+        let written = std::fs::create_dir_all(to.parent().unwrap_or(&part))
+            .and_then(|()| std::fs::write(&to, bytes))
+            .and_then(|()| {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode((mode & 0o7777) | 0o200);
+                std::fs::set_permissions(&to, perms)
+            });
+        match written {
+            Ok(()) => copied += 1,
+            Err(e) => miss(&new.join(&file), Unreadable::Io(e)),
+        }
+    }
+    if copied == 0 {
+        let _ = std::fs::remove_dir_all(&part);
+        return missed;
+    }
+    if let Err(e) = std::fs::rename(&part, new) {
+        let _ = std::fs::remove_dir_all(&part);
+        // Unless another copy of the app made it first.
+        if std::fs::symlink_metadata(new).is_err() {
+            miss(new, Unreadable::Io(e));
         }
     }
     missed
 }
 
-/// A file's bytes if it's a regular file of at most MAX_SETTINGS_BYTES;
-/// None if there's nothing there. A FIFO or a device is never opened.
-fn read_small_bytes(path: &Path) -> Result<Option<Vec<u8>>, Unreadable> {
+/// A file's bytes and permissions if it's a regular file of at most
+/// MAX_SETTINGS_BYTES; None if there's nothing there. It's checked once
+/// open, and opened without waiting, so a FIFO never blocks.
+fn read_small_bytes(path: &Path) -> Result<Option<(Vec<u8>, u32)>, Unreadable> {
     use std::io::Read;
-    match std::fs::metadata(path) {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(Unreadable::Io(e)),
-        Ok(m) if !m.is_file() => return Err(Unreadable::NotAFile),
-        Ok(m) if m.len() > MAX_SETTINGS_BYTES => return Err(Unreadable::TooBig),
-        Ok(_) => {}
+    };
+    let meta = file.metadata().map_err(Unreadable::Io)?;
+    if !meta.is_file() {
+        return Err(Unreadable::NotAFile);
+    }
+    if meta.len() > MAX_SETTINGS_BYTES {
+        return Err(Unreadable::TooBig);
     }
     let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .and_then(|f| f.take(MAX_SETTINGS_BYTES + 1).read_to_end(&mut bytes))
+    file.take(MAX_SETTINGS_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(Unreadable::Io)?;
     if bytes.len() as u64 > MAX_SETTINGS_BYTES {
         return Err(Unreadable::TooBig);
     }
-    Ok(Some(bytes))
+    Ok(Some((bytes, meta.permissions().mode())))
 }
 
 /// settings.json's text: None if there's no file; Err if it's something
@@ -512,6 +550,36 @@ mod tests {
         std::fs::create_dir(&empty).unwrap();
         assert!(copy_config(&old, &empty).is_empty());
         assert_eq!(std::fs::read_dir(&empty).unwrap().count(), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Copies keep their permissions, but stay writable by the user; a copy
+    /// cut short earlier is thrown away, never used.
+    #[test]
+    fn copies_keep_permissions_and_finish_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = test_dir("whole");
+        let (old, new) = (dir.join("old"), dir.join("new"));
+        std::fs::create_dir_all(old.join("lang")).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let set =
+            |p: &Path, m| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        std::fs::write(old.join("settings.json"), b"{}").unwrap();
+        set(&old.join("settings.json"), 0o600);
+        std::fs::write(old.join("lang/nl.lang"), b"A=1").unwrap();
+        set(&old.join("lang/nl.lang"), 0o444);
+        // What an earlier copy, cut short, left behind.
+        let part = dir.join(".new.copying");
+        std::fs::create_dir_all(&part).unwrap();
+        std::fs::write(part.join("stale.json"), b"half").unwrap();
+        assert!(copy_config(&old, &new).is_empty());
+        assert_eq!(mode(&new.join("settings.json")), 0o600);
+        assert_eq!(mode(&new.join("lang/nl.lang")), 0o644);
+        assert!(!new.join("stale.json").exists());
+        assert!(!part.exists());
+        assert_eq!(mode(&old.join("settings.json")), 0o600);
+        assert_eq!(mode(&old.join("lang/nl.lang")), 0o444);
+        set(&old.join("lang/nl.lang"), 0o644);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
