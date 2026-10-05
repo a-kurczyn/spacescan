@@ -146,6 +146,54 @@ struct Worker {
     links: HashMap<(u64, u64), PathBuf>,
     /// Sources removed by a move (a folder in place of all it held).
     removed: Vec<PathBuf>,
+    /// Sources of a move to another filesystem, waiting to be removed
+    /// until their copies are on disk.
+    moved: Moved,
+}
+
+/// A move's sources whose copies are in place but maybe not yet on disk:
+/// a source is removed only once a sync has put its copy on disk, so
+/// pulling out a drive or a power cut never loses both.
+#[derive(Default)]
+struct Moved {
+    /// In the order they finished: a folder after everything it held.
+    sources: Vec<MovedSource>,
+    /// Bytes copied since the last sync.
+    bytes: u64,
+    /// A folder on each filesystem written to since the last sync, by
+    /// device.
+    written: HashMap<u64, PathBuf>,
+    /// The item being put, named if a sync fails.
+    item: PathBuf,
+    /// A source of the item couldn't be removed (it's incomplete).
+    failed: bool,
+}
+
+/// A source a move has finished with.
+enum MovedSource {
+    /// A file, link or pipe, copied in full.
+    File(PathBuf),
+    /// A folder whose whole contents were moved.
+    Folder(PathBuf),
+    /// A folder merged into one already there: removed if nothing is left
+    /// in it.
+    Merged(PathBuf),
+}
+
+/// Syncs and removes moved sources at least this often during an item.
+const SYNC_BYTES: u64 = 256 << 20;
+const SYNC_SOURCES: usize = 1000;
+
+/// Writes everything waiting for the filesystem holding `dir` to its disk.
+fn sync_filesystem(dir: &Path) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let f = std::fs::File::open(dir)?;
+    // SAFETY: `f` is an open descriptor for the whole call.
+    if unsafe { libc::syncfs(f.as_raw_fd()) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 impl Worker {
@@ -225,7 +273,7 @@ impl Worker {
         let mut r = Results::default();
         for src in sources {
             let dst = target.join(src.file_name().unwrap_or_default());
-            match self.put(src, &dst, mode) {
+            match self.put_item(src, &dst, mode) {
                 Ok(Outcome::Done) => r.complete += 1,
                 Ok(Outcome::Skipped) => r.skipped += 1,
                 Ok(Outcome::Incomplete) => r.incomplete += 1,
@@ -237,6 +285,103 @@ impl Worker {
         }
         r.removed = std::mem::take(&mut self.removed);
         r
+    }
+
+    /// Puts `src` at `dst`, one item of a paste. A move to another
+    /// filesystem then removes what arrived from the source (also when
+    /// cancelled: what arrived has moved); a source that stays makes a
+    /// finished item incomplete.
+    fn put_item(&mut self, src: &Path, dst: &Path, mode: ClipMode) -> Result<Outcome, Stop> {
+        self.moved.item = src.to_path_buf();
+        let outcome = self.put(src, dst, mode);
+        self.remove_moved();
+        // A folder that left entirely is listed instead of what it held.
+        self.removed.sort();
+        let mut listed: Vec<PathBuf> = Vec::with_capacity(self.removed.len());
+        for p in self.removed.drain(..) {
+            if !listed.last().is_some_and(|top| p.starts_with(top)) {
+                listed.push(p);
+            }
+        }
+        self.removed = listed;
+        match outcome {
+            Ok(Outcome::Done) if std::mem::take(&mut self.moved.failed) => Ok(Outcome::Incomplete),
+            other => {
+                self.moved.failed = false;
+                other
+            }
+        }
+    }
+
+    /// Notes that `source` of a move has arrived in full (at `dst`, if
+    /// anything was written for it, with `bytes`); it's removed once its
+    /// copy is on disk (see `remove_moved`).
+    fn note_moved(&mut self, source: MovedSource, dst: Option<&Path>, bytes: u64) {
+        if let Some(dir) = dst.and_then(Path::parent)
+            && let Ok(m) = std::fs::metadata(dir)
+        {
+            self.moved
+                .written
+                .entry(m.dev())
+                .or_insert_with(|| dir.to_path_buf());
+        }
+        self.moved.sources.push(source);
+        self.moved.bytes = self.moved.bytes.saturating_add(bytes);
+        if self.moved.bytes >= SYNC_BYTES || self.moved.sources.len() >= SYNC_SOURCES {
+            self.remove_moved();
+        }
+    }
+
+    /// Removes the noted sources, after syncing every filesystem their
+    /// copies went to; if a sync fails, nothing is removed. A source that
+    /// can't be removed is reported once (the folders above it stay
+    /// quietly) and makes the item incomplete.
+    fn remove_moved(&mut self) {
+        let sources = std::mem::take(&mut self.moved.sources);
+        let written = std::mem::take(&mut self.moved.written);
+        self.moved.bytes = 0;
+        if sources.is_empty() {
+            return;
+        }
+        for dir in written.values() {
+            if let Err(e) = sync_filesystem(dir) {
+                self.issue(trf(
+                    "ERR_MOVE_FAILED",
+                    &[&show_path(&self.moved.item), &io_reason(&e)],
+                ));
+                self.moved.failed = true;
+                return;
+            }
+        }
+        // Sources that stay: the folders above them stay too.
+        let mut kept: Vec<PathBuf> = Vec::new();
+        for source in sources {
+            let (p, result, quiet) = match source {
+                MovedSource::File(p) => {
+                    let r = std::fs::remove_file(&p);
+                    (p, r, false)
+                }
+                MovedSource::Folder(p) => {
+                    let r = std::fs::remove_dir(&p);
+                    let quiet = kept.iter().any(|k| k.starts_with(&p));
+                    (p, r, quiet)
+                }
+                MovedSource::Merged(p) => {
+                    let r = std::fs::remove_dir(&p);
+                    (p, r, true)
+                }
+            };
+            match result {
+                Ok(()) => self.removed.push(p),
+                Err(e) => {
+                    if !quiet {
+                        self.issue(trf("ERR_MOVE_FAILED", &[&show_path(&p), &io_reason(&e)]));
+                        self.moved.failed = true;
+                    }
+                    kept.push(p);
+                }
+            }
+        }
     }
 
     /// Puts `src` at `dst`, copying or moving it.
@@ -304,16 +449,14 @@ impl Worker {
                 return Ok(Outcome::Incomplete);
             }
         };
-        let start = self.removed.len();
         let mut outcome = Outcome::Done;
         for (i, entry) in entries.iter().enumerate() {
             let name = entry.file_name();
             let one = deep(|| self.put(&src.join(&name), &dst.join(&name), mode))?;
             outcome = if i == 0 { one } else { outcome.and(one) };
         }
-        if mode == ClipMode::Move && std::fs::remove_dir(src).is_ok() {
-            self.removed.truncate(start);
-            self.removed.push(src.to_path_buf());
+        if mode == ClipMode::Move {
+            self.note_moved(MovedSource::Merged(src.to_path_buf()), None, 0);
         }
         Ok(outcome)
     }
@@ -321,8 +464,8 @@ impl Worker {
     /// Copies `src` (described by `meta`) to the new path `dst`, keeping
     /// permissions, times and hard links between the files copied. With
     /// `remove` (a move to another filesystem), each part of `src` is
-    /// removed as soon as it's in place, so whatever can't be moved is all
-    /// that stays.
+    /// removed once its copy is on disk (see `note_moved`), so whatever
+    /// can't be moved is all that stays.
     fn copy(
         &mut self,
         src: &Path,
@@ -348,7 +491,6 @@ impl Worker {
                 Ok(rd) => rd.filter_map(|e| e.ok()).collect::<Vec<_>>(),
                 Err(e) => return failed(self, e),
             };
-            let start = self.removed.len();
             let mut outcome = Outcome::Done;
             for entry in entries {
                 let child = entry.path();
@@ -361,16 +503,7 @@ impl Worker {
             let _ = std::fs::set_permissions(dst, meta.permissions());
             keep_times(dst, meta);
             if remove && outcome == Outcome::Done {
-                match std::fs::remove_dir(src) {
-                    Ok(()) => {
-                        self.removed.truncate(start);
-                        self.removed.push(src.to_path_buf());
-                    }
-                    Err(e) => {
-                        self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
-                        return Ok(Outcome::Incomplete);
-                    }
-                }
+                self.note_moved(MovedSource::Folder(src.to_path_buf()), Some(dst), 0);
             }
             return Ok(outcome);
         }
@@ -411,11 +544,7 @@ impl Worker {
             }
         }
         if remove {
-            if let Err(e) = std::fs::remove_file(src) {
-                self.issue(trf("ERR_MOVE_FAILED", &[&show_path(src), &io_reason(&e)]));
-                return Ok(Outcome::Incomplete);
-            }
-            self.removed.push(src.to_path_buf());
+            self.note_moved(MovedSource::File(src.to_path_buf()), Some(dst), meta.len());
         }
         Ok(Outcome::Done)
     }
@@ -429,14 +558,15 @@ impl Worker {
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(src)?;
         // Swapped for something else since it was listed: not copied.
-        if !from.metadata()?.is_file() {
+        let meta = from.metadata()?;
+        if !meta.is_file() {
             return Err(Some(std::io::ErrorKind::InvalidInput.into()));
         }
         // Written under a new name next to `dst`, then put in its place: a
         // file already at `dst` (or what a link there points to) is never
         // written through, and a failed copy leaves it as it was.
         let (part, mut to) = new_part_file(dst)?;
-        let result = self.copy_contents(&mut from, &mut to);
+        let result = self.copy_contents(&mut from, &mut to, meta.len());
         drop(to);
         match result.and_then(|()| std::fs::rename(&part, dst).map_err(Some)) {
             Ok(()) => Ok(()),
@@ -447,12 +577,14 @@ impl Worker {
         }
     }
 
-    /// Copies everything from `from` to `to`, in pieces so progress shows
-    /// and Cancel works inside big files. Err(None): cancelled.
+    /// Copies everything from `from` (`len` bytes when it was opened) to
+    /// `to`, in pieces so progress shows and Cancel works inside big files.
+    /// Err(None): cancelled.
     fn copy_contents(
         &mut self,
         from: &mut std::fs::File,
         to: &mut std::fs::File,
+        len: u64,
     ) -> Result<(), Option<std::io::Error>> {
         use std::io::{Read, Write};
         use std::os::fd::AsRawFd;
@@ -489,7 +621,10 @@ impl Worker {
                 }
                 n as usize
             } else {
-                buf.resize(PIECE.min(1 << 20), 0);
+                // As big as the file, up to 1 MiB: many small files (to a
+                // drive the kernel can't copy to directly) don't each fill
+                // a whole MiB first.
+                buf.resize(len.clamp(8 << 10, 1 << 20) as usize, 0);
                 let n = from.read(&mut buf)?;
                 to.write_all(&buf[..n])?;
                 n
@@ -1022,6 +1157,7 @@ impl DiskScanApp {
                 last_report: Instant::now(),
                 links: HashMap::new(),
                 removed: Vec::new(),
+                moved: Moved::default(),
             };
             if let Err(why) = w.check_space(&sources, &known, &target, mode) {
                 let _ = w.reports.send(Report::Refused(why));
@@ -1250,7 +1386,7 @@ mod tests {
                 .or_default()
                 .events
                 .push(egui::ViewportEvent::Close);
-            let out = ctx.run_ui(raw, |ui| app.guard_quit(ui.ctx()));
+            let out = headless_frame(&ctx, raw, |ui| app.guard_quit(ui.ctx()));
             out.viewport_output
                 .get(&egui::ViewportId::ROOT)
                 .is_some_and(|v| v.commands.contains(&egui::ViewportCommand::CancelClose))
@@ -1325,6 +1461,7 @@ mod tests {
                 last_report: Instant::now(),
                 links: HashMap::new(),
                 removed: Vec::new(),
+                moved: Moved::default(),
             },
             rx,
         )
@@ -1348,7 +1485,10 @@ mod tests {
 
         let (mut w, _) = worker(ClashChoice::Skip);
         let dst = d.join("dst");
-        assert_eq!(w.put(&src, &dst, ClipMode::Copy).ok(), Some(Outcome::Done));
+        assert_eq!(
+            w.put_item(&src, &dst, ClipMode::Copy).ok(),
+            Some(Outcome::Done)
+        );
         assert_eq!(std::fs::read(dst.join("sub/a.txt")).unwrap(), b"hello");
         assert_eq!(
             std::fs::read_link(dst.join("link")).unwrap(),
@@ -1373,20 +1513,20 @@ mod tests {
 
         let (mut w, _) = worker(ClashChoice::Skip);
         assert_eq!(
-            w.put(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
+            w.put_item(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
                 .ok(),
             Some(Outcome::Skipped)
         );
         assert_eq!(std::fs::read(there.join("a.txt")).unwrap(), b"old");
 
         let (mut w, _) = worker(ClashChoice::KeepBoth);
-        w.put(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
+        w.put_item(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
             .ok()
             .unwrap();
         assert_eq!(std::fs::read(there.join("a (2).txt")).unwrap(), b"new");
 
         let (mut w, _) = worker(ClashChoice::Replace);
-        w.put(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
+        w.put_item(&d.join("a.txt"), &there.join("a.txt"), ClipMode::Copy)
             .ok()
             .unwrap();
         assert_eq!(std::fs::read(there.join("a.txt")).unwrap(), b"new");
@@ -1404,7 +1544,10 @@ mod tests {
         std::fs::write(dst.join("x/2.ogg"), b"2").unwrap();
 
         let (mut w, _) = worker(ClashChoice::Replace);
-        assert_eq!(w.put(&src, &dst, ClipMode::Move).ok(), Some(Outcome::Done));
+        assert_eq!(
+            w.put_item(&src, &dst, ClipMode::Move).ok(),
+            Some(Outcome::Done)
+        );
         assert!(dst.join("x/1.ogg").exists() && dst.join("x/2.ogg").exists());
         assert!(!src.exists(), "the merged source is gone");
         let _ = std::fs::remove_dir_all(&d);
@@ -1473,7 +1616,7 @@ mod tests {
         let (mut w, reports) = worker(ClashChoice::Skip);
         let dst = d.join("proj");
         assert_eq!(
-            w.put(&src, &dst, ClipMode::Move).ok(),
+            w.put_item(&src, &dst, ClipMode::Move).ok(),
             Some(Outcome::Incomplete)
         );
         let mut arrived = listing(&dst);
@@ -1526,6 +1669,105 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// A fresh folder on another filesystem than the temp folder (in
+    /// /dev/shm), or None where there's no such place.
+    fn other_filesystem(tag: &str) -> Option<PathBuf> {
+        let shm = Path::new("/dev/shm");
+        let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+        if dev(shm)? == dev(&std::env::temp_dir())? {
+            eprintln!("skipped: /dev/shm is on the same filesystem as the temp folder");
+            return None;
+        }
+        let d = shm.join(format!("spacescan-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        Some(d)
+    }
+
+    /// A move to another filesystem of more files than one sync covers:
+    /// everything arrives, the source is gone, and the folder is listed as
+    /// removed instead of everything it held.
+    #[test]
+    fn big_moves_remove_their_sources_in_steps() {
+        let Some(src_root) = other_filesystem("steps") else {
+            return;
+        };
+        let src = src_root.join("many");
+        for sub in ["a", "b/c"] {
+            std::fs::create_dir_all(src.join(sub)).unwrap();
+            for i in 0..1250 {
+                std::fs::write(src.join(sub).join(format!("{i}.txt")), i.to_string()).unwrap();
+            }
+        }
+        let before = listing(&src);
+        let d = scratch("steps");
+        let (mut w, _) = worker(ClashChoice::Skip);
+        let dst = d.join("many");
+        assert_eq!(
+            w.put_item(&src, &dst, ClipMode::Move).ok(),
+            Some(Outcome::Done)
+        );
+        assert_eq!(listing(&dst), before);
+        assert_eq!(std::fs::read(dst.join("b/c/1249.txt")).unwrap(), b"1249");
+        assert!(!src.exists());
+        assert_eq!(w.removed, vec![src.clone()]);
+        let _ = std::fs::remove_dir_all(&src_root);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A moved file whose source can't be removed (its folder is read-only)
+    /// is reported once; it and the folders above it stay at the source,
+    /// everything else leaves, and the item is incomplete.
+    #[test]
+    fn a_source_that_cannot_leave_is_reported_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(src_root) = other_filesystem("stays") else {
+            return;
+        };
+        let src = src_root.join("m");
+        std::fs::create_dir_all(src.join("ro")).unwrap();
+        std::fs::create_dir_all(src.join("free")).unwrap();
+        std::fs::write(src.join("ro/x"), b"x").unwrap();
+        std::fs::write(src.join("free/y"), b"y").unwrap();
+        std::fs::write(src.join("z"), b"z").unwrap();
+        std::fs::set_permissions(src.join("ro"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let d = scratch("stays");
+        let (mut w, reports) = worker(ClashChoice::Skip);
+        let outcome = w.put_item(&src, &d.join("m"), ClipMode::Move).ok();
+        std::fs::set_permissions(src.join("ro"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !src.join("ro/x").exists() {
+            // Running as root: permissions don't stop anything.
+            let _ = std::fs::remove_dir_all(&src_root);
+            let _ = std::fs::remove_dir_all(&d);
+            return;
+        }
+        assert_eq!(outcome, Some(Outcome::Incomplete));
+        assert_eq!(
+            std::fs::read(d.join("m/ro/x")).unwrap(),
+            b"x",
+            "the copy is there"
+        );
+        assert_eq!(
+            listing(&src),
+            vec![
+                (PathBuf::from("ro"), "dir"),
+                (PathBuf::from("ro/x"), "file")
+            ]
+        );
+        assert_eq!(w.removed, vec![src.join("free"), src.join("z")]);
+        let issues: Vec<String> = reports
+            .try_iter()
+            .filter_map(|r| match r {
+                Report::Issue(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("ro/x"));
+        let _ = std::fs::remove_dir_all(&src_root);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// A merge into a folder with a read-only part: what can't go there
     /// stays at the source, with a note, and the rest moves.
     #[test]
@@ -1543,7 +1785,7 @@ mod tests {
         std::fs::set_permissions(dst.join("locked"), std::fs::Permissions::from_mode(0o555))
             .unwrap();
         let (mut w, reports) = worker(ClashChoice::Replace);
-        let outcome = w.put(&src, &dst, ClipMode::Move).ok();
+        let outcome = w.put_item(&src, &dst, ClipMode::Move).ok();
         std::fs::set_permissions(dst.join("locked"), std::fs::Permissions::from_mode(0o755))
             .unwrap();
         if std::fs::write(dst.join("locked/probe"), b"").is_ok() && outcome == Some(Outcome::Done) {
@@ -1576,7 +1818,10 @@ mod tests {
         std::fs::write(src.join("b/plain"), b"p").unwrap();
         let (mut w, _) = worker(ClashChoice::Skip);
         let dst = d.join("dst");
-        assert_eq!(w.put(&src, &dst, ClipMode::Copy).ok(), Some(Outcome::Done));
+        assert_eq!(
+            w.put_item(&src, &dst, ClipMode::Copy).ok(),
+            Some(Outcome::Done)
+        );
         let (one, two) = (
             std::fs::metadata(dst.join("a/one")).unwrap(),
             std::fs::metadata(dst.join("b/two")).unwrap(),
@@ -1763,7 +2008,7 @@ mod tests {
             std::os::unix::fs::symlink(&src, to.join("src.txt")).unwrap();
             let (mut w, reports) = worker(ClashChoice::Replace);
             w.always = Some(ClashChoice::Replace);
-            let _ = w.put(&src, &to.join("src.txt"), mode);
+            let _ = w.put_item(&src, &to.join("src.txt"), mode);
             assert_eq!(
                 std::fs::read(&src).unwrap(),
                 b"precious",
@@ -1778,7 +2023,7 @@ mod tests {
             std::fs::hard_link(&src, to.join("src.txt")).unwrap();
             let (mut w, reports) = worker(ClashChoice::Skip);
             assert_eq!(
-                w.put(&src, &to.join("src.txt"), mode).ok(),
+                w.put_item(&src, &to.join("src.txt"), mode).ok(),
                 Some(Outcome::Skipped)
             );
             assert!(
@@ -1799,7 +2044,7 @@ mod tests {
         std::fs::hard_link(d.join("third"), to.join("src.txt")).unwrap();
         let (mut w, _) = worker(ClashChoice::Replace);
         assert_eq!(
-            w.put(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
+            w.put_item(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
             Some(Outcome::Done)
         );
         assert_eq!(std::fs::read(to.join("src.txt")).unwrap(), b"precious");
@@ -1810,7 +2055,7 @@ mod tests {
         let (mut w, _) = worker(ClashChoice::Replace);
         let t = Instant::now();
         assert_eq!(
-            w.put(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
+            w.put_item(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
             Some(Outcome::Done)
         );
         assert!(t.elapsed() < std::time::Duration::from_secs(5));
@@ -1821,7 +2066,7 @@ mod tests {
         if std::fs::read(&src).is_err() {
             let (mut w, _) = worker(ClashChoice::Replace);
             assert_eq!(
-                w.put(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
+                w.put_item(&src, &to.join("src.txt"), ClipMode::Copy).ok(),
                 Some(Outcome::Incomplete)
             );
             assert_eq!(std::fs::read(to.join("src.txt")).unwrap(), b"keep me");
@@ -1847,7 +2092,7 @@ mod tests {
         let (mut w, _) = worker(ClashChoice::Replace);
         w.mounts.insert(src.join("mnt"));
         assert_eq!(
-            w.put(&src, &d.join("to/src"), ClipMode::Copy).ok(),
+            w.put_item(&src, &d.join("to/src"), ClipMode::Copy).ok(),
             Some(Outcome::Incomplete)
         );
         assert!(!d.join("to/src/mnt/inside").exists());
@@ -1879,7 +2124,7 @@ mod tests {
                 ..Default::default()
             };
             let mut got = false;
-            let _ = ctx.run_ui(raw, |ui| {
+            let _ = headless_frame(&ctx, raw, |ui| {
                 app.note_paste_key(ui.ctx());
                 got = app.transfer.paste_key;
             });

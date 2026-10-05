@@ -319,7 +319,7 @@ pub(crate) fn ext_label(ext: &str) -> String {
 }
 
 /// One category's share of a folder.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CategoryRow {
     pub(crate) cat: Category,
     pub(crate) size: u64,

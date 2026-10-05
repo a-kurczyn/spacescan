@@ -378,34 +378,37 @@ pub(crate) fn rows_in_order(
     }
     let mut files = files_in_app_order(tree);
     if sort == SortColumn::Name {
-        // By the path below the folder, built once per file.
+        // By the path below the folder: it and its sort key are built once
+        // per file, not at every comparison. (Paths differ, so no two are
+        // equal.)
         let top = tree.path();
-        let mut keyed: Vec<(String, &Node)> = files
+        let mut keyed: Vec<(Vec<u8>, String, &Node)> = files
             .par_iter()
             .map(|n| {
                 let p = n.path();
-                (show_path(p.strip_prefix(&top).unwrap_or(&p)), *n)
+                let shown = show_path(p.strip_prefix(&top).unwrap_or(&p));
+                (natural_key(&shown), shown, *n)
             })
             .collect();
-        keyed.par_sort_by(|a, b| {
-            let by = natural_cmp(&a.0, &b.0).then_with(|| a.0.cmp(&b.0));
+        keyed.par_sort_unstable_by(|a, b| {
+            let by = a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1));
             if reverse { by.reverse() } else { by }
         });
-        files = keyed.into_iter().map(|(_, n)| n).collect();
+        files = keyed.into_iter().map(|(_, _, n)| n).collect();
     } else {
         sort_rows(&mut files, sort, reverse);
     }
     files
 }
 
-/// Every file under `top`, in the order the app's flat list takes equal
-/// ones: folder by folder, a folder coming when its first file is met, and
-/// each folder's files in the folder's order.
 /// `n` and the word for it, singular for one.
 fn counted(n: u64, one: &str, many: &str) -> String {
     format!("{} {}", format_count(n), if n == 1 { one } else { many })
 }
 
+/// Every file under `top`, in the order the app's flat list takes equal
+/// ones: folder by folder, a folder coming when its first file is met, and
+/// each folder's files in the folder's order.
 fn files_in_app_order(top: &Node) -> Vec<&Node> {
     fn walk<'a>(dir: &'a Node, folders: &mut Vec<Vec<&'a Node>>) {
         let mut mine = None;
@@ -430,15 +433,24 @@ fn files_in_app_order(top: &Node) -> Vec<&Node> {
 /// largest/newest first, names A–Z, the other way if `reverse`; equal ones
 /// keep the order they come in.
 fn sort_rows(rows: &mut [&Node], column: SortColumn, reverse: bool) {
+    let by: fn(&Node, &Node) -> std::cmp::Ordering = match column {
+        SortColumn::Size => |a, b| b.size.cmp(&a.size),
+        SortColumn::Files => |a, b| b.file_count.cmp(&a.file_count),
+        SortColumn::Modified => |a, b| b.mtime.cmp(&a.mtime),
+        SortColumn::Changed => |a, b| b.ctime.cmp(&a.ctime),
+        _ => {
+            // By name: each name's sort key is built once, not at every
+            // comparison. (Names in one folder differ, so none are equal.)
+            rows.par_sort_by_cached_key(|n| (natural_key(&n.name), n.name.clone()));
+            if reverse {
+                rows.reverse();
+            }
+            return;
+        }
+    };
     rows.par_sort_by(|a, b| {
-        let by = match column {
-            SortColumn::Size => b.size.cmp(&a.size),
-            SortColumn::Files => b.file_count.cmp(&a.file_count),
-            SortColumn::Modified => b.mtime.cmp(&a.mtime),
-            SortColumn::Changed => b.ctime.cmp(&a.ctime),
-            _ => natural_cmp(&a.name, &b.name).then_with(|| a.name.cmp(&b.name)),
-        };
-        if reverse { by.reverse() } else { by }
+        let order = by(a, b);
+        if reverse { order.reverse() } else { order }
     });
 }
 
@@ -971,6 +983,31 @@ mod tests {
         let all = read_csv(&report(&request(Command::Flat, &dir, Format::Csv)));
         assert_eq!(all.len() - 1, 8);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A folder's entries sorted by name, either way: the natural,
+    /// case-insensitive order the app's table uses.
+    #[test]
+    fn list_by_name_is_the_natural_order() {
+        let names = [
+            "file10", "File2", "file1", "b", "Ärger", "a007", "a7", ".dot", "Zeta", "alpha",
+        ];
+        let kids: Vec<Node> = names
+            .iter()
+            .map(|n| test_node(&format!("/t/{n}"), 1, false, vec![]))
+            .collect();
+        let tree = test_node("/t", 10, true, kids);
+        let mut want: Vec<&str> = names.to_vec();
+        want.sort_by(|a, b| natural_cmp(a, b));
+        let got = |reverse| -> Vec<String> {
+            rows_in_order(&tree, false, SortColumn::Name, reverse)
+                .iter()
+                .map(|n| n.name.to_string())
+                .collect()
+        };
+        assert_eq!(got(false), want);
+        want.reverse();
+        assert_eq!(got(true), want);
     }
 
     /// The flat list sorted by name goes by each file's whole path, so files

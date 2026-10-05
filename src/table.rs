@@ -7,6 +7,7 @@
 use super::*;
 use config::TablePrefs;
 use egui_extras::{Column, TableBuilder};
+use panels::open_externally;
 
 /// Width of the details panel ("i").
 const INFO_PANEL_WIDTH: f32 = 340.0;
@@ -202,6 +203,8 @@ struct RowOrder {
     folders: u64,
     /// Width of the longest name or path in the rows, once measured.
     name_width: Option<f32>,
+    /// The marked rows' total size, and the marks it's for.
+    marked_size: Option<(HashSet<PathBuf>, u64)>,
 }
 
 /// The Name column's text for `node`: its name, or in the flat list its
@@ -641,6 +644,21 @@ impl DiskScanApp {
         let name_width = *order.name_width.get_or_insert_with(|| {
             widest_name(ui, &order.rows, view_node, order.key.flat.is_some())
         });
+        // The marked rows' total size, worked out again only when the marks
+        // or the rows change.
+        let marked_size = match &order.marked_size {
+            _ if self.table.marked.is_empty() => 0,
+            Some((marks, size)) if *marks == self.table.marked => *size,
+            _ => {
+                let size = (0..order.rows.len())
+                    .map(|i| order.rows.node(view_node, i))
+                    .filter(|c| c.is_in(&self.table.marked))
+                    .map(|c| c.size)
+                    .fold(0u64, u64::saturating_add);
+                order.marked_size = Some((self.table.marked.clone(), size));
+                size
+            }
+        };
         let row = |i: usize| order.rows.node(view_node, i);
         let n_rows = order.rows.len();
         let flat = order.key.flat.is_some();
@@ -732,9 +750,9 @@ impl DiskScanApp {
                     ui.weak(format!("· {}", tr("TABLE_TAG_FLAT_ON_FINISH")));
                 }
             }
-            // During a scan the pick waits for the end, and says so.
+            // During a scan a picked extension waits for the end, and says so.
             if let Some(pick) = &self.pick {
-                let key = if self.scanning {
+                let key = if self.scanning && matches!(pick, Pick::Extensions(_)) {
                     "TABLE_TAG_CATEGORY_AFTER_SCAN"
                 } else {
                     "TABLE_TAG_CATEGORY"
@@ -755,18 +773,13 @@ impl DiskScanApp {
                 ));
             }
             if !self.table.marked.is_empty() {
-                let size: u64 = (0..n_rows)
-                    .map(row)
-                    .filter(|c| c.is_in(&self.table.marked))
-                    .map(|c| c.size)
-                    .fold(0u64, u64::saturating_add);
                 ui.strong(format!(
                     "· {}",
                     trf(
                         "TABLE_TAG_MARKED",
                         &[
                             &format_count(self.table.marked.len() as u64),
-                            &human_size(size)
+                            &human_size(marked_size)
                         ]
                     )
                 ));
@@ -882,12 +895,13 @@ impl DiskScanApp {
                 ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
             }
             // One scroll area for both directions, so both bars stay at the
-            // window edges (the header row scrolls with the rows).
+            // window edges (the header row scrolls with the rows). Each bar
+            // shows only when the rows don't fit that way.
             let mut scroll_area = egui::ScrollArea::both()
                 .id_salt("contents_scroll")
                 .max_height(max_height)
                 .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
             if let Some(y) = scroll_to.filter(|y| y.is_finite()) {
                 scroll_area = scroll_area.vertical_scroll_offset(y.max(0.0));
             }
@@ -1202,6 +1216,7 @@ impl DiskScanApp {
                 flat_files: count,
                 folders: 0,
                 name_width: None,
+                marked_size: None,
                 key,
             };
         }
@@ -1288,6 +1303,7 @@ impl DiskScanApp {
             rows: Rows::Children(idx),
             flat_files: 0,
             name_width: None,
+            marked_size: None,
             key,
         }
     }
@@ -1640,14 +1656,8 @@ impl DiskScanApp {
             self.open_dir(&path);
             return;
         }
-        match std::process::Command::new("xdg-open").arg(&path).spawn() {
-            // Waited for on another thread, so it doesn't become a zombie.
-            Ok(mut child) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-            }
-            Err(e) => self.log_issue(trf("ERR_OPEN_FAILED", &[&show_path(&path), &e.to_string()])),
+        if let Err(e) = open_externally(&path) {
+            self.log_issue(trf("ERR_OPEN_FAILED", &[&show_path(&path), &e.to_string()]));
         }
     }
 
@@ -2073,7 +2083,7 @@ mod flat_tests {
     /// Draws the contents table once, headless, and returns its row names.
     fn draw(app: &mut DiskScanApp) -> Vec<String> {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _ = headless_frame(&ctx, egui::RawInput::default(), |ui| {
             let root = app.root.clone().unwrap();
             app.table_ui(ui, &root, 400.0);
         });
@@ -2081,6 +2091,43 @@ mod flat_tests {
         (0..rows.len())
             .map(|i| rows.node(view, i).name.to_string())
             .collect()
+    }
+
+    /// The marked rows' total follows every change to the marks and to the
+    /// tree.
+    #[test]
+    fn the_marked_total_follows_marks_and_tree() {
+        let mut app = DiskScanApp {
+            summary_view: true,
+            ..DiskScanApp::default()
+        };
+        app.full_root = Some(Arc::new(tree()));
+        app.rebuild_view_tree();
+        let total = |app: &DiskScanApp| {
+            let order = app.table.order.as_ref().unwrap();
+            order.marked_size.as_ref().map(|m| m.1)
+        };
+        draw(&mut app);
+        assert_eq!(total(&app), None);
+        app.table.marked.insert(PathBuf::from("/v/small"));
+        draw(&mut app);
+        assert_eq!(total(&app), Some(5));
+        app.table.marked.insert(PathBuf::from("/v/a"));
+        draw(&mut app);
+        assert_eq!(total(&app), Some(105));
+        app.table.marked.remove(Path::new("/v/small"));
+        draw(&mut app);
+        assert_eq!(total(&app), Some(100));
+        // The same folder, changed: worked out from the new rows.
+        app.full_root = Some(Arc::new(test_node(
+            "/v",
+            42,
+            true,
+            vec![test_node("/v/a", 42, true, vec![file("/v/a/new", 42)])],
+        )));
+        app.rebuild_view_tree();
+        draw(&mut app);
+        assert_eq!(total(&app), Some(42));
     }
 
     #[test]
@@ -2139,7 +2186,7 @@ mod flat_tests {
                     )),
                     ..Default::default()
                 };
-                let _ = ctx.run_ui(raw, |ui| {
+                let _ = headless_frame(&ctx, raw, |ui| {
                     let root = app.root.clone().unwrap();
                     app.table_ui(ui, &root, 400.0);
                 });
@@ -2149,7 +2196,7 @@ mod flat_tests {
         let full = {
             let ctx = egui::Context::default();
             let mut w = 0.0;
-            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = headless_frame(&ctx, egui::RawInput::default(), |ui| {
                 let font = egui::TextStyle::Body.resolve(ui.style());
                 w = ui
                     .painter()
@@ -2181,7 +2228,7 @@ mod flat_tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run_ui(raw, |ui| {
+            let _ = headless_frame(&ctx, raw, |ui| {
                 let root = app.root.clone().unwrap();
                 app.table_ui(ui, &root, 400.0);
             });

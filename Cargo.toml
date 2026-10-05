@@ -28,6 +28,16 @@ unicode-normalization = "0.1.25"
 uzers = "0.12.2"
 wl-clipboard-rs = "0.9"
 
+# Habits the code already keeps, checked by clippy.
+[lints.clippy]
+# Every unsafe block says why it's sound.
+undocumented_unsafe_blocks = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+uninlined_format_args = "warn"
+manual_let_else = "warn"
+
 # Optimized across the whole program: smaller and faster (slower to build).
 [profile.release]
 lto = "fat"

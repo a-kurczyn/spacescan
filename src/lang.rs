@@ -1,7 +1,7 @@
 //! Translations. Every user-facing string is a `KEY=value` line in a
-//! language file (lang/<code>.lang, built into the binary). English is the
+//! language file (`lang/<code>.lang`, built into the binary). English is the
 //! base: a key missing from a language shows in English. A file
-//! ~/.config/spacescan/lang/<code>.lang overrides lines of a built-in
+//! `~/.config/spacescan/lang/<code>.lang` overrides lines of a built-in
 //! language, or adds a new language. Values may contain `%s` placeholders,
 //! filled in order by `trf`.
 
@@ -284,6 +284,104 @@ mod tests {
             Some("# name: Test\nA=b\n")
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The string literals in Rust source `text` (comments and character
+    /// literals skipped; raw strings read whole).
+    fn string_literals(text: &str) -> Vec<String> {
+        let b = text.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            match b[i] {
+                b'/' if b.get(i + 1) == Some(&b'/') => {
+                    while i < b.len() && b[i] != b'\n' {
+                        i += 1;
+                    }
+                }
+                // '"', '\'' or '\n': a character, not a quote or a lifetime.
+                b'\'' if b.get(i + 2) == Some(&b'\'') => i += 3,
+                b'\'' if b.get(i + 1) == Some(&b'\\') => {
+                    i += 2;
+                    while i < b.len() && b[i] != b'\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                b'r' if b.get(i + 1).is_some_and(|&c| c == b'"' || c == b'#') => {
+                    let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+                    let start = i + 2 + hashes;
+                    let end_mark = format!("\"{}", "#".repeat(hashes));
+                    let len = text[start..].find(&end_mark).unwrap_or(0);
+                    out.push(text[start..start + len].to_string());
+                    i = start + len + end_mark.len();
+                }
+                b'"' => {
+                    let mut lit = String::new();
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' {
+                        if b[i] == b'\\' {
+                            i += 1;
+                        }
+                        lit.push(b[i] as char);
+                        i += 1;
+                    }
+                    out.push(lit);
+                    i += 1;
+                }
+                _ => i += 1,
+            }
+        }
+        out
+    }
+
+    /// Every translation key the code uses (any string literal that looks
+    /// like one, `TABLE_TAG_MARKED`) is in the English file, so no screen
+    /// ever shows a bare key.
+    #[test]
+    fn every_key_used_is_in_english() {
+        // Literals of that look that aren't keys: environment variables, an
+        // X11 atom, and keys these tests make up.
+        let not_a_key = |s: &str| {
+            s.starts_with("SPACESCAN_")
+                || s.starts_with("CARGO_")
+                || [
+                    "WAYLAND_DISPLAY",
+                    "UTF8_STRING",
+                    "N_ONE",
+                    "N_FEW",
+                    "NO_SUCH_KEY",
+                ]
+                .contains(&s)
+        };
+        let looks_like_a_key = |s: &str| {
+            s.len() > 2
+                && s.starts_with(|c: char| c.is_ascii_uppercase())
+                && s.contains('_')
+                && s.chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        };
+        let en = parse_kv_file(built_in("en").unwrap());
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut used = 0;
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for lit in string_literals(&text) {
+                if looks_like_a_key(&lit) && !not_a_key(&lit) {
+                    used += 1;
+                    if !en.contains_key(&lit) {
+                        missing.push(format!("{}: {lit}", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(used > 300, "only {used} keys found: the scan is broken");
+        assert!(missing.is_empty(), "{missing:#?}");
     }
 
     /// Every built-in language has a name and exactly English's keys (plural

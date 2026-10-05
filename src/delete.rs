@@ -8,8 +8,10 @@ use std::sync::mpsc::channel;
 
 // Mount safety: deleting or trashing must never reach into another mounted
 // filesystem (a network share, a USB drive, a bind mount). A target that
-// is or contains a mount point is refused, and the recursive delete also
-// stops at any folder on another device.
+// is or contains a mount point (in /proc/self/mountinfo) is refused, and
+// the recursive delete also stops at any mount point it meets. Device
+// numbers aren't compared: btrfs subvolumes have their own and are
+// deleted like folders.
 
 /// Mount points at or below `path`.
 fn mounts_at_or_under(path: &Path) -> Vec<PathBuf> {
@@ -862,10 +864,10 @@ mod tests {
 
         // The live tree, read in full and as the chart shows it.
         let mut looks = LiveLooks::default();
-        let partial = live.snapshot(usize::MAX, 0.0, &mut looks).unwrap();
+        let partial = live.snapshot(usize::MAX, 0.0, None, &mut looks).unwrap();
         assert_eq!(partial.file_count, files);
         assert!(find_node(&partial, &bottom).is_some());
-        assert!(live.snapshot(12, 1.3 / 360.0, &mut looks).is_some());
+        assert!(live.snapshot(12, 1.3 / 360.0, None, &mut looks).is_some());
 
         // Categories, filter, clone.
         let cats = CategoryModel::defaults();

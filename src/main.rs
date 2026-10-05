@@ -39,7 +39,6 @@ use transfer::ClipMode;
 use widgets::*;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 struct HoverInfo {
     path: PathBuf,
     size: u64,
@@ -138,42 +137,26 @@ impl Settings {
     const FLAT_ROWS: RangeInclusive<usize> = 100..=100_000;
 
     fn sanitized(mut self) -> Self {
-        self.max_render_depth = self
-            .max_render_depth
-            .clamp(*Self::DEPTH.start(), *Self::DEPTH.end());
-        self.min_segment_angle_deg = self
-            .min_segment_angle_deg
-            .clamp(*Self::MIN_ANGLE.start(), *Self::MIN_ANGLE.end());
-        self.max_children_shown = self
-            .max_children_shown
-            .clamp(*Self::MAX_CHILDREN.start(), *Self::MAX_CHILDREN.end());
-        self.hub_radius_frac = self
-            .hub_radius_frac
-            .clamp(*Self::HUB.start(), *Self::HUB.end());
-        self.age_days = self
-            .age_days
-            .clamp(*Self::AGE_DAYS.start(), *Self::AGE_DAYS.end());
-        self.age_steps = self
-            .age_steps
-            .clamp(*Self::AGE_STEPS.start(), *Self::AGE_STEPS.end());
-        self.age_darkest_pct = self
-            .age_darkest_pct
-            .clamp(*Self::AGE_DARKEST.start(), *Self::AGE_DARKEST.end());
-        self.free_space_gamma = self
-            .free_space_gamma
-            .clamp(*Self::FREE_GAMMA.start(), *Self::FREE_GAMMA.end());
-        self.stroke_width = self
-            .stroke_width
-            .clamp(*Self::STROKE_WIDTH.start(), *Self::STROKE_WIDTH.end());
-        self.tess_px_per_step = self
-            .tess_px_per_step
-            .clamp(*Self::TESS.start(), *Self::TESS.end());
-        self.max_log_lines = self
-            .max_log_lines
-            .clamp(*Self::LOG_LINES.start(), *Self::LOG_LINES.end());
-        self.flat_rows = self
-            .flat_rows
-            .clamp(*Self::FLAT_ROWS.start(), *Self::FLAT_ROWS.end());
+        /// `v` moved into `range` if it's outside it.
+        fn clamp<T: PartialOrd + Copy>(v: &mut T, range: RangeInclusive<T>) {
+            if *v < *range.start() {
+                *v = *range.start();
+            } else if *v > *range.end() {
+                *v = *range.end();
+            }
+        }
+        clamp(&mut self.max_render_depth, Self::DEPTH);
+        clamp(&mut self.min_segment_angle_deg, Self::MIN_ANGLE);
+        clamp(&mut self.max_children_shown, Self::MAX_CHILDREN);
+        clamp(&mut self.hub_radius_frac, Self::HUB);
+        clamp(&mut self.age_days, Self::AGE_DAYS);
+        clamp(&mut self.age_steps, Self::AGE_STEPS);
+        clamp(&mut self.age_darkest_pct, Self::AGE_DARKEST);
+        clamp(&mut self.free_space_gamma, Self::FREE_GAMMA);
+        clamp(&mut self.stroke_width, Self::STROKE_WIDTH);
+        clamp(&mut self.tess_px_per_step, Self::TESS);
+        clamp(&mut self.max_log_lines, Self::LOG_LINES);
+        clamp(&mut self.flat_rows, Self::FLAT_ROWS);
         self
     }
 }
@@ -239,6 +222,10 @@ struct DiskScanApp {
     live_tree: Option<Arc<LiveTree>>,
     /// When the live tree is to be read next.
     live_read_at: Option<Instant>,
+    /// What the last read of the live tree showed: depth, smallest slice
+    /// angle (as bits), picked category and measure. A change reads it again
+    /// at once.
+    live_read_for: Option<(usize, u32, Option<Category>, bool)>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -253,6 +240,8 @@ struct DiskScanApp {
     cat_base: Option<Arc<Node>>,
     /// Category breakdown of the viewed folder, cached per (folder, tree_gen).
     cat_breakdown: Vec<CategoryRow>,
+    /// The extensions table's rows, made from `cat_breakdown`.
+    ext_rows: Option<panels::ExtRows>,
     cat_breakdown_for: Option<(PathBuf, u64)>,
     /// The path bar is a text field (else clickable folder names).
     path_editing: bool,
@@ -269,15 +258,14 @@ struct DiskScanApp {
     scan_start: Instant,
     hidden: HashSet<PathBuf>,
     hovered: Option<HoverInfo>,
-    /// Counts folders added to `partial_root` during a scan. The live table
-    /// refreshes from it at most every 250 ms, bumping `live_gen`.
+    /// Counts reads of the live tree into `partial_root` during a scan. The
+    /// live table refreshes from each new one, bumping `live_gen`.
     partial_gen: u64,
     live_gen: u64,
     /// What the live table shows: a copy of the live tree's top level, taken
     /// at each refresh (the live tree keeps re-sorting as data arrives).
     live_view: Node,
     live_seen: u64,
-    live_refreshed: Instant,
     /// Counts changes to the displayed tree, so views derived from it know to
     /// recompute.
     tree_gen: u64,
@@ -351,6 +339,8 @@ struct DiskScanApp {
     settings: Settings,
     /// The settings as last saved; None until the file is up to date.
     saved_config: Option<Config>,
+    /// A change not saved yet, and since when the settings have been so.
+    config_changed: Option<(Config, Instant)>,
     show_settings: bool,
     /// The About window is open.
     show_about: bool,
@@ -406,7 +396,6 @@ impl Default for DiskScanApp {
             live_gen: 0,
             live_view: empty_node(),
             live_seen: 0,
-            live_refreshed: Instant::now(),
             summary_view: false,
             chart_order: ChartOrder::Size,
             chart_scale: 1.0,
@@ -434,6 +423,7 @@ impl Default for DiskScanApp {
             partial_root: empty_node(),
             settings: Settings::default(),
             saved_config: None,
+            config_changed: None,
             show_settings: false,
             show_about: false,
             quit_asked: false,
@@ -446,11 +436,13 @@ impl Default for DiskScanApp {
             live_looks: Default::default(),
             live_tree: None,
             live_read_at: None,
+            live_read_for: None,
             pick: None,
             pick_pending: None,
             live_exts: ExtTotals::default(),
             cat_base: None,
             cat_breakdown: Vec::new(),
+            ext_rows: None,
             cat_breakdown_for: None,
             // Largest first, like the chart.
             contents_sort: SortState {
@@ -591,16 +583,17 @@ impl DiskScanApp {
         self.scan_cats = Some(self.cats.clone());
         self.live_tree = Some(live.clone());
         self.live_read_at = None;
+        self.live_read_for = None;
         std::thread::spawn(move || {
             let start = Instant::now();
-            if !path.exists() {
-                let _ = tx.send(ScanMsg::Error(trf(
-                    "ERR_PATH_NOT_FOUND",
-                    &[&show_path(&path)],
-                )));
-                return;
-            }
             match std::fs::metadata(&path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let _ = tx.send(ScanMsg::Error(trf(
+                        "ERR_PATH_NOT_FOUND",
+                        &[&show_path(&path)],
+                    )));
+                    return;
+                }
                 Err(e) => {
                     let _ = tx.send(ScanMsg::Error(trf(
                         "ERR_CANNOT_STAT",
@@ -778,8 +771,6 @@ impl DiskScanApp {
         get_node(root, idx_path)
     }
 
-    /// Esc while scanning: stops the scan and goes back to the previous result,
-    /// if any.
     /// Work that quitting would cut short: a copy or move, or emptying the
     /// trash. (A scan just stops; deletes finish within a frame.)
     fn work_running(&self) -> bool {
@@ -836,20 +827,23 @@ impl DiskScanApp {
         }
     }
 
+    /// Esc while scanning: stops the scan and goes back to the previous
+    /// result, if any.
     fn abort_scan(&mut self) {
         if let Some(cancel) = &self.cancel_flag {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        self.scanning = false;
-        self.scan_rx = None;
         self.cancel_graft();
         self.scan_ended();
         self.status = tr("STATUS_SCAN_ABORTED");
     }
 
-    /// A scan finished, failed or was cancelled: frees the live tree and
-    /// returns the memory.
+    /// A scan finished, failed or was cancelled: it's no longer running, its
+    /// messages are dropped, and the live tree is freed (its memory
+    /// returned).
     fn scan_ended(&mut self) {
+        self.scanning = false;
+        self.scan_rx = None;
         self.partial_root = empty_node();
         self.live_tree = None;
         after_tree_dropped();
@@ -1008,103 +1002,102 @@ impl DiskScanApp {
     /// Handles waiting scan messages, up to a time budget per frame. True if
     /// messages are still waiting.
     fn poll_scan(&mut self) -> bool {
-        // A time budget keeps the window responsive during bursts of messages;
-        // the rest wait for the next frame.
-        const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(30);
+        // A time budget keeps the window responsive during bursts of messages
+        // (well within a frame at 60 per second); the rest wait for the next
+        // frame.
+        const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(10);
+        // Taken while messages are handled, and put back unless the scan ended.
+        let Some(rx) = self.scan_rx.take() else {
+            return false;
+        };
         let drain_start = Instant::now();
         let mut processed = 0u32;
-        if let Some(rx) = &self.scan_rx {
-            loop {
-                if processed.is_multiple_of(64)
-                    && processed > 0
-                    && drain_start.elapsed() >= FRAME_BUDGET
-                {
-                    return true;
+        loop {
+            if processed.is_multiple_of(64)
+                && processed > 0
+                && drain_start.elapsed() >= FRAME_BUDGET
+            {
+                self.scan_rx = Some(rx);
+                return true;
+            }
+            processed += 1;
+            match rx.try_recv() {
+                Ok(ScanMsg::Unreadable(p)) => self.unreadable.push(p),
+                Ok(ScanMsg::LogError(msg)) => self.log_issue(msg),
+                Ok(ScanMsg::SliceDone { exts }) => {
+                    // Per-extension totals for the category bar; sizes come
+                    // from the live tree.
+                    for (ext, size, files) in exts {
+                        add_ext(&mut self.live_exts, ext, size, files);
+                    }
                 }
-                processed += 1;
-                match rx.try_recv() {
-                    Ok(ScanMsg::Unreadable(p)) => {
-                        self.unreadable.push(p);
-                    }
-                    Ok(ScanMsg::LogError(msg)) => {
-                        if self.log.len() < self.settings.max_log_lines {
-                            self.log.push(msg);
-                        } else {
-                            self.log_truncated += 1;
-                        }
-                    }
-                    Ok(ScanMsg::SliceDone { exts }) => {
-                        // Per-extension totals for the category bar; sizes
-                        // come from the live tree.
-                        for (ext, size, files) in exts {
-                            add_ext(&mut self.live_exts, ext, size, files);
-                        }
-                    }
-                    Ok(ScanMsg::Done(mut node, secs, counted_at)) => {
-                        self.live_tree = None;
-                        self.colored_at = Some(Instant::now());
-                        let scan_cats = self.scan_cats.take();
-                        match &self.graft {
-                            Some(g) => {
-                                let target = g.target.clone();
-                                self.link_owners.retain(|_, at| !at.starts_with(&target));
-                                // A folder classified with other categories than
-                                // the rest leaves the tree mixed.
-                                let same = match (&self.tree_cats, &scan_cats) {
-                                    (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                                    _ => false,
-                                };
-                                if !same {
-                                    self.tree_cats = None;
-                                }
-                            }
-                            None => {
-                                self.link_owners.clear();
-                                self.tree_cats = scan_cats;
-                                self.tree_apparent = self.scan_apparent;
-                                // Scans sort by bytes; shown sorted by files
-                                // at once when that's the measure.
-                                self.tree_by_files = self.settings.measure_files;
-                                if self.tree_by_files {
-                                    scan::sort_tree_by_measure(&mut node, true);
-                                }
-                            }
-                        }
-                        self.link_owners.extend(counted_at);
-                        if self.graft.is_some() {
-                            self.finish_graft(node);
-                        } else {
-                            self.full_root = Some(Arc::new(node));
-                            self.rebuild_view_tree();
-                        }
-                        self.scanning = false;
-                        self.status = self.status_after_rescan.take().unwrap_or_else(|| {
-                            trf("STATUS_SCAN_COMPLETED", &[&format!("{:.1}", secs)])
-                        });
-                        self.scan_rx = None;
-                        self.scan_ended();
-                        break;
-                    }
-                    Ok(ScanMsg::Error(e)) => {
-                        self.cancel_graft();
-                        self.scan_ended();
-                        self.status = e;
-                        self.scanning = false;
-                        self.scan_rx = None;
-                        break;
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => {
-                        self.cancel_graft();
-                        self.scan_ended();
-                        self.scanning = false;
-                        self.scan_rx = None;
-                        break;
-                    }
+                Ok(ScanMsg::Done(node, secs, counted_at)) => {
+                    self.scan_done(node, secs, counted_at);
+                    return false;
+                }
+                Ok(ScanMsg::Error(e)) => {
+                    self.cancel_graft();
+                    self.scan_ended();
+                    self.status = e;
+                    return false;
+                }
+                Err(TryRecvError::Empty) => {
+                    self.scan_rx = Some(rx);
+                    return false;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.cancel_graft();
+                    self.scan_ended();
+                    return false;
                 }
             }
         }
-        false
+    }
+
+    /// The scan finished with the tree `node`, after `secs` seconds;
+    /// `counted_at` is where each file with several hard links was counted.
+    fn scan_done(&mut self, mut node: Node, secs: f64, counted_at: Vec<((u64, u64), PathBuf)>) {
+        self.live_tree = None;
+        self.colored_at = Some(Instant::now());
+        let scan_cats = self.scan_cats.take();
+        match &self.graft {
+            Some(g) => {
+                let target = g.target.clone();
+                self.link_owners.retain(|_, at| !at.starts_with(&target));
+                // A folder classified with other categories than the rest
+                // leaves the tree mixed.
+                let same = match (&self.tree_cats, &scan_cats) {
+                    (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                    _ => false,
+                };
+                if !same {
+                    self.tree_cats = None;
+                }
+            }
+            None => {
+                self.link_owners.clear();
+                self.tree_cats = scan_cats;
+                self.tree_apparent = self.scan_apparent;
+                // Scans sort by bytes; shown sorted by files at once when
+                // that's the measure.
+                self.tree_by_files = self.settings.measure_files;
+                if self.tree_by_files {
+                    scan::sort_tree_by_measure(&mut node, true);
+                }
+            }
+        }
+        self.link_owners.extend(counted_at);
+        if self.graft.is_some() {
+            self.finish_graft(node);
+        } else {
+            self.full_root = Some(Arc::new(node));
+            self.rebuild_view_tree();
+        }
+        self.status = self
+            .status_after_rescan
+            .take()
+            .unwrap_or_else(|| trf("STATUS_SCAN_COMPLETED", &[&format!("{secs:.1}")]));
+        self.scan_ended();
     }
 }
 
@@ -1123,22 +1116,44 @@ impl eframe::App for DiskScanApp {
         }
         let scan_backlog = self.poll_scan();
         // The live chart and table: the live tree, read every 100 ms as deep
-        // as the chart currently shows.
+        // as the chart currently shows, and at once when the depth, the
+        // smallest slice, the picked category or the measure changes.
+        // (A picked extension applies when the scan finishes.)
+        // The smallest slice the chart can draw, as a share of the circle.
+        let min_angle = if self.settings.unlimited_slices {
+            0.02
+        } else {
+            self.settings.min_segment_angle_deg
+        };
+        let live_pick = match self.pick {
+            Some(Pick::Category(c)) => Some(c),
+            _ => None,
+        };
+        let live_for = (
+            self.settings.max_render_depth,
+            min_angle.to_bits(),
+            live_pick,
+            scan::measure_files(),
+        );
         if self.scanning
             && let Some(tree) = self.live_tree.clone()
-            && self.live_read_at.is_none_or(|t| Instant::now() >= t)
+            && (self.live_read_for != Some(live_for)
+                || self.live_read_at.is_none_or(|t| Instant::now() >= t))
         {
             let started = Instant::now();
-            // The smallest slice the chart can draw, as a share of the circle.
-            let min_angle = if self.settings.unlimited_slices {
-                0.02
-            } else {
-                self.settings.min_segment_angle_deg
-            };
+            // The scanned folder's total is in what's picked.
+            if self
+                .live_read_for
+                .is_some_and(|(_, _, pick, _)| pick != live_pick)
+            {
+                self.live_looks.reset_total();
+            }
+            self.live_read_for = Some(live_for);
             let min_share = f64::from(min_angle) / 360.0;
             if let Some(root) = tree.snapshot(
                 self.settings.max_render_depth,
                 min_share,
+                live_pick,
                 &mut self.live_looks,
             ) {
                 self.partial_root = root;
@@ -1166,12 +1181,17 @@ impl eframe::App for DiskScanApp {
         self.removal_frame_start(&ctx);
         self.table_frame_start(&ctx);
         self.esc_cancels_scan(&ctx);
-        // While scanning, redraw 4 times a second (each frame takes CPU from the
-        // scan), or at once while messages are waiting.
+        // While scanning, redraw 10 times a second, as often as the live tree
+        // is read; 4 times with a screen reader, whose updates take CPU from
+        // the scan. At once while messages are waiting.
         if scan_backlog || !self.mime_inflight.is_empty() {
             ctx.request_repaint();
         } else if self.scanning {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            let screen_reader = ctx
+                .accesskit_node_builder(egui::accesskit_root_id(), |_| ())
+                .is_some();
+            let every = if screen_reader { 250 } else { 100 };
+            ctx.request_repaint_after(std::time::Duration::from_millis(every));
         }
 
         self.toolbar_ui(ui);
@@ -1268,7 +1288,7 @@ impl eframe::App for DiskScanApp {
         // Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
         // Esc clears, D / T delete or trash, r rescans. The table's keys are in
         // table.rs.
-        self.save_config_if_changed();
+        self.save_config_if_changed(&ctx);
         // The table also runs live during a scan (see live_table_ui).
         if self.summary_view && (self.root.is_some() || self.scanning) {
             self.table_keys(&ctx);
@@ -1355,6 +1375,10 @@ impl eframe::App for DiskScanApp {
         }
         self.confirm_dialog(&ctx);
         self.transfer_ui(&ctx);
+    }
+
+    fn on_exit(&mut self) {
+        self.save_config_now();
     }
 }
 

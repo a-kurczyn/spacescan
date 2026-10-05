@@ -583,6 +583,20 @@ pub(crate) fn elide_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width
     cut(lo)
 }
 
+/// One frame without a renderer, for tests. Nothing uploads the font
+/// textures, so they are let go here (epaint checks that none are dropped
+/// unseen).
+#[cfg(test)]
+pub(crate) fn headless_frame(
+    ctx: &egui::Context,
+    input: egui::RawInput,
+    ui: impl FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
+    let mut out = ctx.run_ui(input, ui);
+    out.textures_delta.clear();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,7 +610,7 @@ mod tests {
             ascending: false,
         };
         let mut run = || {
-            ctx.run_ui(Default::default(), |ui| {
+            headless_frame(&ctx, Default::default(), |ui| {
                 sortable_header(ui, "Size", SortColumn::Size, &mut state);
                 icon_toolbar_button(ui, true, true, "Chart view", draw_chart_icon);
                 glyph_toolbar_button(ui, ButtonRole::Action { lit: true }, true, "⟳", "Rescan");

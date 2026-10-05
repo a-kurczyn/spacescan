@@ -423,17 +423,70 @@ impl DiskScanApp {
         }
     }
 
-    /// Once per frame: saves the configuration if anything in it changed
-    /// (or it has never been saved, see `Config::load`).
-    pub(crate) fn save_config_if_changed(&mut self) {
+    /// What to do about the configuration at `now`: save it once it has
+    /// stayed the same for `CONFIG_SETTLE` after a change (or if it has
+    /// never been saved, see `Config::load`), so a slider being dragged
+    /// isn't written to disk at every frame.
+    fn config_due(&mut self, now: Instant) -> ConfigDue {
         let cfg = self.current_config();
-        if self.saved_config.as_ref() != Some(&cfg) {
-            if let Err(e) = cfg.save() {
-                self.log_issue(trf("ERR_SETTINGS_SAVE", &[&e.to_string()]));
+        if self.saved_config.as_ref() == Some(&cfg) {
+            self.config_changed = None;
+            return ConfigDue::Nothing;
+        }
+        match &self.config_changed {
+            Some((pending, since)) if *pending == cfg => {
+                let waited = now.saturating_duration_since(*since);
+                match CONFIG_SETTLE.checked_sub(waited) {
+                    Some(left) if !left.is_zero() => ConfigDue::Wait(left),
+                    _ => ConfigDue::Save(cfg),
+                }
             }
-            self.saved_config = Some(cfg);
+            _ => {
+                self.config_changed = Some((cfg, now));
+                ConfigDue::Wait(CONFIG_SETTLE)
+            }
         }
     }
+
+    /// Once per frame: saves the configuration when it's due (see
+    /// `config_due`), or asks for a frame when it will be.
+    pub(crate) fn save_config_if_changed(&mut self, ctx: &egui::Context) {
+        match self.config_due(Instant::now()) {
+            ConfigDue::Nothing => {}
+            ConfigDue::Wait(left) => ctx.request_repaint_after(left),
+            ConfigDue::Save(cfg) => self.save_config(cfg),
+        }
+    }
+
+    /// On quitting: saves a change that hasn't settled yet.
+    pub(crate) fn save_config_now(&mut self) {
+        let cfg = self.current_config();
+        if self.saved_config.as_ref() != Some(&cfg) {
+            self.save_config(cfg);
+        }
+    }
+
+    /// Saves `cfg` and keeps it as the saved one (also if saving failed, so
+    /// the problem is reported once).
+    fn save_config(&mut self, cfg: Config) {
+        if let Err(e) = cfg.save() {
+            self.log_issue(trf("ERR_SETTINGS_SAVE", &[&e.to_string()]));
+        }
+        self.saved_config = Some(cfg);
+        self.config_changed = None;
+    }
+}
+
+/// How long the configuration must stay the same after a change before
+/// it's saved.
+const CONFIG_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// What to do about the configuration in a frame (see `config_due`).
+enum ConfigDue {
+    Nothing,
+    /// Ask again after this long.
+    Wait(std::time::Duration),
+    Save(Config),
 }
 
 /// Just the language, for loading translations at startup (before the app
@@ -452,6 +505,31 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    /// A change is saved only once the settings have stayed the same for
+    /// half a second; each further change (a slider still moving) waits
+    /// again from then. (Decided without writing anything.)
+    #[test]
+    fn changes_are_saved_once_they_settle() {
+        let mut app = DiskScanApp::default();
+        app.saved_config = Some(app.current_config());
+        let t0 = Instant::now();
+        let ms = |n: u64| std::time::Duration::from_millis(n);
+        assert!(matches!(app.config_due(t0), ConfigDue::Nothing));
+        app.settings.max_render_depth += 1;
+        assert!(matches!(app.config_due(t0), ConfigDue::Wait(d) if d == ms(500)));
+        assert!(matches!(app.config_due(t0 + ms(300)), ConfigDue::Wait(d) if d == ms(200)));
+        app.settings.max_render_depth += 1;
+        assert!(matches!(app.config_due(t0 + ms(400)), ConfigDue::Wait(d) if d == ms(500)));
+        assert!(matches!(app.config_due(t0 + ms(850)), ConfigDue::Wait(d) if d == ms(50)));
+        let ConfigDue::Save(cfg) = app.config_due(t0 + ms(900)) else {
+            panic!("due after half a second without changes");
+        };
+        assert_eq!(cfg.chart.max_render_depth, app.settings.max_render_depth);
+        // Saved (as `save_config` keeps it): nothing more to do.
+        app.saved_config = Some(cfg);
+        assert!(matches!(app.config_due(t0 + ms(1000)), ConfigDue::Nothing));
+    }
+
     /// Runs `f` with HOME pointing at a fresh temporary folder (one test at
     /// a time: HOME is process-wide).
     fn with_home(f: impl FnOnce(&Path)) {
@@ -461,13 +539,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join(".config/spacescan")).unwrap();
         let old = std::env::var_os("HOME");
-        // SAFETY (for the set_var/remove_var calls): tests that change HOME
-        // hold LOCK, and no other test reads HOME: the app and translations
-        // skip the user's files under cfg(test).
+        // SAFETY: tests that change HOME hold LOCK, and no other test reads
+        // HOME: the app and translations skip the user's files under
+        // cfg(test).
         unsafe { std::env::set_var("HOME", &home) };
         f(&home);
         match old {
+            // SAFETY: as above.
             Some(h) => unsafe { std::env::set_var("HOME", h) },
+            // SAFETY: as above.
             None => unsafe { std::env::remove_var("HOME") },
         }
         let _ = std::fs::remove_dir_all(&home);

@@ -249,7 +249,7 @@ mod tests {
     fn cjk_names_have_glyphs() {
         let ctx = egui::Context::default();
         install_fallback_fonts(&ctx, false);
-        let _ = ctx.run_ui(Default::default(), |_| {});
+        let _ = headless_frame(&ctx, Default::default(), |_| {});
         let font = egui::FontId::proportional(14.0);
         let has = |c: char| ctx.fonts_mut(|f| f.has_glyph(&font, c));
         assert!(has('ü') && has('Ж') && has('é'));
@@ -268,7 +268,7 @@ mod tests {
         {
             assert!(!has('한'));
             install_fallback_fonts(&ctx, true);
-            let _ = ctx.run_ui(Default::default(), |_| {});
+            let _ = headless_frame(&ctx, Default::default(), |_| {});
             assert!(has('한') && has('국') && has('어'));
             assert!(has('日'));
         }

@@ -255,7 +255,6 @@ pub(crate) fn format_mode_ls(mode: u32, is_dir: bool) -> String {
     s
 }
 
-/// A time that isn't known (0 would be a real date: 1970-01-01).
 /// A fast hash for short keys hashed very often (extensions, paths during
 /// a scan), the way the Rust compiler hashes internally: a multiply and a
 /// rotate per word. Not resistant to crafted keys, which don't matter here.
@@ -284,6 +283,7 @@ pub(crate) type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 pub(crate) type FxHashMap<K, V> = HashMap<K, V, FxBuild>;
 pub(crate) type FxHashSet<K> = HashSet<K, FxBuild>;
 
+/// A time that isn't known (0 would be a real date: 1970-01-01).
 pub(crate) const NO_TIME: i64 = i64::MIN;
 
 /// Unix seconds as local "YYYY-MM-DD HH:MM", or "-" if unknown.
@@ -376,7 +376,8 @@ pub(crate) fn file_name_of(p: &Path) -> String {
 
 /// A name for display that can't be mistaken for another, like `ls -b`:
 /// invalid UTF-8 bytes appear as `\xFF`, control characters as `\n`,
-/// `\t` or `\x1B`, and a backslash as `\\`.
+/// `\t` or `\x1B` (`\u{85}` above ASCII, so it can't pass for a raw
+/// byte), and a backslash as `\\`.
 pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
     use std::os::unix::ffi::OsStrExt;
     // Nearly every name is valid UTF-8 with nothing to escape: a plain copy.
@@ -399,7 +400,10 @@ pub(crate) fn show_os(s: &std::ffi::OsStr) -> String {
                 '\n' => out.push_str("\\n"),
                 '\t' => out.push_str("\\t"),
                 '\r' => out.push_str("\\r"),
-                c if c.is_control() => out.push_str(&format!("\\x{:02X}", c as u32)),
+                c if c.is_control() && c.is_ascii() => {
+                    out.push_str(&format!("\\x{:02X}", c as u32))
+                }
+                c if c.is_control() => out.push_str(&format!("\\u{{{:X}}}", c as u32)),
                 c => out.push(c),
             }
         }
@@ -559,7 +563,7 @@ pub(crate) fn mount_points() -> HashSet<PathBuf> {
 }
 
 /// True if `path` is on a spinning disk. Linux reports it per disk in
-/// /sys/dev/block/<major>:<minor>/queue/rotational (for a partition, in its
+/// `/sys/dev/block/<major>:<minor>/queue/rotational` (for a partition, in its
 /// disk's folder, one level up). Network shares and virtual devices have no
 /// such entry and count as not rotational.
 pub(crate) fn is_rotational(path: &Path) -> bool {
@@ -1442,6 +1446,13 @@ mod tests {
             show_os(std::ffi::OsStr::new("a\nb\tc\\d")),
             "a\\nb\\tc\\\\d"
         );
+        // A control character above ASCII and the raw byte of the same
+        // value look different (SM-76).
+        assert_eq!(show_os(std::ffi::OsStr::new("a\u{80}b")), "a\\u{80}b");
+        assert_eq!(show_os(std::ffi::OsStr::from_bytes(b"a\x80b")), "a\\x80b");
+        assert_eq!(show_os(std::ffi::OsStr::new("c\u{9f}d")), "c\\u{9F}d");
+        assert_eq!(show_os(std::ffi::OsStr::from_bytes(b"c\x9fd")), "c\\x9Fd");
+        assert_eq!(show_os(std::ffi::OsStr::new("e\u{1b}")), "e\\x1B");
         assert_eq!(
             show_os(std::ffi::OsStr::new("ünïcödé 日本語")),
             "ünïcödé 日本語"
@@ -1462,7 +1473,10 @@ mod tests {
                         '\n' => out.push_str("\\n"),
                         '\t' => out.push_str("\\t"),
                         '\r' => out.push_str("\\r"),
-                        c if c.is_control() => out.push_str(&format!("\\x{:02X}", c as u32)),
+                        c if c.is_control() && c.is_ascii() => {
+                            out.push_str(&format!("\\x{:02X}", c as u32))
+                        }
+                        c if c.is_control() => out.push_str(&format!("\\u{{{:X}}}", c as u32)),
                         c => out.push(c),
                     }
                 }
@@ -1821,7 +1835,7 @@ mod scan_perf {
                     scope.spawn(move || {
                         let mut looks = LiveLooks::default();
                         while scanning.load(std::sync::atomic::Ordering::Relaxed) {
-                            std::hint::black_box(live.snapshot(7, 1.3 / 360.0, &mut looks));
+                            std::hint::black_box(live.snapshot(7, 1.3 / 360.0, None, &mut looks));
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });

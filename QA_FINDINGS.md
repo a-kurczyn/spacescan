@@ -94,7 +94,10 @@ A REOPENED note says what is still wrong, not which check failed. Any verified b
 | SM-72 | S4 | Rows of exactly equal size: order after a delete differs from a rescan / fresh scan (and fresh scans order ties by disk order, not by name) | VERIFIED | | | **QA ✔ equal sizes listed by name (byte order) in fresh scans, after a delete and after r ("eqA, eqB"; "alpha, mid, zeta").** |
 | SM-73 | S4 | After deleting/trashing many files from a folder, the folder's own size isn't updated until a rescan (filesystem freed its directory blocks) | VERIFIED | 18fe611 | After a delete, trash or move, each folder that lost entries takes its own size from the disk again (counted the way the scan counted it: disk space, or lengths with apparent sizes on), and the folders above change by the same amount, so the row and chart equal a fresh scan or r. |  **QA ✔ (18fe611) mass trash under a filter on XFS, several folders losing entries in one action (flat-list marks), a folder emptied completely, a folder deleted with its parent in one selection — disk and apparent size: live = fresh scan, chart pixels too.** |
 | SM-74 | S4 | Command line: rows of equal size or equal date are in a different order than in the app | VERIFIED | | |  **QA ✔ (d6c7a2e) list --sort size/name/modified/changed, default and --reverse, give exactly the app table's order (ties: byte order; date ties by size, then name); --limit with --reverse = first rows of --reverse; header says "1 file".** |
-| SM-75 | S4 | Command line: with stdout closed, list and flat exit 0 with no message (output silently lost) | OPEN | | |  **QA: coder's explanation checked against behaviour (closed fd 1 already points at /dev/null before main, so it can't be told apart from >/dev/null; a real write error — full disk — gives exit 1). Waiting for the user's WONTFIX decision.** |
+| SM-75 | S4 | Command line: with stdout closed, list and flat exit 0 with no message (output silently lost) | VERIFIED | | |  **QA ✔ (0ab593a) list/flat/exts/--help/--version with >&-: "spacescan: standard output is closed", exit 1; >/dev/null exit 0; usage error with >&- exit 2 + its own message.** |
+| SM-76 | S3 | Two different files can look identical: a control character U+0080–U+009F and the raw invalid byte 0x80–0x9F are shown the same way ("\x80") | OPEN | | | |
+| SM-77 | S4 | Ctrl+Q / ✕ in the middle of a copy leaves a hidden .NAME.spacescan-partN file in the target | FIXED | 553d95b | Quit while working asks first ("Work in progress"); "Quit anyway" stops the copy and removes the part file. (QA retest pending) |
+| SM-78 | S4 | ☰ menu items for screen readers: names carried padding and the shortcut ("Settings ", "Quit Ctrl+Q"); shortcuts not exposed separately | OPEN | | | |
 
 Severity: **S1** data loss/safety · **S2** wrong numbers / missed data · **S3** functional/UX bug · **S4** polish / a11y
 
@@ -511,6 +514,16 @@ Expected:
 - Scenario: `spacemap flat DIR >&-` (or `list`), outside any wrapper.
 - Actual: exit 0, nothing on stderr — the report is lost silently. (`| head -1` correctly exits 0 quietly; a full disk correctly gives exit 1 "No space left on device".)
 - Expected: exit 1 with "spacemap: …" as for other write failures (the brief lists a closed stdout among those).
+
+### SM-76 · S3 · Two different files can look identical (C1 control characters vs invalid bytes)
+- Scenario: in one folder, a file named "a" U+0080 "b" (valid UTF-8, bytes C2 80) and a file named "a" 0x80 "b" (the single invalid byte 80). Same with U+009F vs byte 9F. Found by property-based fuzzing of the command line.
+- Actual: both are shown as `a\x80b` (and `c\x9Fd`) — in the Contents table, the flat list, `list`/`flat`/`exts` in txt, CSV and JSON. Two different files, identical text: a user (or a script reading the CSV) can't tell which is which before deleting/copying one.
+- Expected: one rendering per name (SM-10's rule). For example escape the control character with its code point (`\u{80}` or `\u0080`) and keep `\x80` for raw bytes only.
+
+### SM-78 · S4 · ☰ menu items for screen readers
+- Seen on 3546a28: items exposed as buttons named "Settings ", "Filters ", "Keyboard shortcuts ?", "Report a bug ", "About SpaceScan ", "Quit Ctrl+Q" (padding and shortcut in the name).
+- 0ab593a: role "menu item" and plain names — fixed. Still open: the shortcuts ("?", "Ctrl+Q") are not visible through AT-SPI at all (Action key binding empty, no attributes), so a screen reader can't announce them.
+- Expected: the shortcut available as the item's accessible keyboard shortcut.
 
 ### Performance baseline (for SM-18, SM-19, SM-27)
 Measured on this machine under a software-rendered virtual display. Use relative numbers.

@@ -65,12 +65,18 @@ enum MenuPick {
     Quit,
 }
 
-/// Opens `target` (a web address or a file) in the desktop's default app.
+/// Opens `target` (a web address, a file or a folder) in the desktop's
+/// default app for it.
+pub(crate) fn open_externally(target: impl AsRef<std::ffi::OsStr>) -> std::io::Result<()> {
+    let mut child = std::process::Command::new("xdg-open").arg(target).spawn()?;
+    // Collected when it ends, so no finished process lingers.
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+/// Opens a web address in the browser (nothing to report if it can't).
 fn open_link(target: &str) {
-    if let Ok(mut child) = std::process::Command::new("xdg-open").arg(target).spawn() {
-        // Collected when it ends, so no finished process lingers.
-        std::thread::spawn(move || child.wait());
-    }
+    let _ = open_externally(target);
 }
 
 /// The licenses of the libraries SpaceScan is built with: the copy
@@ -355,12 +361,16 @@ impl DiskScanApp {
                             let text = tr(key);
                             let resp = ui.add(egui::Button::new(&text).shortcut_text(keys));
                             // For screen readers: a menu item named by its text
-                            // alone, its shortcut given separately.
+                            // alone, its shortcut given separately. The Linux
+                            // bridge (AT-SPI) passes on no keyboard shortcut, so
+                            // the shortcut is the description too, read after the
+                            // name.
                             ui.ctx().accesskit_node_builder(resp.id, |node| {
                                 node.set_role(egui::accesskit::Role::MenuItem);
                                 node.set_label(text);
                                 if !keys.is_empty() {
                                     node.set_keyboard_shortcut(keys);
+                                    node.set_description(keys);
                                 }
                             });
                             // Opened with F10: the keyboard starts on the first item.
@@ -1055,14 +1065,11 @@ impl DiskScanApp {
     }
 
     /// Table view while scanning: the progress bar, the category bar and the
-    /// contents table so far, refreshed at most every 250 ms.
+    /// contents table so far, refreshed at each read of the live tree.
     fn live_table_ui(&mut self, ui: &mut egui::Ui) {
-        if self.partial_gen != self.live_seen
-            && self.live_refreshed.elapsed() >= std::time::Duration::from_millis(250)
-        {
+        if self.partial_gen != self.live_seen {
             self.live_gen += 1;
             self.live_seen = self.partial_gen;
-            self.live_refreshed = Instant::now();
             self.live_view = flat_copy(&self.partial_root);
             self.cat_breakdown = category_rows(&self.live_exts, &self.cats);
             // The finished tree is broken down afresh when the scan ends.
@@ -1077,9 +1084,12 @@ impl DiskScanApp {
         let view = std::mem::replace(&mut self.live_view, empty_node());
         self.bar_and_table(ui, avail, heading_h, &view);
         self.live_view = view;
-        // Mid-scan, a picked category applies when the scan finishes.
+        // Mid-scan, a picked category applies to the live view from the next
+        // frame (the live tree is read again at once); the finished tree gets
+        // it, or a picked extension, when the scan ends.
         if let Some(cat) = self.pick_pending.take() {
             self.pick = cat;
+            ui.ctx().request_repaint();
         }
     }
 
@@ -1201,8 +1211,17 @@ impl DiskScanApp {
 
     /// The extensions table's rows: every extension in the folder (also
     /// while something is picked, so each stays clickable), in the chosen
-    /// order.
-    fn extension_rows(&self) -> Vec<ExtRow> {
+    /// order. Made again only when the breakdown, the order or the language
+    /// changes.
+    fn extension_rows(&mut self) -> Arc<[ExtRow]> {
+        let lang = current_lang_code();
+        if let Some(made) = &self.ext_rows
+            && made.breakdown == self.cat_breakdown
+            && made.sort == self.ext_sort
+            && made.lang == lang
+        {
+            return made.rows.clone();
+        }
         let mut rows: Vec<ExtRow> = self
             .cat_breakdown
             .iter()
@@ -1228,6 +1247,13 @@ impl DiskScanApp {
             } else {
                 order.reverse()
             }
+        });
+        let rows: Arc<[ExtRow]> = rows.into();
+        self.ext_rows = Some(ExtRows {
+            breakdown: self.cat_breakdown.clone(),
+            sort,
+            lang,
+            rows: rows.clone(),
         });
         rows
     }
@@ -1464,7 +1490,9 @@ impl DiskScanApp {
         let mut height = height;
         let line_h = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
         // Notes under the heading (not in the narrow panel).
-        if !compact && self.scanning && self.pick.is_some() {
+        // A picked category shows in the live view; extensions only once the
+        // scan is done.
+        if !compact && self.scanning && matches!(self.pick, Some(Pick::Extensions(_))) {
             ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
             height -= line_h;
         } else if !compact
@@ -2072,7 +2100,9 @@ impl DiskScanApp {
                         .map(Path::to_path_buf)
                         .unwrap_or(target.clone())
                 };
-                let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+                if let Err(e) = open_externally(&dir) {
+                    self.log_issue(trf("ERR_OPEN_FAILED", &[&show_path(&dir), &e.to_string()]));
+                }
                 ui.close();
             }
             if ui.button(tr("MENU_HIDE")).clicked() {
@@ -2233,12 +2263,13 @@ impl DiskScanApp {
     /// scanned out of its used space with the percentage; for anything else,
     /// a spinner. Both show the files and bytes found so far.
     pub(crate) fn scan_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
-        let files = self.partial_root.file_count;
+        // Everything read so far, whatever category is picked.
+        let (size, files) = self.live_looks.scanned();
         let counts = trf(
             "SCAN_PROGRESS_COUNTS",
             &[
                 &trn("COUNT_FILES", files, &[&format_count(files)]),
-                &human_size(self.partial_root.size),
+                &human_size(size),
             ],
         );
         let used = self
@@ -2257,7 +2288,7 @@ impl DiskScanApp {
             );
             return;
         };
-        let raw = self.partial_root.size as f64 / used as f64;
+        let raw = size as f64 / used as f64;
         // The bar never moves backwards.
         self.progress_shown = self.progress_shown.max(raw.clamp(0.0, 1.0) as f32);
         let fraction = self.progress_shown;
@@ -2282,8 +2313,16 @@ impl DiskScanApp {
     }
 }
 
+/// The extensions table's rows, and what they were made from.
+pub(crate) struct ExtRows {
+    breakdown: Vec<CategoryRow>,
+    sort: SortState,
+    lang: String,
+    rows: Arc<[ExtRow]>,
+}
+
 /// One row of the extensions table.
-struct ExtRow {
+pub(crate) struct ExtRow {
     /// The extension, as an `ext_key` ("" for files without one).
     ext: String,
     label: String,
@@ -2391,7 +2430,7 @@ mod category_bar_tests {
     /// Draws one Summary view frame, headless.
     fn frame(app: &mut DiskScanApp) {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _ = headless_frame(&ctx, egui::RawInput::default(), |ui| {
             let root = app.root.clone().unwrap();
             let view = get_node(&root, app.view_stack.last().unwrap());
             app.summary_ui(ui, view);
@@ -2416,10 +2455,9 @@ mod category_bar_tests {
                 vec![test_node("/scan/a", 30, true, vec![])],
             );
             app.partial_gen = 1;
-            app.live_refreshed = Instant::now() - std::time::Duration::from_secs(1);
             let ctx = egui::Context::default();
             for _ in 0..2 {
-                let _ = ctx.run_ui(egui::RawInput::default(), |ui| app.live_table_ui(ui));
+                let _ = headless_frame(&ctx, egui::RawInput::default(), |ui| app.live_table_ui(ui));
             }
             assert_eq!(
                 app.table.cursor,
@@ -2508,6 +2546,36 @@ mod category_bar_tests {
         }
     }
 
+    /// The extensions table's rows follow every change to the breakdown and
+    /// to the order, and are kept as they are while neither changes.
+    #[test]
+    fn extension_rows_follow_breakdown_and_order() {
+        let mut app = DiskScanApp::default();
+        let docs = app.cats.of_name("a.pdf");
+        let row = |exts: &[(&str, u64)]| CategoryRow {
+            cat: docs,
+            size: exts.iter().map(|e| e.1).sum(),
+            files: exts.len() as u64,
+            exts: exts.iter().map(|(e, s)| (e.to_string(), *s, 1)).collect(),
+        };
+        let exts = |app: &mut DiskScanApp| -> Vec<String> {
+            app.extension_rows().iter().map(|r| r.ext.clone()).collect()
+        };
+        app.cat_breakdown = vec![row(&[("pdf", 10), ("doc", 30)])];
+        assert_eq!(exts(&mut app), ["doc", "pdf"], "largest first");
+        let first = app.extension_rows();
+        assert!(Arc::ptr_eq(&first, &app.extension_rows()), "kept");
+        app.ext_sort = SortState {
+            column: SortColumn::Name,
+            ascending: true,
+        };
+        assert_eq!(exts(&mut app), ["doc", "pdf"]);
+        app.cat_breakdown = vec![row(&[("pdf", 10), ("doc", 30), ("txt", 5)])];
+        assert_eq!(exts(&mut app), ["doc", "pdf", "txt"]);
+        app.ext_sort.ascending = false;
+        assert_eq!(exts(&mut app), ["txt", "pdf", "doc"]);
+    }
+
     /// Keys 1–9 pick by position in the bar; the same key again, or 0,
     /// shows all files; a key past the last category does nothing.
     #[test]
@@ -2565,7 +2633,7 @@ mod category_bar_tests {
                 exts: exts(&[("pdf", 5, 9)]),
             },
         ];
-        let names = |rows: Vec<ExtRow>| rows.into_iter().map(|r| r.label).collect::<Vec<_>>();
+        let names = |rows: Arc<[ExtRow]>| rows.iter().map(|r| r.label.clone()).collect::<Vec<_>>();
         assert_eq!(names(app.extension_rows()), [".mkv", ".srt", ".pdf"]);
         app.ext_sort = SortState {
             column: SortColumn::Files,
@@ -2649,7 +2717,7 @@ mod category_bar_tests {
         ctx.enable_accesskit();
         let mut update = None;
         for _ in 0..2 {
-            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let out = headless_frame(&ctx, egui::RawInput::default(), |ui| {
                 let root = app.root.clone().unwrap();
                 let view = get_node(&root, app.view_stack.last().unwrap());
                 app.summary_ui(ui, view);
@@ -2740,7 +2808,7 @@ mod about_tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run_ui(raw, |ui| app.toolbar_ui(ui));
+            let _ = headless_frame(&ctx, raw, |ui| app.toolbar_ui(ui));
             egui::Popup::is_any_open(&ctx)
         };
         assert!(!press(&mut app, None));
@@ -2749,6 +2817,52 @@ mod about_tests {
         assert!(!press(&mut app, Some(egui::Key::F10)));
         app.show_about = true;
         assert!(!press(&mut app, Some(egui::Key::F10)));
+    }
+
+    /// Screen readers get each main menu item as a menu item named by its
+    /// text alone, with its shortcut as the keyboard shortcut and as the
+    /// description (SM-78).
+    #[test]
+    fn main_menu_items_are_named_for_screen_readers() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut app = DiskScanApp::default();
+        let mut update = None;
+        for key in [Some(egui::Key::F10), None] {
+            let raw = egui::RawInput {
+                events: key
+                    .map(|key| egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    })
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            };
+            let out = headless_frame(&ctx, raw, |ui| app.toolbar_ui(ui));
+            update = out.platform_output.accesskit_update;
+        }
+        let update = update.expect("accesskit output");
+        let item = |key: &str| {
+            update
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label() == Some(tr(key).as_str()))
+                .map(|(_, n)| n.clone())
+                .unwrap_or_else(|| panic!("a menu item named {:?}", tr(key)))
+        };
+        let quit = item("MENU_QUIT");
+        assert_eq!(quit.role(), egui::accesskit::Role::MenuItem);
+        let keys = tr("HELP_KEYS_QUIT");
+        assert_eq!(quit.keyboard_shortcut(), Some(keys.as_str()));
+        assert_eq!(quit.description(), Some(keys.as_str()));
+        let settings = item("SETTINGS_TITLE");
+        assert_eq!(settings.role(), egui::accesskit::Role::MenuItem);
+        assert_eq!(settings.keyboard_shortcut(), None);
+        assert_eq!(settings.description(), None);
     }
 
     /// Esc closes an open About or shortcuts window and leaves the scan
@@ -2768,7 +2882,7 @@ mod about_tests {
                 }],
                 ..Default::default()
             };
-            let _ = ctx.run_ui(raw, |ui| app.esc_cancels_scan(ui.ctx()));
+            let _ = headless_frame(&ctx, raw, |ui| app.esc_cancels_scan(ui.ctx()));
         };
         app.scanning = true;
         app.show_about = true;
