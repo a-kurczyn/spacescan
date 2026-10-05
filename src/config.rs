@@ -678,6 +678,22 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Notes about the old settings' copy stay in the Issues log through
+    /// the first scan (which starts a new log), and only that one.
+    #[test]
+    fn copy_notes_outlive_the_first_scan() {
+        let dir = test_dir("notes");
+        let mut app = DiskScanApp::default();
+        app.log_issue("copy note".into());
+        app.startup_issues = app.log.clone();
+        app.start_scan(dir.clone());
+        assert_eq!(app.log, ["copy note"]);
+        app.start_scan(dir.clone());
+        assert!(app.log.is_empty());
+        app.abort_scan();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// The command line reads the old folder's categories until the app
     /// has run under its new name, and writes nothing.
     #[test]

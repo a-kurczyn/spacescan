@@ -333,6 +333,9 @@ struct DiskScanApp {
     tree_by_files: bool,
     /// A folder to scan as soon as the app starts (from the command line).
     start_path: Option<PathBuf>,
+    /// Problems from before the window opened (the old settings' copy),
+    /// listed again after the first scan clears the Issues log.
+    startup_issues: Vec<String>,
     /// The contents and extension sorts switched from size to files when
     /// the measure became files (switched back with it).
     sorts_switched: [bool; 2],
@@ -417,6 +420,7 @@ impl Default for DiskScanApp {
             tree_apparent: false,
             tree_by_files: false,
             start_path: None,
+            startup_issues: Vec::new(),
             sorts_switched: [false; 2],
             status: String::new(),
             free_space: None,
@@ -538,6 +542,9 @@ impl DiskScanApp {
         self.hidden.clear();
         self.log.clear();
         self.log_truncated = 0;
+        for msg in std::mem::take(&mut self.startup_issues) {
+            self.log_issue(msg);
+        }
         // After clearing the log, so problems in the file stay listed.
         self.reload_categories();
         self.partial_root = empty_node();
@@ -1368,6 +1375,7 @@ fn main() -> eframe::Result<()> {
             for n in &not_copied {
                 app.log_issue(n.message());
             }
+            app.startup_issues = app.log.clone();
             Ok(Box::new(app))
         }),
     )
