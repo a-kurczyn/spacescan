@@ -73,6 +73,11 @@ impl Lang {
     /// Loads language `code`: English, then the built-in file for `code`,
     /// then the user's file for it, each overriding the one before.
     pub(crate) fn load(code: &str) -> Lang {
+        Lang::load_from(code, true)
+    }
+
+    /// `load`, with the user's file for `code` only if `user_file`.
+    fn load_from(code: &str, user_file: bool) -> Lang {
         let mut map = parse_kv_file(built_in("en").unwrap_or_default());
         let mut own = HashSet::new();
         let mut add = |lines: HashMap<String, String>| {
@@ -84,7 +89,10 @@ impl Lang {
         {
             add(parse_kv_file(text));
         }
-        if let Some(text) = read_small_file(&lang_dir().join(format!("{code}.lang"))) {
+        if let Some(text) = user_file
+            .then(|| read_small_file(&lang_dir().join(format!("{code}.lang"))))
+            .flatten()
+        {
             add(parse_kv_file(&text));
         }
         Lang {
@@ -126,16 +134,10 @@ impl Lang {
     }
 }
 
-/// The active language (English in tests, which don't read the user's
-/// settings).
-pub(crate) static LANG: LazyLock<RwLock<Lang>> = LazyLock::new(|| {
-    let code = if cfg!(test) {
-        "en".to_string()
-    } else {
-        config::language_setting()
-    };
-    RwLock::new(Lang::load(&code))
-});
+/// The active language: built-in English until the app sets the user's
+/// (see `main`), so tests never read the user's files.
+pub(crate) static LANG: LazyLock<RwLock<Lang>> =
+    LazyLock::new(|| RwLock::new(Lang::load_from("en", false)));
 
 /// The translated string for `key`.
 pub(crate) fn tr(key: &str) -> String {

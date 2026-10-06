@@ -367,6 +367,9 @@ struct DiskScanApp {
     mime_rx: Receiver<(PathBuf, Option<String>)>,
     user_cache: std::collections::HashMap<u32, String>,
     group_cache: std::collections::HashMap<u32, String>,
+    /// Reads and writes the user's settings and categories (see
+    /// `with_user_files`).
+    user_files: bool,
 }
 
 impl Default for DiskScanApp {
@@ -467,20 +470,31 @@ impl Default for DiskScanApp {
             mime_rx,
             user_cache: std::collections::HashMap::new(),
             group_cache: std::collections::HashMap::new(),
+            user_files: false,
         };
-        // Tests build the app too: they keep the defaults and never read or
-        // write the user's settings.
-        if !cfg!(test) {
-            let (cfg, needs_save, problem) = Config::load();
-            app.settings = cfg.chart.clone();
-            app.apply_table_prefs(&cfg.table);
-            app.saved_config = (!needs_save).then_some(cfg);
-            if let Some(p) = problem {
-                app.log_issue(p);
-            }
-            if let Some(p) = lang_file_problem(&current_lang_code()) {
-                app.log_issue(p);
-            }
+        app.reload_categories();
+        app
+    }
+}
+
+impl DiskScanApp {
+    /// The app as the user starts it: with their settings and categories,
+    /// which it reads and keeps up to date. (`default` reads and writes
+    /// none of the user's files: what tests use.)
+    fn with_user_files() -> Self {
+        let mut app = DiskScanApp {
+            user_files: true,
+            ..DiskScanApp::default()
+        };
+        let (cfg, needs_save, problem) = Config::load();
+        app.settings = cfg.chart.clone();
+        app.apply_table_prefs(&cfg.table);
+        app.saved_config = (!needs_save).then_some(cfg);
+        if let Some(p) = problem {
+            app.log_issue(p);
+        }
+        if let Some(p) = lang_file_problem(&current_lang_code()) {
+            app.log_issue(p);
         }
         app.reload_categories();
         app
@@ -507,8 +521,8 @@ impl DiskScanApp {
     /// Rereads categories.json (edits show up at the next scan). A changed
     /// list drops the picked category: positions may mean something else.
     fn reload_categories(&mut self) {
-        // Tests keep the built-in categories and never read the user's file.
-        if cfg!(test) {
+        // Without the user's files (tests): the built-in categories.
+        if !self.user_files {
             return;
         }
         let (model, problem) = CategoryModel::load();
@@ -1497,6 +1511,8 @@ pub(crate) fn raise_open_file_limit() {
 
 fn main() -> eframe::Result<()> {
     raise_open_file_limit();
+    // The user's language, for the command line's messages too.
+    lang::set_language(&config::language_setting());
     // A command runs and exits; otherwise the app starts.
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     let start_path = match cli::run(&args) {
@@ -1521,7 +1537,7 @@ fn main() -> eframe::Result<()> {
             install_fallback_fonts(&cc.egui_ctx, false);
             let mut app = DiskScanApp {
                 start_path,
-                ..DiskScanApp::default()
+                ..DiskScanApp::with_user_files()
             };
             for n in &not_copied {
                 app.log_issue(n.message());
