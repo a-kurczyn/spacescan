@@ -74,14 +74,18 @@ plain-text, CSV or JSON reports from the command line.
 
 ### AppImage
 
-Download `SpaceScan-<version>-x86_64.AppImage` from the
+Download `SpaceScan-x86_64.AppImage` from the
 [Releases](https://github.com/a-kurczyn/spacescan/releases) page, make it
 executable and run it:
 
 ```sh
-chmod +x SpaceScan-*-x86_64.AppImage
-./SpaceScan-*-x86_64.AppImage
+chmod +x SpaceScan-x86_64.AppImage
+./SpaceScan-x86_64.AppImage
 ```
+
+To add it to the application menu (under Utilities), follow
+[AGENT_INSTALL.md](AGENT_INSTALL.md); its steps also work for an AI agent
+installing SpaceScan for you.
 
 It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
 release is built from the tagged source in this repository.
