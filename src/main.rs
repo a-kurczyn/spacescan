@@ -1751,6 +1751,42 @@ mod pick_tests {
         assert_eq!(shown_files(&app), all);
     }
 
+    /// A slice under the pointer shows its details, unless a dialog is
+    /// open over the chart.
+    #[test]
+    fn no_slice_hover_under_a_dialog() {
+        let mut app = DiskScanApp::default();
+        let files = (0..8)
+            .map(|i| test_node(&format!("/t/f{i}.txt"), 100, false, vec![]))
+            .collect();
+        app.full_root = Some(Arc::new(test_node("/t", 800, true, files)));
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        // Around the chart's middle, at several distances: some are on a
+        // slice.
+        let hovers = |app: &mut DiskScanApp| {
+            let mut any = false;
+            for i in 0..24 {
+                let a = i as f32 * 0.5;
+                let at = Pos2::new(800.0, 520.0)
+                    + Vec2::new(a.cos(), a.sin()) * (60.0 + i as f32 * 12.0);
+                app_frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+                any |= app.hovered.is_some();
+            }
+            any
+        };
+        assert!(hovers(&mut app), "the slices can be hovered");
+        app.show_about = true;
+        // The dialog is measured in its first frame, shown after.
+        app_frame(&mut app, &ctx, vec![]);
+        assert!(
+            !hovers(&mut app),
+            "no slice is hovered under the About dialog"
+        );
+        app.show_about = false;
+        assert!(hovers(&mut app));
+    }
+
     /// Clicks on the Summary view's category bar: a plain click picks only
     /// that category (again: nothing), Ctrl+click adds or removes it.
     #[test]

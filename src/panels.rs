@@ -1845,7 +1845,11 @@ impl DiskScanApp {
         for seg in &segs {
             self.draw_segment(painter, seg, geom, &colors);
         }
-        let pointer = ctx.input(|i| i.pointer.hover_pos());
+        // Only where nothing else (a dialog, a menu, the legend) is over the
+        // chart.
+        let pointer = ctx
+            .input(|i| i.pointer.hover_pos())
+            .filter(|_| response.contains_pointer());
         let hovered = pointer.and_then(|p| segment_at(&segs, p, geom));
         self.hovered = hovered.map(|seg| self.hover_info(view_node, seg));
         // Relative to view_node, like the segments' idx_paths. Free space
