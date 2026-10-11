@@ -4,8 +4,9 @@ Release:        1%{?dist}
 Summary:        Disk-usage explorer with a sunburst chart, a keyboard-driven table and reports
 
 SourceLicense:  GPL-3.0-only
-# Filled in from %%cargo_license_summary (the crates built into the binary).
-License:        GPL-3.0-only
+# SpaceScan's own license, then the crates built into the binary (from
+# %%cargo_license_summary; update it when Cargo.lock changes).
+License:        GPL-3.0-only AND (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 AND (MIT OR Apache-2.0) AND Unicode-3.0 AND (0BSD OR MIT OR Apache-2.0) AND Apache-2.0 AND Apache-2.0 AND MIT AND (Apache-2.0 OR GPL-2.0-only) AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND BSD-2-Clause AND (BSD-2-Clause OR Apache-2.0 OR MIT) AND BSD-3-Clause AND (BSD-3-Clause OR Apache-2.0) AND (BSD-3-Clause OR MIT OR Apache-2.0) AND BSL-1.0 AND ISC AND MIT AND (MIT OR Apache-2.0) AND (MIT OR Apache-2.0 OR LGPL-2.1-or-later) AND (MIT OR Apache-2.0 OR Zlib) AND (MIT OR Zlib OR Apache-2.0) AND Unicode-3.0 AND (Unlicense OR MIT) AND Zlib AND (Zlib OR Apache-2.0 OR MIT)
 URL:            https://github.com/a-kurczyn/spacescan
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 # The crates from Cargo.lock: `cargo vendor --versioned-dirs vendor` in the
@@ -19,16 +20,19 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 
 # Loaded at run time (not linked), so rpm can't find them by itself.
-Requires:       libX11
-Requires:       libX11-xcb
-Requires:       libXcursor
-Requires:       libXi
-Requires:       libxkbcommon
-Requires:       libxkbcommon-x11
-Requires:       libwayland-client
-Requires:       libwayland-egl
-Requires:       libglvnd-egl
-Requires:       dbus-libs
+%if 0%{?__isa_bits} == 64
+%global soname_suffix ()(64bit)
+%endif
+Requires:       libX11.so.6%{?soname_suffix}
+Requires:       libX11-xcb.so.1%{?soname_suffix}
+Requires:       libXcursor.so.1%{?soname_suffix}
+Requires:       libXi.so.6%{?soname_suffix}
+Requires:       libxkbcommon.so.0%{?soname_suffix}
+Requires:       libxkbcommon-x11.so.0%{?soname_suffix}
+Requires:       libwayland-client.so.0%{?soname_suffix}
+Requires:       libwayland-egl.so.1%{?soname_suffix}
+Requires:       libEGL.so.1%{?soname_suffix}
+Requires:       libdbus-1.so.3%{?soname_suffix}
 Requires:       hicolor-icon-theme
 # The folder picker.
 Recommends:     xdg-desktop-portal
