@@ -67,7 +67,7 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.a_ku
 
 %files
 %license LICENSE LICENSE.dependencies cargo-vendor.txt
-%doc README.md
+%doc README.md CHANGELOG.md
 %{_bindir}/%{name}
 %{_datadir}/applications/%{name}.desktop
 %{_datadir}/icons/hicolor/256x256/apps/%{name}.png

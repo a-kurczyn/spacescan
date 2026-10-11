@@ -26,7 +26,8 @@ plain-text, CSV or JSON reports from the command line.
   Press `?` for all shortcuts.
 - **Breakdown by category and file extension** for the folder you're viewing:
   click a category or extension to show only those files (Ctrl+click picks
-  several extensions).
+  several). In the chart, click categories in the legend to show only
+  theirs.
 
   ![SpaceScan table view: the category bar on the left, the folder contents on the right](docs/table.png)
 
@@ -41,12 +42,13 @@ plain-text, CSV or JSON reports from the command line.
 - **Filters** by name pattern (`*.iso`, `*.[mkv,mp4]`), size range and
   created or modified dates.
 - **Safe cleanup.** Move to the trash or delete permanently, always with a
-  confirmation. SpaceScan refuses to delete anything that is or contains a
-  mounted filesystem.
+  confirmation and a running count for large selections. SpaceScan refuses
+  to delete anything that is or contains a mounted filesystem.
 - **Copy and move.** Ctrl+C / Ctrl+X and Ctrl+V between folders, or to and
   from your file manager through the system clipboard.
 - **Command-line reports** of a folder's contents, all its files, or its
-  file extensions, as text, CSV or JSON (see below).
+  file extensions, as text, CSV or JSON, optionally filtered by name; or
+  start the app already showing given categories or a filter (see below).
 - **Handles large and awkward trees:** millions of files, very deep folders,
   paths longer than `PATH_MAX`, unreadable folders (listed as issues, not
   errors), and names in any script.
@@ -72,7 +74,21 @@ plain-text, CSV or JSON reports from the command line.
 
 ## Installing
 
-### AppImage
+### Fedora
+
+SpaceScan is packaged for Fedora in a
+[COPR repository](https://copr.fedorainfracloud.org/coprs/a-kurczyn/spacescan/),
+which also brings its updates through the usual system updates:
+
+```sh
+sudo dnf copr enable a-kurczyn/spacescan
+sudo dnf install spacescan
+```
+
+It appears in the application menu under Utilities. To remove it, run
+`sudo dnf remove spacescan`.
+
+### AppImage (any distribution)
 
 Download `SpaceScan-x86_64.AppImage` from the
 [Releases](https://github.com/a-kurczyn/spacescan/releases) page, make it
@@ -104,8 +120,9 @@ To build without installing, run `cargo build --release`; the binary is
 
 ## Usage
 
-Start `spacescan`, or `spacescan PATH` to scan a folder right away. Then pick
-where to scan:
+Start `spacescan`, or `spacescan PATH` to scan a folder right away (see
+[Command line](#command-line) for more ways to start it). Then pick where to
+scan:
 
 - 🔍 opens a folder picker for any drive, mount point or folder,
 - `/` scans the whole system, 🏠 scans your home folder,
@@ -137,7 +154,15 @@ trash or delete it. In the table, the main keys are:
 ### Command line
 
 ```text
+spacescan [APP OPTIONS]        start the app
+spacescan [APP OPTIONS] PATH   start the app and scan PATH
 spacescan COMMAND PATH [OPTIONS]
+
+App options:
+  --category NAME,NAME     show only these categories' files (names as the
+                           app shows them in its language, any case)
+  --filter TEXT            start with this name filter, as typed in the
+                           app's Filters window (e.g. "*.log,*.tmp")
 
 Commands:
   list   the folders and files directly in PATH, with their totals
@@ -152,16 +177,21 @@ Options:
   --reverse                reverse the order
   --limit N                flat: only the first N files
   --apparent-size          count file lengths instead of disk space used
+  --filter TEXT            only files whose names match, as in the app's
+                           Filters window; folders count only those files
   -h, --help               show this help
   -V, --version            show the version
 ```
 
-For example, the 20 biggest files in your Downloads folder, or a
-spreadsheet of what's in your home folder:
+For example, the 20 biggest files in your Downloads folder, a spreadsheet
+of what's in your home folder, where the log files in it are, or the app
+showing only the videos in your home folder:
 
 ```sh
 spacescan flat ~/Downloads --limit 20
 spacescan list ~ --format csv > home.csv
+spacescan list ~ --filter "*.log"
+spacescan --category video ~
 ```
 
 Reports go to standard output and problems to standard error. Sizes in CSV
@@ -194,10 +224,14 @@ built-in language (for example `fr.lang`) changes just the lines it
 contains. New translations and corrections are welcome as suggestions in an
 issue.
 
+## Changes
+
+What's new in each version is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Contributing
 
 Ideas, suggestions and bug reports are welcome: please
-[open an issue](https://github.com/akurczyn/spacescan/issues). Pull requests
+[open an issue](https://github.com/a-kurczyn/spacescan/issues). Pull requests
 are welcome too; for anything bigger than a small fix, please open an issue
 first. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
