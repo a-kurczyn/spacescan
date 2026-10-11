@@ -190,7 +190,7 @@ fn show_os_escaped(s: &std::ffi::OsStr) -> String {
 /// characters (zero-width spaces and joiners, direction controls, the soft
 /// hyphen, the byte order mark, variation selectors, Hangul fillers, tags)
 /// and the line and paragraph separators. Two names differing only in one
-/// would look the same (SM-79).
+/// would look the same.
 fn is_invisible(c: char) -> bool {
     matches!(
         c as u32,
@@ -414,7 +414,7 @@ mod tests {
             "a\\nb\\tc\\\\d"
         );
         // A control character above ASCII and the raw byte of the same
-        // value look different (SM-76).
+        // value look different.
         assert_eq!(show_os(std::ffi::OsStr::new("a\u{80}b")), "a\\u{80}b");
         assert_eq!(show_os(std::ffi::OsStr::from_bytes(b"a\x80b")), "a\\x80b");
         assert_eq!(show_os(std::ffi::OsStr::new("c\u{9f}d")), "c\\u{9F}d");
@@ -481,7 +481,7 @@ mod tests {
     }
 
     /// Two names differing only in a character that shows as nothing, or
-    /// that rearranges the text around it, never look the same (SM-79);
+    /// that rearranges the text around it, never look the same;
     /// emoji built with joiners and presentation selectors stay as they
     /// are, and so does ordinary text.
     #[test]

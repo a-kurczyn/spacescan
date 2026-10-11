@@ -1782,7 +1782,7 @@ mod tests {
             })
             .collect();
         assert_eq!(issues.len(), 1, "{issues:?}");
-        // What really failed (SM-81): the copy is there, the original stays.
+        // What really failed: the copy is there, the original stays.
         assert_eq!(
             issues[0],
             trf(

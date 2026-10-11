@@ -2972,7 +2972,7 @@ mod typed_path_tests {
     }
 
     /// Every path the app shows opens the folder it was shown for, also
-    /// next to a sibling really named like its escaped text (SM-80): a
+    /// next to a sibling really named like its escaped text: a
     /// zero-width space, a line break and a raw byte, each beside a folder
     /// called by its escape. Typed with real characters (no backslash), a
     /// folder opens too.
@@ -3045,7 +3045,7 @@ mod about_tests {
 
     /// Screen readers get each main menu item as a menu item named by its
     /// text alone, with its shortcut as the keyboard shortcut and as the
-    /// description (SM-78).
+    /// description.
     #[test]
     fn main_menu_items_are_named_for_screen_readers() {
         let ctx = egui::Context::default();

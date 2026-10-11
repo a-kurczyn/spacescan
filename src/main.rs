@@ -2372,7 +2372,7 @@ mod frame_bench {
 }
 
 /// Resident memory across rescans ("r") of the scanned folder, the way the
-/// app does them (SM-19). Run with `SPACESCAN_MEM_TREE=<folder> cargo test
+/// app does them. Run with `SPACESCAN_MEM_TREE=<folder> cargo test
 /// --release app_rescan_memory -- --ignored --nocapture`.
 #[cfg(test)]
 mod rescan_memory {
