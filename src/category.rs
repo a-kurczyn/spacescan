@@ -246,15 +246,91 @@ impl CategoryModel {
     }
 }
 
-/// What the files are narrowed down to: one category, or one or more
-/// extensions (`ext_key`s; never none).
+/// A set of categories: those with an index below 256 (what a file's
+/// stored category byte can hold).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub(crate) struct CatSet([u64; 4]);
+
+impl CatSet {
+    /// The set holding only `c`.
+    pub(crate) fn of(c: Category) -> CatSet {
+        let mut set = CatSet::default();
+        set.insert(c);
+        set
+    }
+
+    pub(crate) fn insert(&mut self, c: Category) {
+        if c.0 < 256 {
+            self.0[c.0 / 64] |= 1 << (c.0 % 64);
+        }
+    }
+
+    pub(crate) fn remove(&mut self, c: Category) {
+        if c.0 < 256 {
+            self.0[c.0 / 64] &= !(1 << (c.0 % 64));
+        }
+    }
+
+    /// Adds `c` if it's missing, removes it if it's there.
+    pub(crate) fn toggle(&mut self, c: Category) {
+        if self.contains(c) {
+            self.remove(c);
+        } else {
+            self.insert(c);
+        }
+    }
+
+    pub(crate) fn contains(&self, c: Category) -> bool {
+        c.0 < 256 && self.0[c.0 / 64] & (1 << (c.0 % 64)) != 0
+    }
+
+    /// True if a file whose stored category byte is `b` is in the set
+    /// (never for `NO_CAT`).
+    pub(crate) fn has_byte(&self, b: u8) -> bool {
+        b != NO_CAT && self.contains(Category(usize::from(b)))
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0 == [0; 4]
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.iter().map(|w| w.count_ones() as usize).sum()
+    }
+
+    /// The categories in the set, in index order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Category> + '_ {
+        (0..256).map(Category).filter(|&c| self.contains(c))
+    }
+}
+
+/// What the files are narrowed down to: one or more categories, or one or
+/// more extensions (`ext_key`s). Never an empty set.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Pick {
-    Category(Category),
+    Categories(CatSet),
     Extensions(std::collections::BTreeSet<String>),
 }
 
 impl Pick {
+    /// A pick of the one category `c`.
+    pub(crate) fn category(c: Category) -> Pick {
+        Pick::Categories(CatSet::of(c))
+    }
+
+    /// The picked categories, for a pick of categories.
+    pub(crate) fn categories(&self) -> Option<CatSet> {
+        match self {
+            Pick::Categories(set) => Some(*set),
+            Pick::Extensions(_) => None,
+        }
+    }
+
+    /// True if category `c` is one of the picked categories.
+    pub(crate) fn has_category(&self, c: Category) -> bool {
+        matches!(self, Pick::Categories(set) if set.contains(c))
+    }
+
     /// A pick of the one extension `ext`.
     #[cfg(test)]
     pub(crate) fn extension(ext: &str) -> Pick {
@@ -271,7 +347,7 @@ impl CategoryModel {
     /// True if a file called `name` is part of `pick`.
     pub(crate) fn pick_matches(&self, pick: &Pick, name: &str) -> bool {
         match pick {
-            Pick::Category(c) => self.of_name(name) == *c,
+            Pick::Categories(set) => set.contains(self.of_name(name)),
             Pick::Extensions(set) => set.contains(&ext_key(name)),
         }
     }
@@ -279,30 +355,30 @@ impl CategoryModel {
     /// True if `pick` has files of category `cat`.
     pub(crate) fn pick_in_category(&self, pick: &Pick, cat: Category) -> bool {
         match pick {
-            Pick::Category(c) => *c == cat,
+            Pick::Categories(set) => set.contains(cat),
             Pick::Extensions(set) => set.iter().any(|e| self.of_ext(e) == cat),
         }
     }
 
-    /// `pick` as shown: the category's name, or the extensions (the first
+    /// `pick` as shown: the categories' names or the extensions (the first
     /// three, then how many more).
     pub(crate) fn pick_label(&self, pick: &Pick) -> String {
         const SHOWN: usize = 3;
-        match pick {
-            Pick::Category(c) => self.label(*c),
-            Pick::Extensions(set) => {
-                let mut label = set
-                    .iter()
-                    .take(SHOWN)
-                    .map(|e| ext_label(e))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if set.len() > SHOWN {
-                    label.push_str(&trf("EXT_MORE", &[&(set.len() - SHOWN).to_string()]));
-                }
-                label
-            }
+        let (names, count): (Vec<String>, usize) = match pick {
+            Pick::Categories(set) => (
+                set.iter().take(SHOWN).map(|c| self.label(c)).collect(),
+                set.len(),
+            ),
+            Pick::Extensions(set) => (
+                set.iter().take(SHOWN).map(|e| ext_label(e)).collect(),
+                set.len(),
+            ),
+        };
+        let mut label = names.join(", ");
+        if count > SHOWN {
+            label.push_str(&trf("EXT_MORE", &[&(count - SHOWN).to_string()]));
         }
+        label
     }
 }
 
@@ -475,6 +551,61 @@ pub(crate) fn category_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sets of categories: every index that a stored byte can hold, the
+    /// edges of each word, and indexes past what the set can hold.
+    #[test]
+    fn category_sets() {
+        let mut set = CatSet::default();
+        assert!(set.is_empty());
+        for c in [0, 63, 64, 127, 128, 191, 192, 254, 255] {
+            set.insert(Category(c));
+            assert!(set.contains(Category(c)), "{c}");
+        }
+        assert_eq!(set.len(), 9);
+        assert_eq!(
+            set.iter().map(|c| c.0).collect::<Vec<_>>(),
+            [0, 63, 64, 127, 128, 191, 192, 254, 255]
+        );
+        assert!(set.has_byte(254));
+        assert!(!set.has_byte(NO_CAT), "no stored category is never picked");
+        assert!(!set.has_byte(1));
+        set.insert(Category(256));
+        set.insert(Category(usize::MAX));
+        assert!(!set.contains(Category(256)));
+        assert_eq!(set.len(), 9);
+        set.toggle(Category(63));
+        assert!(!set.contains(Category(63)) && set.contains(Category(64)));
+        set.toggle(Category(63));
+        assert!(set.contains(Category(63)));
+        for c in set.clone().iter() {
+            set.remove(c);
+        }
+        assert!(set.is_empty());
+        assert_eq!(
+            CatSet::of(Category(5)).iter().collect::<Vec<_>>(),
+            [Category(5)]
+        );
+    }
+
+    /// A pick of several categories matches files of any of them.
+    #[test]
+    fn several_categories_pick_all_their_files() {
+        let cats = CategoryModel::defaults();
+        let (video, docs) = (cats.of_name("a.mkv"), cats.of_name("a.txt"));
+        let mut set = CatSet::of(video);
+        set.insert(docs);
+        let pick = Pick::Categories(set);
+        assert!(cats.pick_matches(&pick, "x.mkv"));
+        assert!(cats.pick_matches(&pick, "x.TXT"));
+        assert!(!cats.pick_matches(&pick, "x.mp3"));
+        assert!(cats.pick_in_category(&pick, docs));
+        assert!(!cats.pick_in_category(&pick, cats.of_name("x.mp3")));
+        assert_eq!(pick.categories(), Some(set));
+        assert!(pick.has_category(video) && !pick.has_category(cats.other()));
+        let label = cats.pick_label(&pick);
+        assert!(label.contains(&cats.label(video)) && label.contains(&cats.label(docs)));
+    }
 
     /// The quick path of `of_name` agrees with `ext_key`.
     #[test]

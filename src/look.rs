@@ -284,18 +284,30 @@ pub(crate) struct Summary {
 }
 
 impl Summary {
-    /// The summary as shown while only category `pick`'s files count
-    /// (`files` of them): that category. The times stay those of all the
-    /// files, which only the finished tree tells apart.
-    fn picked(self, pick: Option<usize>, files: u64) -> Summary {
-        match pick {
-            Some(c) => Summary {
-                cat: Category(c),
-                cat_by_files: Category(c),
-                any: files > 0,
-                ..self
-            },
-            None => self,
+    /// The summary as shown while only the picked categories' files count
+    /// (`files` of them): the picked category with the most bytes (or
+    /// files), going by the per-category `(bytes, files)` when known. The
+    /// times stay those of all the files, which only the finished tree
+    /// tells apart.
+    fn picked(
+        self,
+        pick: Option<CatSet>,
+        files: u64,
+        per_cat: Option<(&[u64], &[u64])>,
+    ) -> Summary {
+        let Some(set) = pick else {
+            return self;
+        };
+        let first = set.iter().next().unwrap_or(self.cat);
+        let (cat, cat_by_files) = match per_cat {
+            Some((bytes, counts)) => (largest_in(set, bytes), largest_in(set, counts)),
+            None => (first, first),
+        };
+        Summary {
+            cat,
+            cat_by_files,
+            any: files > 0,
+            ..self
         }
     }
 
@@ -415,14 +427,44 @@ struct Finished {
 }
 
 impl Finished {
-    /// Its size and file count: of everything, or of category `pick`'s
-    /// files only.
-    fn shown(&self, pick: Option<usize>) -> (u64, u64) {
+    /// Its size and file count: of everything, or of the picked
+    /// categories' files only.
+    fn shown(&self, pick: Option<CatSet>) -> (u64, u64) {
         match pick {
-            Some(c) => (self.by_cat[c], self.by_cat[self.by_cat.len() / 2 + c]),
+            Some(set) => {
+                let (bytes, files) = self.per_cat();
+                set_share(set, bytes, files)
+            }
             None => (self.size, self.file_count),
         }
     }
+
+    /// Bytes and files of each category under it.
+    fn per_cat(&self) -> (&[u64], &[u64]) {
+        self.by_cat.split_at(self.by_cat.len() / 2)
+    }
+}
+
+/// The bytes and files of the categories in `set`, out of per-category
+/// `bytes` and `files`.
+fn set_share(set: CatSet, bytes: &[u64], files: &[u64]) -> (u64, u64) {
+    set.iter()
+        .filter(|c| c.0 < bytes.len())
+        .fold((0u64, 0u64), |(b, f), c| {
+            (b.saturating_add(bytes[c.0]), f.saturating_add(files[c.0]))
+        })
+}
+
+/// The category of `set` with the most of `values` (the first on a tie).
+fn largest_in(set: CatSet, values: &[u64]) -> Category {
+    let mut best: Option<(Category, u64)> = None;
+    for c in set.iter() {
+        let v = values.get(c.0).copied().unwrap_or(0);
+        if best.is_none_or(|(_, b)| v > b) {
+            best = Some((c, v));
+        }
+    }
+    best.map_or(Category(0), |(c, _)| c)
 }
 
 /// One folder of a running scan. The scan counts every file read in its
@@ -601,12 +643,11 @@ impl LiveTree {
         &self,
         depth: usize,
         min_share: f64,
-        pick: Option<Category>,
+        pick: Option<CatSet>,
         measure: Measure,
         looks: &mut LiveLooks,
     ) -> Option<Node> {
         let root = self.root.get()?;
-        let pick = pick.map(|c| c.0).filter(|&c| c <= self.cats.other().0);
         looks.summaries.clear();
         let now = Instant::now();
         // The smallest slice, from the scanned folder's size at the last read
@@ -742,8 +783,8 @@ impl LiveTree {
         }
         // An unfinished folder's picked share: its totals, now that its
         // subfolders' are in them.
-        if let (None, Some(c), Some(t)) = (finished, shown.pick, &totals) {
-            (size, files) = (t.bytes[c], t.files[c]);
+        if let (None, Some(set), Some(t)) = (finished, shown.pick, &totals) {
+            (size, files) = set_share(set, &t.bytes, &t.files);
         }
         let node = depth.map(|_| {
             let (file_count, summary) = match (finished, &totals) {
@@ -756,7 +797,12 @@ impl LiveTree {
             } else {
                 file_count
             };
-            let summary = summary.picked(shown.pick, files);
+            let per_cat = match (finished, &totals) {
+                (Some(d), _) => Some(d.per_cat()),
+                (None, Some(t)) => Some((&t.bytes[..], &t.files[..])),
+                (None, None) => None,
+            };
+            let summary = summary.picked(shown.pick, files, per_cat);
             let mut n = looks.node(f, size, file_count, summary, finished, shown.now);
             if below.is_some() {
                 sort_by_measure(&mut kids, shown.measure.by_files());
@@ -789,19 +835,22 @@ struct Grouped {
 }
 
 impl Grouped {
-    /// Adds subfolder `c`, read as `r` (with only category `pick`'s files
-    /// counted, if one is picked).
-    fn add(&mut self, c: &LiveFolder, r: &Read, pick: Option<usize>, measure: Measure) {
+    /// Adds subfolder `c`, read as `r` (with only the picked categories'
+    /// files counted, if some are picked).
+    fn add(&mut self, c: &LiveFolder, r: &Read, pick: Option<CatSet>, measure: Measure) {
         self.count += 1;
         self.size = self.size.saturating_add(r.size);
-        let summary = match (c.done.get(), &r.totals) {
-            (Some(d), _) => d.summary,
-            (None, Some(t)) => t.summary(),
+        let (summary, per_cat) = match (c.done.get(), &r.totals) {
+            (Some(d), _) => (d.summary, Some(d.per_cat())),
+            (None, Some(t)) => (t.summary(), Some((&t.bytes[..], &t.files[..]))),
             (None, None) => return,
         };
         self.file_count += r.files;
-        self.looks
-            .push(summary.picked(pick, r.files).look(r.size, r.files, measure));
+        self.looks.push(
+            summary
+                .picked(pick, r.files, per_cat)
+                .look(r.size, r.files, measure),
+        );
     }
 
     /// The entry, colored like the chart's "other" slices; None if empty.
@@ -859,8 +908,8 @@ struct Shown {
     /// Below the scanned folder's own children, folders weighing less are
     /// grouped (see `LiveTree::snapshot`).
     min_size: u64,
-    /// Only the files of this category count (None: every file).
-    pick: Option<usize>,
+    /// Only the files of these categories count (None: every file).
+    pick: Option<CatSet>,
     /// What sizes are measured in.
     measure: Measure,
     /// The time of the read, when folders newly colored got their color.
@@ -1443,9 +1492,10 @@ mod live_stress {
     }
 
     /// Scans `dir` with a live tree made in `made_in` and scanned in
-    /// `pool`, while a reader like the window's reads it all along: the
-    /// scanned folder's size and file count never go down. Then every
-    /// folder of a full snapshot matches the finished tree.
+    /// `pool`, while a reader like the window's reads it all along, with
+    /// nothing picked and with two categories picked: no folder's size or
+    /// file count ever goes down. Then every folder of a full snapshot
+    /// matches the finished tree, also with one or more categories picked.
     fn scan_and_check(dir: &Path, made_in: &rayon::ThreadPool, pool: &rayon::ThreadPool) -> usize {
         let cats = CategoryModel::defaults();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1477,14 +1527,19 @@ mod live_stress {
                         check(c, seen);
                     }
                 }
-                let mut looks = LiveLooks::default();
-                let mut seen = HashMap::new();
+                let mut two = CatSet::of(cats.of_name("a.txt"));
+                two.insert(cats.of_name("a.mkv"));
+                let mut looks = [LiveLooks::default(), LiveLooks::default()];
+                let mut seen = [HashMap::new(), HashMap::new()];
+                let mut i = 0;
                 while reading.load(Relaxed) {
+                    let pick = [None, Some(two)][i % 2];
                     if let Some(root) =
-                        live.snapshot(usize::MAX, 0.0, None, Measure::Bytes, &mut looks)
+                        live.snapshot(usize::MAX, 0.0, pick, Measure::Bytes, &mut looks[i % 2])
                     {
-                        check(&root, &mut seen);
+                        check(&root, &mut seen[i % 2]);
                     }
+                    i += 1;
                     std::thread::yield_now();
                 }
             });
@@ -1513,26 +1568,34 @@ mod live_stress {
             out
         };
         let doc = cats.of_name("a.txt");
-        let pick = Pick::Category(doc);
-        // Nothing of it found: an empty top, as the app shows it.
-        let filtered = match filter_tree_by(
-            &tree,
-            &|n: &Node| cats.pick_matches(&pick, &n.name),
-            Measure::Bytes,
-        ) {
-            Some(f) => folders(&f),
-            None => vec![(tree.path(), 0, 0)],
-        };
-        let picked = live
-            .snapshot(
-                usize::MAX,
-                0.0,
-                Some(doc),
+        let mut picks = vec![CatSet::of(doc)];
+        for other in ["a.mkv", "a.JPG", "a.eml", "a"] {
+            let mut set = CatSet::of(doc);
+            set.insert(cats.of_name(other));
+            picks.push(set);
+        }
+        for set in picks {
+            let pick = Pick::Categories(set);
+            // Nothing of it found: an empty top, as the app shows it.
+            let filtered = match filter_tree_by(
+                &tree,
+                &|n: &Node| cats.pick_matches(&pick, &n.name),
                 Measure::Bytes,
-                &mut LiveLooks::default(),
-            )
-            .unwrap();
-        assert_eq!(folders(&picked), filtered);
+            ) {
+                Some(f) => folders(&f),
+                None => vec![(tree.path(), 0, 0)],
+            };
+            let picked = live
+                .snapshot(
+                    usize::MAX,
+                    0.0,
+                    Some(set),
+                    Measure::Bytes,
+                    &mut LiveLooks::default(),
+                )
+                .unwrap();
+            assert_eq!(folders(&picked), filtered, "{set:?}");
+        }
         same(&snap, &tree, &looks, &cats)
     }
 
@@ -1808,7 +1871,7 @@ mod live_stress {
 
         let mut looks = LiveLooks::default();
         let picked = live
-            .snapshot(5, 0.0, Some(doc), Measure::Bytes, &mut looks)
+            .snapshot(5, 0.0, Some(CatSet::of(doc)), Measure::Bytes, &mut looks)
             .unwrap();
         assert_eq!(
             shape(&picked),
@@ -1831,7 +1894,7 @@ mod live_stress {
         // picked): grouped, with its picked share.
         let mut looks = LiveLooks::default();
         let grouped = live
-            .snapshot(5, 0.5, Some(doc), Measure::Bytes, &mut looks)
+            .snapshot(5, 0.5, Some(CatSet::of(doc)), Measure::Bytes, &mut looks)
             .unwrap();
         let deep = grouped
             .children

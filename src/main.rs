@@ -231,7 +231,7 @@ struct DiskScanApp {
     /// What the last read of the live tree showed: depth, smallest slice
     /// angle (as bits), picked category and measure. A change reads it again
     /// at once.
-    live_read_for: Option<(usize, u32, Option<Category>, Measure)>,
+    live_read_for: Option<(usize, u32, Option<CatSet>, Measure)>,
     /// A pick from the left panel, applied once the frame's table is drawn
     /// (the table is drawn from the tree as it was when the frame began).
     pick_pending: Option<Option<Pick>>,
@@ -758,9 +758,10 @@ impl DiskScanApp {
                     .as_ref()
                     .is_some_and(|c| Arc::ptr_eq(c, &cats));
                 let kept = match pick {
-                    Pick::Category(c) if stored && cat_byte(*c) != NO_CAT => {
-                        let byte = cat_byte(*c);
-                        filter_tree_by(&base, &|n: &Node| n.cat == byte, self.measure)
+                    Pick::Categories(set)
+                        if stored && set.iter().all(|c| cat_byte(c) != NO_CAT) =>
+                    {
+                        filter_tree_by(&base, &|n: &Node| set.has_byte(n.cat), self.measure)
                     }
                     _ => filter_tree_by(
                         &base,
@@ -1306,10 +1307,7 @@ impl DiskScanApp {
         } else {
             self.settings.min_segment_angle_deg
         };
-        let live_pick = match self.pick {
-            Some(Pick::Category(c)) => Some(c),
-            _ => None,
-        };
+        let live_pick = self.pick.as_ref().and_then(Pick::categories);
         let live_for = (
             self.settings.max_render_depth,
             min_angle.to_bits(),
@@ -1378,7 +1376,9 @@ impl DiskScanApp {
 
     /// Chart view: the categories in the category bar's order, bottom left
     /// of `area`. While scanning, those found so far, re-sorted as totals
-    /// grow; each row glides to its new place.
+    /// grow; each row glides to its new place. Clicking a category adds it
+    /// to the picked ones, or takes it out: the chart then shows only the
+    /// picked categories' files.
     fn chart_legend_ui(&mut self, ctx: &egui::Context, area: egui::Rect) {
         let rows: Vec<Category> = if self.scanning {
             self.live_looks.order()
@@ -1388,22 +1388,29 @@ impl DiskScanApp {
             self.cat_breakdown.iter().map(|r| r.cat).collect()
         };
         let dark = ctx.global_style().visuals.dark_mode;
+        let picked = self.pick.as_ref().and_then(Pick::categories);
+        let mut clicked = None;
         egui::Area::new("category_legend".into())
             .order(egui::Order::Foreground)
-            .interactable(false)
             .pivot(egui::Align2::LEFT_BOTTOM)
             .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
             .show(ctx, |ui| {
                 let font = egui::TextStyle::Small.resolve(ui.style());
-                let text_color = ui.visuals().text_color();
+                // With some categories picked, the others are dimmed.
+                let (strong, weak) = (ui.visuals().text_color(), ui.visuals().weak_text_color());
+                let ink = |c: Category| match picked {
+                    Some(set) if !set.contains(c) => weak,
+                    _ => strong,
+                };
                 let labels: Vec<_> = rows
                     .iter()
                     .map(|&c| {
                         ui.painter()
-                            .layout_no_wrap(self.cats.label(c), font.clone(), text_color)
+                            .layout_no_wrap(self.cats.label(c), font.clone(), ink(c))
                     })
                     .collect();
                 const SWATCH: f32 = 10.0;
+                const PAD: f32 = 3.0;
                 let gap = ui.spacing().item_spacing.x;
                 let row_h = font.size.max(SWATCH) + ui.spacing().item_spacing.y + 4.0;
                 let width = labels.iter().map(|g| g.size().x).fold(0.0, f32::max) + SWATCH + gap;
@@ -1420,16 +1427,74 @@ impl DiskScanApp {
                     );
                     let top = rect.top() + y;
                     let mid = top + row_h / 2.0;
+                    let row_rect = egui::Rect::from_min_size(
+                        Pos2::new(rect.left() - PAD, top),
+                        Vec2::new(width + 2.0 * PAD, row_h),
+                    );
+                    let is_picked = picked.is_some_and(|set| set.contains(cat));
+                    let hit = ui
+                        .interact(
+                            row_rect,
+                            ui.id().with(("legend_row", cat.0)),
+                            egui::Sense::click(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if is_picked {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            3.0,
+                            ui.visuals().selection.bg_fill.gamma_multiply(0.5),
+                        );
+                    } else if hit.hovered() {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            3.0,
+                            ui.visuals().widgets.hovered.weak_bg_fill,
+                        );
+                    }
                     let swatch = egui::Rect::from_center_size(
                         Pos2::new(rect.left() + SWATCH / 2.0, mid),
                         Vec2::splat(SWATCH),
                     );
-                    ui.painter()
-                        .rect_filled(swatch, 2.0, self.cats.color(cat, dark));
+                    let color = self.cats.color(cat, dark);
+                    let color = match picked {
+                        Some(_) if !is_picked => color.gamma_multiply(0.3),
+                        _ => color,
+                    };
+                    ui.painter().rect_filled(swatch, 2.0, color);
                     let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
-                    ui.painter().galley(at, label, text_color);
+                    ui.painter().galley(at, label, ink(cat));
+                    let name = self.cats.label(cat);
+                    hit.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::Checkbox,
+                            true,
+                            is_picked,
+                            &name,
+                        )
+                    });
+                    if hit.on_hover_text(tr("LEGEND_CLICK")).clicked() {
+                        clicked = Some(cat);
+                    }
                 }
             });
+        if let Some(c) = clicked {
+            let mut set = picked.unwrap_or_default();
+            set.toggle(c);
+            self.set_pick((!set.is_empty()).then_some(Pick::Categories(set)));
+        }
+    }
+
+    /// Shows only `pick`'s files (None: everything). During a scan the live
+    /// view follows at its next read; a picked extension waits for the end.
+    fn set_pick(&mut self, pick: Option<Pick>) {
+        if pick == self.pick {
+            return;
+        }
+        self.pick = pick;
+        if !self.scanning {
+            self.repick();
+        }
     }
 
     /// Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
@@ -1569,6 +1634,144 @@ fn main() -> eframe::Result<()> {
 mod pick_tests {
     use super::*;
 
+    /// A frame of the whole app in a 1600 × 1000 window.
+    fn app_frame(
+        app: &mut DiskScanApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        app.saved_config = Some(app.current_config());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                Pos2::ZERO,
+                Vec2::new(1600.0, 1000.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        headless_frame(ctx, input, |ui| app.frame_ui(ui))
+    }
+
+    /// Clicks the widget screen readers know as `name`, as the pointer
+    /// would; with Ctrl held if `ctrl`.
+    fn click_named(app: &mut DiskScanApp, ctx: &egui::Context, name: &str, ctrl: bool) {
+        // Floating areas are measured in their first frame, shown after.
+        app_frame(app, ctx, vec![]);
+        let out = app_frame(app, ctx, vec![]);
+        let update = out
+            .platform_output
+            .accesskit_update
+            .expect("accesskit output");
+        let bounds = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some(name))
+            .and_then(|(_, n)| n.bounds())
+            .unwrap_or_else(|| panic!("no widget named {name}"));
+        let at = Pos2::new(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        let modifiers = if ctrl {
+            egui::Modifiers::COMMAND
+        } else {
+            egui::Modifiers::NONE
+        };
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        app_frame(app, ctx, vec![egui::Event::PointerMoved(at), button(true)]);
+        app_frame(app, ctx, vec![button(false)]);
+    }
+
+    /// The names of the files in the tree shown.
+    fn shown_files(app: &DiskScanApp) -> Vec<String> {
+        fn walk(n: &Node, out: &mut Vec<String>) {
+            for c in n.children.iter() {
+                if c.is_dir {
+                    walk(c, out);
+                } else {
+                    out.push(c.name.to_string());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(app.root.as_ref().unwrap(), &mut out);
+        out.sort();
+        out
+    }
+
+    /// Clicking categories in the chart's legend picks them one by one; the
+    /// chart then shows only their files. Clicking a picked one takes it
+    /// out, and taking out the last shows everything again.
+    #[test]
+    fn legend_clicks_pick_and_unpick_categories() {
+        let mut app = DiskScanApp::default();
+        let cats = app.cats.clone();
+        let file = |p: &str, size| {
+            let mut n = test_node(p, size, false, vec![]);
+            n.cat = cat_byte(cats.of_name(&n.name));
+            n
+        };
+        let sub = test_node("/t/s", 30, true, vec![file("/t/s/c.mp3", 30)]);
+        app.full_root = Some(Arc::new(test_node(
+            "/t",
+            180,
+            true,
+            vec![file("/t/a.mkv", 100), file("/t/b.txt", 50), sub],
+        )));
+        app.tree_cats = Some(app.cats.clone());
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let (video, docs) = (
+            cats.label(cats.of_name("a.mkv")),
+            cats.label(cats.of_name("b.txt")),
+        );
+        let all = ["a.mkv", "b.txt", "c.mp3"];
+        assert_eq!(shown_files(&app), all);
+
+        click_named(&mut app, &ctx, &video, false);
+        assert_eq!(shown_files(&app), ["a.mkv"]);
+        click_named(&mut app, &ctx, &docs, false);
+        assert_eq!(shown_files(&app), ["a.mkv", "b.txt"]);
+        click_named(&mut app, &ctx, &video, false);
+        assert_eq!(shown_files(&app), ["b.txt"]);
+        assert_eq!(app.pick, Some(Pick::category(cats.of_name("b.txt"))));
+        click_named(&mut app, &ctx, &docs, false);
+        assert_eq!(app.pick, None);
+        assert_eq!(shown_files(&app), all);
+    }
+
+    /// Clicks on the Summary view's category bar: a plain click picks only
+    /// that category (again: nothing), Ctrl+click adds or removes it.
+    #[test]
+    fn category_bar_clicks() {
+        let mut app = DiskScanApp::default();
+        let (a, b) = (Category(0), Category(1));
+        let both = || {
+            let mut set = CatSet::of(a);
+            set.insert(b);
+            Some(Pick::Categories(set))
+        };
+        assert_eq!(app.category_clicked(a, false), Some(Pick::category(a)));
+        assert_eq!(app.category_clicked(a, true), Some(Pick::category(a)));
+        app.pick = Some(Pick::category(a));
+        assert_eq!(app.category_clicked(a, false), None);
+        assert_eq!(app.category_clicked(b, false), Some(Pick::category(b)));
+        assert_eq!(app.category_clicked(b, true), both());
+        assert_eq!(app.category_clicked(a, true), None);
+        app.pick = both();
+        assert_eq!(app.category_clicked(a, false), Some(Pick::category(a)));
+        assert_eq!(app.category_clicked(a, true), Some(Pick::category(b)));
+        // An extension pick: a category click starts over.
+        app.pick = Some(Pick::extension("mkv"));
+        assert_eq!(app.category_clicked(a, true), Some(Pick::category(a)));
+    }
+
     /// The files left by picking each category: the same whether the
     /// categories the scan stored are used or every name is read again; and
     /// the stored ones are what's used when the scan had these categories.
@@ -1620,7 +1823,7 @@ mod pick_tests {
             let mut app = DiskScanApp::default();
             app.full_root = Some(Arc::new(tree(&app.cats, misfiled)));
             app.tree_cats = stored.then(|| app.cats.clone());
-            app.pick = Some(Pick::Category(c));
+            app.pick = Some(Pick::category(c));
             app.rebuild_view_tree();
             files(&app)
         };
@@ -1679,7 +1882,7 @@ mod pick_tests {
             Some(app.cats.of_name("x.txt")),
             None,
         ] {
-            app.pick = pick.map(Pick::Category);
+            app.pick = pick.map(Pick::category);
             app.repick();
             assert!(
                 Arc::ptr_eq(&base, app.cat_base.as_ref().unwrap()),
@@ -1906,7 +2109,7 @@ mod frame_bench {
         report(
             "chart, category picked",
             &frames(&mut app, &ctx, 3, n, |a, i| {
-                a.pick = Some(Pick::Category(Category(i % (cats.other().0 + 1))));
+                a.pick = Some(Pick::category(Category(i % (cats.other().0 + 1))));
                 a.repick();
                 vec![]
             }),
@@ -2083,7 +2286,7 @@ mod frame_bench {
             frame(&mut app, &format!("chart hover {i}"), moved(x, y));
             frame(&mut app, &format!("chart hover {i} again"), vec![]);
         }
-        app.pick = Some(Pick::Category(Category(0)));
+        app.pick = Some(Pick::category(Category(0)));
         app.rebuild_view_tree();
         for i in 0..2 {
             frame(&mut app, &format!("chart picked {i}"), moved(900.0, 400.0));

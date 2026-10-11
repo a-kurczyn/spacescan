@@ -1110,8 +1110,8 @@ impl DiskScanApp {
         let pick = match n {
             0 => None,
             _ => match self.cat_breakdown.get(n - 1) {
-                Some(row) if self.pick != Some(Pick::Category(row.cat)) => {
-                    Some(Pick::Category(row.cat))
+                Some(row) if self.pick != Some(Pick::category(row.cat)) => {
+                    Some(Pick::category(row.cat))
                 }
                 Some(_) => None,
                 None => return, // no category at that position
@@ -1241,7 +1241,7 @@ impl DiskScanApp {
                         .is_some_and(|p| p.has_extension(&row.ext));
                     let dimmed = !picked
                         && self.pick.as_ref().is_some_and(|p| match p {
-                            Pick::Category(c) => row.cat != *c,
+                            Pick::Categories(set) => !set.contains(row.cat),
                             Pick::Extensions(_) => true,
                         });
                     table_row.set_selected(picked);
@@ -1405,11 +1405,10 @@ impl DiskScanApp {
             self.category_segments_ui(ui, rect, total, compact)
         };
 
-        if clear || clicked.is_some() {
-            self.pick_pending = Some(match clicked {
-                Some(c) if self.pick != Some(Pick::Category(c)) => Some(Pick::Category(c)),
-                _ => None,
-            });
+        if clear {
+            self.pick_pending = Some(None);
+        } else if let Some((c, add)) = clicked {
+            self.pick_pending = Some(self.category_clicked(c, add));
         }
     }
 
@@ -1461,7 +1460,7 @@ impl DiskScanApp {
             return 0.0;
         };
         if self.cat_breakdown.iter().any(|r| match pick {
-            Pick::Category(c) => r.cat == *c,
+            Pick::Categories(set) => set.contains(r.cat),
             Pick::Extensions(set) => r.exts.iter().any(|x| set.contains(&x.0)),
         }) {
             return 0.0;
@@ -1469,7 +1468,7 @@ impl DiskScanApp {
         // The picked category or extension has no files in this folder.
         let hidden: u64 = self.cat_breakdown.iter().map(|r| r.files).sum();
         let key = match pick {
-            Pick::Category(_) => "CAT_NONE_HERE",
+            Pick::Categories(_) => "CAT_NONE_HERE",
             Pick::Extensions(_) => "EXT_NONE_HERE",
         };
         let text = trn(
@@ -1485,14 +1484,14 @@ impl DiskScanApp {
 
     /// The category bar's segments in `rect`, with labels beside them
     /// (none when `compact`). `total` is the rows' total weight. Returns
-    /// the category clicked.
+    /// the category clicked, and whether Ctrl was held.
     fn category_segments_ui(
         &self,
         ui: &mut egui::Ui,
         rect: egui::Rect,
         total: u64,
         compact: bool,
-    ) -> Option<Category> {
+    ) -> Option<(Category, bool)> {
         let measure = self.measure;
         let rows = &self.cat_breakdown;
         let painter = ui.painter_at(rect);
@@ -1527,7 +1526,7 @@ impl DiskScanApp {
             );
             // An extension pick highlights its category without
             // selecting it.
-            let picked = self.pick == Some(Pick::Category(row.cat));
+            let picked = self.pick.as_ref().is_some_and(|p| p.has_category(row.cat));
             let dimmed = self
                 .pick
                 .as_ref()
@@ -1662,12 +1661,26 @@ impl DiskScanApp {
                 } else {
                     "CAT_CLICK"
                 }));
+                ui.weak(tr("CAT_CTRL_CLICK"));
             });
             if hit.clicked() {
-                clicked = Some(row.cat);
+                clicked = Some((row.cat, ui.input(|i| i.modifiers.command)));
             }
         }
         clicked
+    }
+
+    /// The pick after a click on category `c`: with `add` (Ctrl+click) it
+    /// joins or leaves the picked categories; otherwise it becomes the only
+    /// one picked, or, if it already is, nothing is picked.
+    pub(crate) fn category_clicked(&self, c: Category, add: bool) -> Option<Pick> {
+        let mut set = match (&self.pick, add) {
+            (Some(Pick::Categories(set)), true) => *set,
+            _ if self.pick == Some(Pick::category(c)) => return None,
+            _ => return Some(Pick::category(c)),
+        };
+        set.toggle(c);
+        (!set.is_empty()).then_some(Pick::Categories(set))
     }
 
     /// How far the chart's legends have faded in after the last scan: 0
@@ -2635,7 +2648,7 @@ mod category_bar_tests {
                 exts.iter().map(|e| e.to_string()).collect(),
             ))
         };
-        let video = Pick::Category(Category(0));
+        let video = Pick::category(Category(0));
         assert_eq!(pick_after_click(None, "mkv", false), set(&["mkv"]));
         assert_eq!(pick_after_click(set(&["mkv"]).as_ref(), "mkv", false), None);
         assert_eq!(
@@ -2688,8 +2701,8 @@ mod category_bar_tests {
         frame(&mut app);
         assert_eq!(app.root.as_ref().unwrap().children.len(), 22);
 
-        let video = Pick::Category(app.cats.of_name("x.mkv"));
-        let other = Pick::Category(app.cats.other());
+        let video = Pick::category(app.cats.of_name("x.mkv"));
+        let other = Pick::category(app.cats.other());
         let eml = Pick::extension("eml");
         for (pick, rows) in [
             (Some(video), 1),
@@ -2755,14 +2768,14 @@ mod category_bar_tests {
             }
         };
         press(&mut app, 1);
-        assert_eq!(app.pick, Some(Pick::Category(docs)));
+        assert_eq!(app.pick, Some(Pick::category(docs)));
         press(&mut app, 2);
-        assert_eq!(app.pick, Some(Pick::Category(video)));
+        assert_eq!(app.pick, Some(Pick::category(video)));
         press(&mut app, 2);
         assert_eq!(app.pick, None);
         press(&mut app, 1);
         press(&mut app, 3);
-        assert_eq!(app.pick, Some(Pick::Category(docs)));
+        assert_eq!(app.pick, Some(Pick::category(docs)));
         press(&mut app, 0);
         assert_eq!(app.pick, None);
     }
@@ -2800,7 +2813,7 @@ mod category_bar_tests {
         };
         assert_eq!(names(app.extension_rows()), [".pdf", ".srt", ".mkv"]);
         // A pick doesn't hide rows: every extension stays clickable.
-        app.pick = Some(Pick::Category(video));
+        app.pick = Some(Pick::category(video));
         assert_eq!(names(app.extension_rows()).len(), 3);
 
         app.pick = None;

@@ -2935,7 +2935,7 @@ mod cursor_tests {
                 ..DiskScanApp::default()
             };
             if picked {
-                app.pick = Some(Pick::Category(app.cats.of_name("x.rs")));
+                app.pick = Some(Pick::category(app.cats.of_name("x.rs")));
             }
             app.rebuild_view_tree();
             // Delete: "big" drops below "small", and "mid2" becomes a tie.
@@ -2969,7 +2969,7 @@ mod cursor_tests {
                 ..DiskScanApp::default()
             };
             if picked {
-                app.pick = Some(Pick::Category(app.cats.of_name("x.mkv")));
+                app.pick = Some(Pick::category(app.cats.of_name("x.mkv")));
             }
             app.rebuild_view_tree();
             let before = Arc::as_ptr(app.full_root.as_ref().unwrap());

@@ -737,7 +737,7 @@ mod tests {
         full.children[0].size = 6900;
         full.children[0].file_count = 2;
         app.full_root = Some(Arc::new(full));
-        app.pick = Some(Pick::Category(app.cats.of_name("x.mkv")));
+        app.pick = Some(Pick::category(app.cats.of_name("x.mkv")));
         app.rebuild_view_tree();
         let target = vec![PathBuf::from("/nonexistent/mixed")];
 
