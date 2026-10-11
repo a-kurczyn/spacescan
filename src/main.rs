@@ -2004,6 +2004,116 @@ mod frame_bench {
             }
         }
     }
+
+    /// Writes what every frame draws, in a fixed set of views and
+    /// pointer positions, to $SPACESCAN_DUMP: two versions of the window
+    /// code that should look the same must give identical files.
+    /// Run with `cargo test --release frame_dump -- --ignored`.
+    #[test]
+    #[ignore]
+    fn frame_dump() {
+        use std::fmt::Write as _;
+        let out = std::env::var("SPACESCAN_DUMP").unwrap();
+        let mut app = DiskScanApp::default();
+        let mut tree = synthetic_tree(3_000, &app.cats);
+        // Times on whole days, so the dates drawn are the same in every run.
+        fn whole_days(n: &mut Node) {
+            n.mtime -= n.mtime.rem_euclid(86_400);
+            n.ctime -= n.ctime.rem_euclid(86_400);
+            for c in n.children.iter_mut() {
+                whole_days(c);
+            }
+        }
+        whole_days(&mut tree);
+        app.tree_cats = Some(app.cats.clone());
+        app.full_root = Some(Arc::new(tree));
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let mut frame = |app: &mut DiskScanApp, name: &str, events: Vec<egui::Event>| {
+            app.saved_config = Some(app.current_config());
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1600.0, 1000.0),
+                )),
+                time: Some(0.0),
+                events,
+                ..Default::default()
+            };
+            let out = headless_frame(&ctx, input, |ui| app.frame_ui(ui));
+            let _ = writeln!(text, "== {name}");
+            for s in &out.shapes {
+                let _ = writeln!(text, "{:?}", s.shape);
+            }
+        };
+        let moved = |x: f32, y: f32| vec![egui::Event::PointerMoved(Pos2::new(x, y))];
+        let key = |k: egui::Key| egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for i in 0..3 {
+            frame(&mut app, &format!("chart {i}"), vec![]);
+        }
+        for (i, (x, y)) in [
+            (800.0, 520.0),
+            (900.0, 400.0),
+            (700.0, 650.0),
+            (1000.0, 520.0),
+            (620.0, 300.0),
+            (60.0, 900.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            frame(&mut app, &format!("chart hover {i}"), moved(x, y));
+            frame(&mut app, &format!("chart hover {i} again"), vec![]);
+        }
+        app.pick = Some(Pick::Category(Category(0)));
+        app.rebuild_view_tree();
+        for i in 0..2 {
+            frame(&mut app, &format!("chart picked {i}"), moved(900.0, 400.0));
+        }
+        app.pick = None;
+        app.rebuild_view_tree();
+        app.summary_view = true;
+        for i in 0..3 {
+            frame(&mut app, &format!("table {i}"), vec![]);
+        }
+        for (i, (x, y)) in [(40.0, 300.0), (120.0, 500.0), (700.0, 300.0), (400.0, 60.0)]
+            .into_iter()
+            .enumerate()
+        {
+            frame(&mut app, &format!("table hover {i}"), moved(x, y));
+            frame(&mut app, &format!("table hover {i} again"), vec![]);
+        }
+        for i in 0..3 {
+            frame(
+                &mut app,
+                &format!("table key {i}"),
+                vec![key(egui::Key::ArrowDown)],
+            );
+        }
+        app.table.side = SidePanel::Extensions;
+        for i in 0..3 {
+            frame(&mut app, &format!("extensions {i}"), vec![]);
+        }
+        app.table.side = SidePanel::Categories;
+        app.table.flat = true;
+        for i in 0..3 {
+            frame(&mut app, &format!("flat {i}"), vec![]);
+        }
+        app.table.flat = false;
+        app.summary_view = false;
+        app.scanning = true;
+        for i in 0..2 {
+            frame(&mut app, &format!("scanning toolbar {i}"), vec![]);
+        }
+        std::fs::write(out, text).unwrap();
+    }
 }
 
 /// Resident memory across rescans ("r") of the scanned folder, the way the
