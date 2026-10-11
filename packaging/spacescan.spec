@@ -8,8 +8,8 @@ SourceLicense:  GPL-3.0-only
 License:        GPL-3.0-only
 URL:            https://github.com/a-kurczyn/spacescan
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
-# The crates from Cargo.lock: `cargo vendor --versioned-dirs` in the source
-# folder, packed as %%{name}-%%{version}/vendor.
+# The crates from Cargo.lock: `cargo vendor --versioned-dirs vendor` in the
+# source folder, then `tar -cJf %%{name}-%%{version}-vendor.tar.xz vendor`.
 Source1:        %{name}-%{version}-vendor.tar.xz
 
 ExclusiveArch:  %{rust_arches}
