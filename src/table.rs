@@ -746,6 +746,206 @@ const HELP_ROWS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+/// What's drawn the same way in every row of the table.
+struct CellStyle {
+    measure: Measure,
+    /// What the shares (% and bar) are shares of.
+    total: u64,
+    row_h: f32,
+    /// The flat list: names are full paths.
+    flat: bool,
+    /// A scan is running: unfinished folders have no details yet.
+    live: bool,
+    bar_fill: Color32,
+    bar_frame: Color32,
+    dir_color: Color32,
+    mark_color: Color32,
+    /// The cursor row's text color...
+    selected_fg: Color32,
+    /// ...and its size bar's track.
+    panel_bg: Color32,
+}
+
+/// How one row of the table looks.
+#[derive(Clone, Copy)]
+struct RowLook {
+    /// The cursor row.
+    selected: bool,
+    is_marked: bool,
+}
+
+/// Rows clicked in the table this frame.
+#[derive(Default)]
+struct RowClicks {
+    clicked: Option<usize>,
+    double_clicked: Option<usize>,
+    /// Ctrl+click marks like Space (a second click unmarks, never opens).
+    ctrl_clicked: Option<usize>,
+}
+
+impl RowClicks {
+    /// Records a click on row `i`, whose response is `r`.
+    fn record(&mut self, r: &egui::Response, i: usize) {
+        if r.clicked() && r.ctx.input(|i| i.modifiers.command) {
+            self.ctrl_clicked = Some(i);
+        } else if r.double_clicked() {
+            self.double_clicked = Some(i);
+        } else if r.clicked() {
+            self.clicked = Some(i);
+        }
+    }
+}
+
+/// One header cell; a click on a sortable one changes `sort`.
+fn header_cell_ui(ui: &mut egui::Ui, cell: Cell, sort: &mut SortState) {
+    let sortable = |ui: &mut egui::Ui, key: &str, column: SortColumn, sort: &mut SortState| {
+        sortable_header(ui, &tr(key), column, sort)
+    };
+    match cell {
+        Cell::Mark | Cell::Opt(TableCol::Bar) => {}
+        Cell::Opt(TableCol::Percent) => {
+            ui.strong(tr("COL_PERCENT"));
+        }
+        Cell::Opt(TableCol::Size) => {
+            sortable(ui, "COL_SIZE", SortColumn::Size, sort);
+        }
+        Cell::Opt(TableCol::Files) => {
+            sortable(ui, "COL_FILES", SortColumn::Files, sort);
+        }
+        Cell::Opt(TableCol::Modified) => {
+            sortable(ui, "COL_MODIFIED", SortColumn::Modified, sort)
+                .on_hover_text(tr("COL_MODIFIED_TIP"));
+        }
+        Cell::Opt(TableCol::Changed) => {
+            sortable(ui, "COL_CHANGED", SortColumn::Changed, sort)
+                .on_hover_text(tr("COL_CHANGED_TIP"));
+        }
+        Cell::Opt(TableCol::Perms) => {
+            sortable(ui, "COL_PERMS", SortColumn::Perms, sort);
+        }
+        Cell::Name => {
+            sortable(ui, "COL_NAME", SortColumn::Name, sort);
+        }
+    }
+}
+
+/// One cell of row `c`.
+fn body_cell_ui(
+    ui: &mut egui::Ui,
+    cell: Cell,
+    c: &Node,
+    row: RowLook,
+    style: &CellStyle,
+    user_cache: &mut HashMap<u32, String>,
+    group_cache: &mut HashMap<u32, String>,
+) {
+    let RowLook {
+        selected,
+        is_marked,
+    } = row;
+    let pick = |normal: Color32| if selected { style.selected_fg } else { normal };
+    // During a scan, an unfinished folder has only a name and running
+    // totals (no mode yet).
+    let pending = style.live && c.is_dir && c.mode == 0;
+    match cell {
+        Cell::Mark => {
+            if is_marked {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                let stroke = egui::Stroke::new(1.8, pick(style.mark_color));
+                ui.painter().add(egui::Shape::line(
+                    vec![
+                        Pos2::new(r.left(), r.center().y),
+                        Pos2::new(r.left() + r.width() * 0.4, r.bottom() - 1.0),
+                        Pos2::new(r.right(), r.top() + 1.0),
+                    ],
+                    stroke,
+                ));
+            }
+        }
+        Cell::Opt(TableCol::Bar) => {
+            // Share of the folder, matching the % column.
+            let (r, _) =
+                ui.allocate_exact_size(Vec2::new(86.0, style.row_h * 0.55), egui::Sense::hover());
+            let frac = style.measure.of(c) as f32 / style.total as f32;
+            if selected {
+                // A dark track under the fill.
+                ui.painter()
+                    .rect_filled(r, egui::CornerRadius::ZERO, style.panel_bg);
+            }
+            if frac > 0.0 {
+                let filled = egui::Rect::from_min_size(
+                    r.min,
+                    Vec2::new((r.width() * frac).max(1.0), r.height()),
+                );
+                ui.painter()
+                    .rect_filled(filled, egui::CornerRadius::ZERO, style.bar_fill);
+            }
+            ui.painter().rect_stroke(
+                r,
+                egui::CornerRadius::ZERO,
+                egui::Stroke::new(
+                    1.0,
+                    if selected {
+                        style.panel_bg
+                    } else {
+                        style.bar_frame
+                    },
+                ),
+                egui::StrokeKind::Inside,
+            );
+        }
+        Cell::Opt(TableCol::Percent) => {
+            ui.label(format!(
+                "{:.1}%",
+                style.measure.of(c) as f64 * 100.0 / style.total as f64
+            ));
+        }
+        Cell::Opt(TableCol::Size) => {
+            // Right-aligned, so sizes line up by unit.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(human_size(c.size));
+            });
+        }
+        Cell::Opt(TableCol::Files) => {
+            ui.label(format_count(c.file_count));
+        }
+        // A folder still being scanned shows "…".
+        Cell::Opt(TableCol::Modified | TableCol::Changed | TableCol::Perms) if pending => {
+            ui.weak("…");
+        }
+        Cell::Opt(TableCol::Modified) => {
+            ui.label(format_epoch(c.mtime));
+        }
+        Cell::Opt(TableCol::Changed) => {
+            ui.label(format_epoch(c.ctime));
+        }
+        Cell::Opt(TableCol::Perms) => {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} {}",
+                    format_mode_ls(c.mode, c.is_dir),
+                    format_owner(c.uid, c.gid, user_cache, group_cache)
+                ))
+                .monospace(),
+            );
+        }
+        Cell::Name => {
+            #[cfg(test)]
+            tests_probe::NAME_WIDTH.set(ui.available_width());
+            // The flat list shows each file's full path.
+            let mut text = egui::RichText::new(row_text(c, style.flat));
+            // Folders stand out by color alone.
+            if c.is_dir || selected {
+                text = text.color(pick(style.dir_color));
+            }
+            if is_marked {
+                text = text.strong();
+            }
+            ui.add(egui::Label::new(text).extend());
+        }
+    }
+}
+
 /// A cell of the table, left to right.
 #[derive(Clone, Copy, PartialEq)]
 enum Cell {
@@ -822,9 +1022,198 @@ impl DiskScanApp {
             self.table.marks_for = Some(view_node.path());
         }
 
+        let mut order = self.table_order(ui, view_node);
+        let marked_size = self.marked_size(&mut order, view_node);
+        let row = |i: usize| order.rows.node(view_node, i);
+        let n_rows = order.rows.len();
+        let flat = order.key.flat.is_some();
+        let cursor_row = self.table_cursor_row(&order, view_node);
+        let scroll_to = self.cursor_scroll_offset(cursor_row);
+
+        let set_flat = self.table_heading_ui(ui, view_node, &order, marked_size);
+        self.jump_field_ui(ui, view_node, &order);
+        ui.add_space(4.0);
+
+        let cells = self.table_cells(flat);
+        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+        let header_h = ui.spacing().interact_size.y + 4.0;
+        let table_h = (max_height - header_h).max(row_h * 3.0);
+        self.table.page_rows = ((table_h / row_h) as usize).saturating_sub(1).max(1);
+
+        let style = CellStyle {
+            measure: self.measure,
+            // Percentages and bars are shares of the listed rows, so they add
+            // up to 100% even with dotfiles hidden.
+            total: self
+                .measure
+                .pick(order.shown_size, order.shown_files)
+                .max(1),
+            row_h,
+            flat,
+            live: self.scanning,
+            bar_fill: ui.visuals().selection.bg_fill,
+            bar_frame: ui.visuals().weak_text_color(),
+            dir_color: ui.visuals().hyperlink_color,
+            mark_color: ui.visuals().warn_fg_color,
+            selected_fg: ui.visuals().selection.stroke.color,
+            panel_bg: ui.visuals().panel_fill,
+        };
+        let marked = &self.table.marked;
+        let table_id_out = &self.table.table_id;
+        // Filled in below, where `self` can't be reached.
+        let drawn_geometry = std::cell::Cell::new(None);
+        let mut first_drawn: Option<(usize, f32)> = None;
+        let mut clicks = RowClicks::default();
+        let show_info = self.table.show_info;
+        let sort_before = self.table_sort();
+        let mut shown_sort = sort_before;
+        let user_cache = &mut self.user_cache;
+        let group_cache = &mut self.group_cache;
+        // Column widths are remembered per set of visible columns, so hiding one
+        // doesn't give its width to a neighbor.
+        let layout_key: Vec<&str> = cells
+            .iter()
+            .map(|c| match c {
+                Cell::Mark => "mark",
+                Cell::Opt(t) => t.key(),
+                Cell::Name => "name",
+            })
+            .collect();
+        ui.scope(|ui| {
+            // Cell text isn't selectable, so a click reaches the row.
+            ui.style_mut().interaction.selectable_labels = false;
+            // Steady scroll bars, beside the rows rather than over them.
+            ui.spacing_mut().scroll = steady_scroll_style();
+            // Column resize handles show only while hovered or dragged.
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+            if show_info {
+                ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
+            }
+            // One scroll area for both directions, so both bars stay at the
+            // window edges (the header row scrolls with the rows). Each bar
+            // shows only when the rows don't fit that way.
+            let mut scroll_area = egui::ScrollArea::both()
+                .id_salt("contents_scroll")
+                .max_height(max_height)
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
+            if let Some(y) = scroll_to.filter(|y| y.is_finite()) {
+                scroll_area = scroll_area.vertical_scroll_offset(y.max(0.0));
+            }
+            let scrolled = scroll_area.show(ui, |ui| {
+                let table_salt = ("contents_table", layout_key.join(","));
+                // A double-click on the divider after a column fits it to its
+                // widest visible cell.
+                // The id the table gives its state (it turns its salt into an IdSalt).
+                let table_id = ui.id().with(egui::IdSalt::new(&table_salt));
+                table_id_out.set(Some(table_id));
+                let fit: Vec<bool> = (0..cells.len())
+                    .map(|i| {
+                        ui.ctx()
+                            .read_response(table_id.with("resize_column").with(i))
+                            .is_some_and(|r| r.double_clicked())
+                    })
+                    .collect();
+                let mut tb = TableBuilder::new(ui)
+                    .id_salt(table_salt.clone())
+                    .striped(true)
+                    .resizable(true)
+                    .sense(egui::Sense::click())
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    // The scroll area around the table scrolls both ways.
+                    .vscroll(false)
+                    .auto_shrink([false, true]);
+                for (i, cell) in cells.iter().enumerate() {
+                    let column = match cell {
+                        Cell::Mark => Column::exact(12.0),
+                        Cell::Opt(TableCol::Bar) => Column::exact(92.0),
+                        Cell::Opt(_) => Column::auto().at_least(40.0),
+                        // Wide enough for the longest name in full; the table
+                        // scrolls sideways when that's wider than the window.
+                        // Clipped, so it narrows again to that width.
+                        Cell::Name => Column::remainder()
+                            .at_least(order.name_width.unwrap_or_default().max(120.0))
+                            .clip(true),
+                    };
+                    tb = tb.column(column.auto_size_this_frame(fit[i]));
+                }
+                tb.header(header_h, |mut header| {
+                    for cell in &cells {
+                        header.col(|ui| header_cell_ui(ui, *cell, &mut shown_sort));
+                    }
+                })
+                .body(|body| {
+                    body.rows(row_h, n_rows, |mut tr_row| {
+                        let i = tr_row.index();
+                        let c = row(i);
+                        let is_marked = c.is_in(marked);
+                        let selected = Some(i) == cursor_row;
+                        tr_row.set_selected(selected);
+                        for cell in &cells {
+                            tr_row.col(|ui| {
+                                let row = RowLook {
+                                    selected,
+                                    is_marked,
+                                };
+                                body_cell_ui(ui, *cell, c, row, &style, user_cache, group_cache)
+                            });
+                        }
+                        let r = tr_row.response();
+                        if first_drawn.is_none() && r.rect.top().is_finite() {
+                            first_drawn = Some((i, r.rect.top()));
+                        }
+                        clicks.record(&r, i);
+                    });
+                });
+            });
+            if let Some((i, top)) = first_drawn {
+                let pitch = row_h + ui.spacing().item_spacing.y;
+                let offset = scrolled.state.offset.y;
+                let content_top = scrolled.inner_rect.top() - offset;
+                drawn_geometry.set(
+                    RowGeometry {
+                        pitch,
+                        first_top: top - content_top - i as f32 * pitch,
+                        offset,
+                        visible: scrolled.inner_rect.height(),
+                    }
+                    .checked(),
+                );
+            }
+        });
+        self.table.row_geometry = drawn_geometry.get().or(self.table.row_geometry);
+
+        // A clicked header sorts by its column, which becomes the one `<`/`>`
+        // move.
+        if shown_sort != sort_before {
+            self.contents_sort = shown_sort;
+            self.table.active_col = shown_sort.column.table_col();
+        }
+        if let Some(i) = clicks
+            .clicked
+            .or(clicks.double_clicked)
+            .or(clicks.ctrl_clicked)
+        {
+            self.table.cursor = Some(row(i).path());
+        }
+        if let Some(i) = clicks.ctrl_clicked {
+            self.toggle_mark_of(row(i).path());
+        }
+        self.table.order = Some(order);
+        if clicks.double_clicked.is_some() {
+            self.open_cursor();
+        }
+        if let Some(on) = set_flat {
+            self.set_flat(on);
+        }
+    }
+
+    /// The rows of `view_node` in table order, worked out again only when
+    /// something the order depends on has changed, with the name column's
+    /// width.
+    fn table_order(&mut self, ui: &egui::Ui, view_node: &Node) -> RowOrder {
         // The live table during a scan always lists the folder's contents.
         let flat_on = self.table.flat && !self.scanning;
-        // The row order is recomputed only when something it depends on changes.
         let key = OrderKey {
             tree_gen: if self.scanning {
                 self.live_gen
@@ -847,18 +1236,27 @@ impl DiskScanApp {
                 self.settings.flat_rows
             }),
         };
-        let order = match self.table.order.take() {
+        let mut order = match self.table.order.take() {
             Some(o) if o.key == key && !o.pending => o,
             shown => self.order_for(view_node, key, shown, ui.ctx()),
         };
-        let mut order = order;
-        let name_width = *order.name_width.get_or_insert_with(|| {
+        if order.name_width.is_none() {
             let flat = order.key.flat.is_some();
-            widest_name(ui, &order.longest, &order.rows, view_node, flat)
-        });
-        // The marked rows' total size, worked out again only when the marks
-        // or the rows change.
-        let marked_size = match &order.marked_size {
+            order.name_width = Some(widest_name(
+                ui,
+                &order.longest,
+                &order.rows,
+                view_node,
+                flat,
+            ));
+        }
+        order
+    }
+
+    /// The marked rows' total size, worked out again only when the marks or
+    /// the rows change.
+    fn marked_size(&self, order: &mut RowOrder, view_node: &Node) -> u64 {
+        match &order.marked_size {
             _ if self.table.marked.is_empty() => 0,
             Some((marks, size)) if *marks == self.table.marked => *size,
             _ => {
@@ -870,44 +1268,56 @@ impl DiskScanApp {
                 order.marked_size = Some((self.table.marked.clone(), size));
                 size
             }
-        };
-        let row = |i: usize| order.rows.node(view_node, i);
-        let n_rows = order.rows.len();
-        let flat = order.key.flat.is_some();
-        let measure = self.measure;
-        let shown_weight = measure.pick(order.shown_size, order.shown_files);
-        // The cursor goes to the first row when it isn't in this folder.
+        }
+    }
+
+    /// The cursor's row. The cursor goes to the first row when it isn't in
+    /// this folder, and waits while the rows are still being worked out.
+    fn table_cursor_row(&mut self, order: &RowOrder, view_node: &Node) -> Option<usize> {
         let found = self
             .table
             .cursor
             .as_ref()
             .and_then(|c| find_cursor(c, &self.table.cursor_pos, view_node, &order.rows));
-        let cursor_row = match found {
+        match found {
             Some(i) => Some(i),
-            // The rows are still being worked out: the cursor waits for them.
             None if order.pending => None,
             None => {
-                self.table.cursor = (n_rows > 0).then(|| row(0).path());
+                self.table.cursor =
+                    (order.rows.len() > 0).then(|| order.rows.node(view_node, 0).path());
                 let first = self.table.cursor.is_some().then_some(0);
                 self.table.cursor_pos.set(first);
                 first
             }
-        };
-        // The cursor row is scrolled into view using where the rows were last
-        // drawn; until they have been, the request waits.
+        }
+    }
+
+    /// The scroll offset that brings the cursor's row into view, when that
+    /// was asked for. It uses where the rows were last drawn; until they
+    /// have been, the request waits.
+    fn cursor_scroll_offset(&mut self, cursor_row: Option<usize>) -> Option<f32> {
         let scroll_to_cursor = std::mem::take(&mut self.table.scroll_pending);
-        let geometry = self.table.row_geometry;
-        let scroll_to = match (scroll_to_cursor, cursor_row, geometry) {
+        match (scroll_to_cursor, cursor_row, self.table.row_geometry) {
             (true, Some(r), Some(g)) => g.offset_showing(r),
             (true, Some(_), None) => {
                 self.table.scroll_pending = true;
                 None
             }
             _ => None,
-        };
-        let mut first_drawn: Option<(usize, f32)> = None;
+        }
+    }
 
-        // Heading line: title, what's switched on, and where the keys are.
+    /// The heading line: the tree or flat toggle, the title, what's switched
+    /// on, and what's marked or on the clipboard. Returns the toggle clicked.
+    fn table_heading_ui(
+        &self,
+        ui: &mut egui::Ui,
+        view_node: &Node,
+        order: &RowOrder,
+        marked_size: u64,
+    ) -> Option<bool> {
+        let n_rows = order.rows.len();
+        let flat = order.key.flat.is_some();
         let mut set_flat = None;
         ui.horizontal(|ui| {
             // Toggle: the folder's own contents, or files from all subfolders.
@@ -1013,6 +1423,14 @@ impl DiskScanApp {
                 ui.weak(format!("· {}", tr("TABLE_TAG_SORTING")));
             }
         });
+        set_flat
+    }
+
+    /// The jump-to-name field, while open: typing moves the cursor to the
+    /// first row whose name starts with (or else contains) the text.
+    fn jump_field_ui(&mut self, ui: &mut egui::Ui, view_node: &Node, order: &RowOrder) {
+        let row = |i: usize| order.rows.node(view_node, i);
+        let n_rows = order.rows.len();
         if let Some(query) = &mut self.table.jump {
             let mut close = false;
             let mut changed = false;
@@ -1041,355 +1459,23 @@ impl DiskScanApp {
                 self.table.jump = None;
             }
         }
-        ui.add_space(4.0);
+    }
 
+    /// The table's columns, in order: the mark, the visible optional
+    /// columns (no Files column in the flat list, which has only files),
+    /// and the name.
+    fn table_cells(&self, flat: bool) -> Vec<Cell> {
         let mut cells = vec![Cell::Mark];
         cells.extend(
             self.table
                 .col_order
                 .iter()
                 .filter(|c| !self.table.hidden_cols.contains(c))
-                // The flat list has only files: no Files column.
                 .filter(|c| !(flat && **c == TableCol::Files))
                 .map(|c| Cell::Opt(*c)),
         );
         cells.push(Cell::Name);
-
-        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
-        let header_h = ui.spacing().interact_size.y + 4.0;
-        let table_h = (max_height - header_h).max(row_h * 3.0);
-        self.table.page_rows = ((table_h / row_h) as usize).saturating_sub(1).max(1);
-
-        // Percentages and bars are shares of the listed rows, so they add up
-        // to 100% even with dotfiles hidden.
-        let total = shown_weight.max(1);
-        let bar_fill = ui.visuals().selection.bg_fill;
-        let bar_frame = ui.visuals().weak_text_color();
-        let dir_color = ui.visuals().hyperlink_color;
-        let mark_color = ui.visuals().warn_fg_color;
-        // The cursor row is drawn in the selection's text color...
-        let selected_fg = ui.visuals().selection.stroke.color;
-        // ...and its size bar gets a track in the window background color.
-        let panel_bg = ui.visuals().panel_fill;
-        let marked = &self.table.marked;
-        let table_id_out = &self.table.table_id;
-        // Filled in below, where `self` can't be reached.
-        let drawn_geometry = std::cell::Cell::new(None);
-
-        let mut clicked: Option<usize> = None;
-        let mut double_clicked: Option<usize> = None;
-        let mut ctrl_clicked: Option<usize> = None;
-        let show_info = self.table.show_info;
-        // During a scan, an unfinished folder has only a name and running totals
-        // (no mode yet).
-        let live = self.scanning;
-        let pending = |c: &Node| live && c.is_dir && c.mode == 0;
-        let sort_before = self.table_sort();
-        let mut shown_sort = sort_before;
-        let contents_sort = &mut shown_sort;
-        let user_cache = &mut self.user_cache;
-        let group_cache = &mut self.group_cache;
-        // Column widths are remembered per set of visible columns, so hiding one
-        // doesn't give its width to a neighbor.
-        let layout_key: Vec<&str> = cells
-            .iter()
-            .map(|c| match c {
-                Cell::Mark => "mark",
-                Cell::Opt(t) => t.key(),
-                Cell::Name => "name",
-            })
-            .collect();
-        ui.scope(|ui| {
-            // Cell text isn't selectable, so a click reaches the row.
-            ui.style_mut().interaction.selectable_labels = false;
-            // Steady scroll bars, beside the rows rather than over them.
-            ui.spacing_mut().scroll = steady_scroll_style();
-            // Column resize handles show only while hovered or dragged.
-            ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
-            if show_info {
-                ui.set_max_width(ui.available_width() - INFO_PANEL_WIDTH - 8.0);
-            }
-            // One scroll area for both directions, so both bars stay at the
-            // window edges (the header row scrolls with the rows). Each bar
-            // shows only when the rows don't fit that way.
-            let mut scroll_area = egui::ScrollArea::both()
-                .id_salt("contents_scroll")
-                .max_height(max_height)
-                .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
-            if let Some(y) = scroll_to.filter(|y| y.is_finite()) {
-                scroll_area = scroll_area.vertical_scroll_offset(y.max(0.0));
-            }
-            let scrolled = scroll_area.show(ui, |ui| {
-                let table_salt = ("contents_table", layout_key.join(","));
-                // A double-click on the divider after a column fits it to its
-                // widest visible cell.
-                // The id the table gives its state (it turns its salt into an IdSalt).
-                let table_id = ui.id().with(egui::IdSalt::new(&table_salt));
-                table_id_out.set(Some(table_id));
-                let fit: Vec<bool> = (0..cells.len())
-                    .map(|i| {
-                        ui.ctx()
-                            .read_response(table_id.with("resize_column").with(i))
-                            .is_some_and(|r| r.double_clicked())
-                    })
-                    .collect();
-                let mut tb = TableBuilder::new(ui)
-                    .id_salt(table_salt.clone())
-                    .striped(true)
-                    .resizable(true)
-                    .sense(egui::Sense::click())
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    // The scroll area around the table scrolls both ways.
-                    .vscroll(false)
-                    .auto_shrink([false, true]);
-                for (i, cell) in cells.iter().enumerate() {
-                    let column = match cell {
-                        Cell::Mark => Column::exact(12.0),
-                        Cell::Opt(TableCol::Bar) => Column::exact(92.0),
-                        Cell::Opt(_) => Column::auto().at_least(40.0),
-                        // Wide enough for the longest name in full; the table
-                        // scrolls sideways when that's wider than the window.
-                        // Clipped, so it narrows again to that width.
-                        Cell::Name => Column::remainder()
-                            .at_least(name_width.max(120.0))
-                            .clip(true),
-                    };
-                    tb = tb.column(column.auto_size_this_frame(fit[i]));
-                }
-                tb.header(header_h, |mut header| {
-                    for cell in &cells {
-                        header.col(|ui| match cell {
-                            Cell::Mark | Cell::Opt(TableCol::Bar) => {}
-                            Cell::Opt(TableCol::Percent) => {
-                                ui.strong(tr("COL_PERCENT"));
-                            }
-                            Cell::Opt(TableCol::Size) => {
-                                sortable_header(
-                                    ui,
-                                    &tr("COL_SIZE"),
-                                    SortColumn::Size,
-                                    contents_sort,
-                                );
-                            }
-                            Cell::Opt(TableCol::Files) => {
-                                sortable_header(
-                                    ui,
-                                    &tr("COL_FILES"),
-                                    SortColumn::Files,
-                                    contents_sort,
-                                );
-                            }
-                            Cell::Opt(TableCol::Modified) => {
-                                sortable_header(
-                                    ui,
-                                    &tr("COL_MODIFIED"),
-                                    SortColumn::Modified,
-                                    contents_sort,
-                                )
-                                .on_hover_text(tr("COL_MODIFIED_TIP"));
-                            }
-                            Cell::Opt(TableCol::Changed) => {
-                                sortable_header(
-                                    ui,
-                                    &tr("COL_CHANGED"),
-                                    SortColumn::Changed,
-                                    contents_sort,
-                                )
-                                .on_hover_text(tr("COL_CHANGED_TIP"));
-                            }
-                            Cell::Opt(TableCol::Perms) => {
-                                sortable_header(
-                                    ui,
-                                    &tr("COL_PERMS"),
-                                    SortColumn::Perms,
-                                    contents_sort,
-                                );
-                            }
-                            Cell::Name => {
-                                sortable_header(
-                                    ui,
-                                    &tr("COL_NAME"),
-                                    SortColumn::Name,
-                                    contents_sort,
-                                );
-                            }
-                        });
-                    }
-                })
-                .body(|body| {
-                    body.rows(row_h, n_rows, |mut tr_row| {
-                        let i = tr_row.index();
-                        let c = row(i);
-                        let is_marked = c.is_in(marked);
-                        let selected = Some(i) == cursor_row;
-                        tr_row.set_selected(selected);
-                        let pick = |normal: Color32| if selected { selected_fg } else { normal };
-                        for cell in &cells {
-                            tr_row.col(|ui| match cell {
-                                Cell::Mark => {
-                                    if is_marked {
-                                        let (r, _) = ui.allocate_exact_size(
-                                            Vec2::splat(10.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        let stroke = egui::Stroke::new(1.8, pick(mark_color));
-                                        ui.painter().add(egui::Shape::line(
-                                            vec![
-                                                Pos2::new(r.left(), r.center().y),
-                                                Pos2::new(
-                                                    r.left() + r.width() * 0.4,
-                                                    r.bottom() - 1.0,
-                                                ),
-                                                Pos2::new(r.right(), r.top() + 1.0),
-                                            ],
-                                            stroke,
-                                        ));
-                                    }
-                                }
-                                Cell::Opt(TableCol::Bar) => {
-                                    // Share of the folder, matching the % column.
-                                    let (r, _) = ui.allocate_exact_size(
-                                        Vec2::new(86.0, row_h * 0.55),
-                                        egui::Sense::hover(),
-                                    );
-                                    let frac = measure.of(c) as f32 / total as f32;
-                                    if selected {
-                                        // A dark track under the fill.
-                                        ui.painter().rect_filled(
-                                            r,
-                                            egui::CornerRadius::ZERO,
-                                            panel_bg,
-                                        );
-                                    }
-                                    if frac > 0.0 {
-                                        let filled = egui::Rect::from_min_size(
-                                            r.min,
-                                            Vec2::new((r.width() * frac).max(1.0), r.height()),
-                                        );
-                                        ui.painter().rect_filled(
-                                            filled,
-                                            egui::CornerRadius::ZERO,
-                                            bar_fill,
-                                        );
-                                    }
-                                    ui.painter().rect_stroke(
-                                        r,
-                                        egui::CornerRadius::ZERO,
-                                        egui::Stroke::new(
-                                            1.0,
-                                            if selected { panel_bg } else { bar_frame },
-                                        ),
-                                        egui::StrokeKind::Inside,
-                                    );
-                                }
-                                Cell::Opt(TableCol::Percent) => {
-                                    ui.label(format!(
-                                        "{:.1}%",
-                                        measure.of(c) as f64 * 100.0 / total as f64
-                                    ));
-                                }
-                                Cell::Opt(TableCol::Size) => {
-                                    // Right-aligned, so sizes line up by unit.
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(human_size(c.size));
-                                        },
-                                    );
-                                }
-                                Cell::Opt(TableCol::Files) => {
-                                    ui.label(format_count(c.file_count));
-                                }
-                                // A folder still being scanned shows "…".
-                                Cell::Opt(
-                                    TableCol::Modified | TableCol::Changed | TableCol::Perms,
-                                ) if pending(c) => {
-                                    ui.weak("…");
-                                }
-                                Cell::Opt(TableCol::Modified) => {
-                                    ui.label(format_epoch(c.mtime));
-                                }
-                                Cell::Opt(TableCol::Changed) => {
-                                    ui.label(format_epoch(c.ctime));
-                                }
-                                Cell::Opt(TableCol::Perms) => {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} {}",
-                                            format_mode_ls(c.mode, c.is_dir),
-                                            format_owner(c.uid, c.gid, user_cache, group_cache)
-                                        ))
-                                        .monospace(),
-                                    );
-                                }
-                                Cell::Name => {
-                                    #[cfg(test)]
-                                    tests_probe::NAME_WIDTH.set(ui.available_width());
-                                    // The flat list shows each file's full path.
-                                    let mut text = egui::RichText::new(row_text(c, flat));
-                                    // Folders stand out by color alone.
-                                    if c.is_dir || selected {
-                                        text = text.color(pick(dir_color));
-                                    }
-                                    if is_marked {
-                                        text = text.strong();
-                                    }
-                                    ui.add(egui::Label::new(text).extend());
-                                }
-                            });
-                        }
-                        let r = tr_row.response();
-                        if first_drawn.is_none() && r.rect.top().is_finite() {
-                            first_drawn = Some((i, r.rect.top()));
-                        }
-                        // Ctrl+click marks like Space (a second click unmarks, never opens).
-                        if r.clicked() && r.ctx.input(|i| i.modifiers.command) {
-                            ctrl_clicked = Some(i);
-                        } else if r.double_clicked() {
-                            double_clicked = Some(i);
-                        } else if r.clicked() {
-                            clicked = Some(i);
-                        }
-                    });
-                });
-            });
-            if let Some((i, top)) = first_drawn {
-                let pitch = row_h + ui.spacing().item_spacing.y;
-                let offset = scrolled.state.offset.y;
-                let content_top = scrolled.inner_rect.top() - offset;
-                drawn_geometry.set(
-                    RowGeometry {
-                        pitch,
-                        first_top: top - content_top - i as f32 * pitch,
-                        offset,
-                        visible: scrolled.inner_rect.height(),
-                    }
-                    .checked(),
-                );
-            }
-        });
-        self.table.row_geometry = drawn_geometry.get().or(self.table.row_geometry);
-
-        // A clicked header sorts by its column, which becomes the one `<`/`>`
-        // move.
-        if shown_sort != sort_before {
-            self.contents_sort = shown_sort;
-            self.table.active_col = shown_sort.column.table_col();
-        }
-        if let Some(i) = clicked.or(double_clicked).or(ctrl_clicked) {
-            self.table.cursor = Some(row(i).path());
-        }
-        if let Some(i) = ctrl_clicked {
-            self.toggle_mark_of(row(i).path());
-        }
-        self.table.order = Some(order);
-        if double_clicked.is_some() {
-            self.open_cursor();
-        }
-        if let Some(on) = set_flat {
-            self.set_flat(on);
-        }
+        cells
     }
 
     /// The table's sort order. The flat list has no Files column: sorted by
