@@ -137,343 +137,250 @@ impl DiskScanApp {
     /// Top bar: starting points, path bar, view toggles.
     pub(crate) fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        // `Sides` lays out the right-hand buttons first and gives the rest to the
-        // left side. The closures only record clicks; `self` is changed after.
-        let root_arc = self.root.clone();
-        let cur_view_idx = self.current_view().clone();
-        let can_reload = root_arc.is_some();
-        let mut path_input = self.path_input.clone();
-        let path_input_was_focused = self.path_input_focused;
-
-        enum NavAction {
-            None,
-            Reload,
-        }
-        let mut nav_action = NavAction::None;
-        let mut settings_toggled = false;
-        let mut menu_pick: Option<MenuPick> = None;
-        // F10 opens or closes the main menu from the keyboard, as in other
-        // desktop apps (not while a window over the app asks something).
-        let windows_open =
-            self.show_about || self.table.show_help || self.quit_asked || self.delete_dialog_open();
-        let menu_by_key = !windows_open && ctx.input(|i| i.key_pressed(egui::Key::F10));
-        let settings_open = self.show_settings;
-        let mut open_picker = false;
-        let mut start_at: Option<PathBuf> = None;
-        let picking_folder = self.folder_pick_rx.is_some();
-        let summary_on = self.summary_view;
-        let mut set_summary: Option<bool> = None;
-        let mut empty_bin = false;
-        let mut rescan = false;
         // The folder shown: the scan target while scanning, else the folder
         // zoomed into.
         let current_path: Option<PathBuf> = if self.scanning {
             Some(self.partial_root.path())
         } else {
-            root_arc.as_ref().map(|r| get_node(r, &cur_view_idx).path())
+            self.root
+                .as_ref()
+                .map(|r| get_node(r, self.current_view()).path())
         };
-        let home = home_dir();
-        let mut filters_toggled = false;
-        let filter_active = self.filter.is_some() || self.pick.is_some();
-        let filters_open = self.show_filters;
-        let mut crumb_click: Option<PathBuf> = None;
-        let mut start_path_edit = false;
-        let mut stop_path_edit = false;
-        let editing_path = self.path_editing || current_path.is_none();
+        // F10 opens or closes the main menu from the keyboard, as in other
+        // desktop apps (not while a window over the app asks something).
+        let windows_open =
+            self.show_about || self.table.show_help || self.quit_asked || self.delete_dialog_open();
+        let menu_by_key = !windows_open && ctx.input(|i| i.key_pressed(egui::Key::F10));
         let focus_path_edit = std::mem::take(&mut self.path_edit_focus_pending);
-        // Clickable path segments ("/", "mnt", "DATA", …). A very deep path shows
-        // only its first and last few, with "…" (None) between.
-        const HEAD: usize = 2;
-        const TAIL: usize = 6;
-        let crumbs: Vec<Option<(String, PathBuf)>> = current_path
-            .as_ref()
-            .map(|p| {
-                let mut levels: Vec<&Path> = p.ancestors().collect();
-                levels.reverse();
-                let crumb = |a: &Path| {
-                    let label = a.file_name().map(show_os).unwrap_or_else(|| show_path(a));
-                    Some((label, a.to_path_buf()))
-                };
-                let n = levels.len();
-                if n <= HEAD + TAIL + 1 {
-                    levels.iter().map(|a| crumb(a)).collect()
-                } else {
-                    let mut v: Vec<_> = levels[..HEAD].iter().map(|a| crumb(a)).collect();
-                    v.push(None);
-                    v.extend(levels[n - TAIL..].iter().map(|a| crumb(a)));
-                    v
-                }
-            })
-            .unwrap_or_default();
-        let mut submit: Option<String> = None;
-        let mut path_input_focused = path_input_was_focused;
-
+        let mut path_input = self.path_input.clone();
+        // `Sides` lays out the right-hand buttons first and gives the rest to
+        // the left side. Each side only records what was clicked; `self` is
+        // changed after.
+        let mut left = LeftBarInput {
+            path_input_focused: self.path_input_focused,
+            ..LeftBarInput::default()
+        };
+        let mut right = RightBarInput::default();
         egui::Panel::top("top").show(ui, |ui| {
             egui::Sides::new().shrink_left().show(
                 ui,
                 |ui| {
-                    // Starting points: folder dialog, root, home (lit while scanned).
-                    if glyph_toolbar_button(
+                    self.toolbar_left_ui(
                         ui,
-                        ButtonRole::Action { lit: false },
-                        !picking_folder,
-                        "🔍",
-                        &tr("TOOLBAR_PICK_FOLDER"),
+                        current_path.as_deref(),
+                        focus_path_edit,
+                        &mut path_input,
+                        &mut left,
                     )
-                    .clicked()
-                    {
-                        open_picker = true;
-                    }
-                    let at_root = current_path.as_deref() == Some(Path::new("/"));
-                    if glyph_toolbar_button(
-                        ui,
-                        ButtonRole::Action { lit: at_root },
-                        true,
-                        "/",
-                        &tr("TOOLBAR_SCAN_ROOT"),
-                    )
-                    .clicked()
-                    {
-                        start_at = Some(PathBuf::from("/"));
-                    }
-                    let at_home = current_path.as_deref() == Some(home.as_path());
-                    let home_name = trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]);
-                    if glyph_toolbar_button(
-                        ui,
-                        ButtonRole::Action { lit: at_home },
-                        true,
-                        "🏠",
-                        &home_name,
-                    )
-                    .clicked()
-                    {
-                        start_at = Some(home.clone());
-                    }
-                    if glyph_toolbar_button(
-                        ui,
-                        ButtonRole::Action { lit: false },
-                        can_reload,
-                        "⟳",
-                        &tr("TOOLBAR_RESCAN"),
-                    )
-                    .clicked()
-                    {
-                        rescan = true;
-                    }
-
-                    // The path field follows navigation, except while being typed in.
-                    if !path_input_was_focused {
-                        let current = current_path
-                            .as_ref()
-                            .map(|p| show_path(p))
-                            .unwrap_or_default();
-                        if path_input != current {
-                            path_input = current;
-                        }
-                    }
-
-                    if editing_path {
-                        let resp = ui.add(
-                            egui::TextEdit::singleline(&mut path_input)
-                                .desired_width(ui.available_width())
-                                .hint_text(tr("TOOLBAR_PATH_HINT")),
-                        );
-                        // Its name for screen readers (it has no label on screen).
-                        ui.ctx().accesskit_node_builder(resp.id, |node| {
-                            node.set_label(tr("A11Y_PATH_BAR"));
-                        });
-                        if focus_path_edit {
-                            resp.request_focus();
-                        }
-                        path_input_focused = resp.has_focus();
-                        if resp.lost_focus() {
-                            // Enter goes there; Esc or a click elsewhere goes back to the segments.
-                            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                submit = Some(path_input.clone());
-                            }
-                            stop_path_edit = true;
-                        }
-                    } else {
-                        // The scroll area keeps the deepest folders visible.
-                        let edit_w = 28.0;
-                        egui::ScrollArea::horizontal()
-                            .id_salt("path_crumbs")
-                            // Full width, so ✏ sits at the far right.
-                            .auto_shrink([false, true])
-                            .stick_to_right(true)
-                            .max_width((ui.available_width() - edit_w).max(0.0))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 2.0;
-                                    let last = crumbs.len().saturating_sub(1);
-                                    let root_first = crumbs
-                                        .first()
-                                        .is_some_and(|c| c.as_ref().is_some_and(|(l, _)| l == "/"));
-                                    for (i, crumb) in crumbs.iter().enumerate() {
-                                        if i > 0 && !(i == 1 && root_first) {
-                                            ui.weak("/");
-                                        }
-                                        let Some((label, path)) = crumb else {
-                                            ui.weak("…");
-                                            continue;
-                                        };
-                                        let btn = egui::Button::new(if i == last {
-                                            egui::RichText::new(label).strong()
-                                        } else {
-                                            egui::RichText::new(label)
-                                        })
-                                        .frame(false);
-                                        if ui.add(btn).on_hover_text(short_path(path)).clicked()
-                                            && i != last
-                                        {
-                                            crumb_click = Some(path.clone());
-                                        }
-                                    }
-                                });
-                            });
-                        // A clickable label: no button padding.
-                        let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
-                        if pencil
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .named(&tr("TOOLBAR_PATH_EDIT_TOOLTIP"))
-                            .clicked()
-                        {
-                            start_path_edit = true;
-                        }
-                    }
                 },
-                // Right to left: the main menu, settings, filters, then empty
-                // trash and the view buttons.
-                |ui| {
-                    let menu = glyph_toolbar_button(
-                        ui,
-                        ButtonRole::Action { lit: false },
-                        true,
-                        "☰",
-                        &tr("MENU_MAIN"),
-                    );
-                    if menu_by_key {
-                        egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&menu));
-                    }
-                    egui::Popup::menu(&menu).show(|ui| {
-                        let mut focus_first = menu_by_key;
-                        let mut item = |ui: &mut egui::Ui, key: &str, keys: &str| {
-                            let text = tr(key);
-                            let resp = ui.add(egui::Button::new(&text).shortcut_text(keys));
-                            // For screen readers: a menu item named by its text
-                            // alone, its shortcut given separately. The Linux
-                            // bridge (AT-SPI) passes on no keyboard shortcut, so
-                            // the shortcut is the description too, read after the
-                            // name.
-                            ui.ctx().accesskit_node_builder(resp.id, |node| {
-                                node.set_role(egui::accesskit::Role::MenuItem);
-                                node.set_label(text);
-                                if !keys.is_empty() {
-                                    node.set_keyboard_shortcut(keys);
-                                    node.set_description(keys);
-                                }
-                            });
-                            // Opened with F10: the keyboard starts on the first item.
-                            if std::mem::take(&mut focus_first) {
-                                resp.request_focus();
-                            }
-                            // Picked with the keyboard too, the menu closes.
-                            if resp.clicked() {
-                                ui.close();
-                            }
-                            resp.clicked()
-                        };
-                        if item(ui, "SETTINGS_TITLE", "") {
-                            menu_pick = Some(MenuPick::Settings);
-                        }
-                        if item(ui, "FILTER_TITLE", "") {
-                            menu_pick = Some(MenuPick::Filters);
-                        }
-                        if item(ui, "HELP_TITLE", "?") {
-                            menu_pick = Some(MenuPick::Shortcuts);
-                        }
-                        ui.separator();
-                        if item(ui, "MENU_REPORT_BUG", "") {
-                            menu_pick = Some(MenuPick::ReportBug);
-                        }
-                        if item(ui, "MENU_ABOUT", "") {
-                            menu_pick = Some(MenuPick::About);
-                        }
-                        ui.separator();
-                        if item(ui, "MENU_QUIT", &tr("HELP_KEYS_QUIT")) {
-                            menu_pick = Some(MenuPick::Quit);
-                        }
-                    });
-                    if glyph_toolbar_button(
-                        ui,
-                        ButtonRole::Toggle { on: settings_open },
-                        true,
-                        "⚙",
-                        &tr("SETTINGS_TITLE"),
-                    )
-                    .clicked()
-                    {
-                        settings_toggled = true;
-                    }
-                    // Lit while the panel is open or a filter is active.
-                    if icon_toolbar_button(
-                        ui,
-                        filters_open || filter_active,
-                        true,
-                        &if filter_active {
-                            tr("TOOLBAR_FILTERS_ACTIVE")
-                        } else {
-                            tr("FILTER_TITLE")
-                        },
-                        draw_filter_icon,
-                    )
-                    .clicked()
-                    {
-                        filters_toggled = true;
-                    }
-                    ui.separator();
-
-                    if glyph_toolbar_button(
-                        ui,
-                        ButtonRole::Action { lit: false },
-                        true,
-                        "🗑",
-                        &tr("TOOLBAR_EMPTY_TRASH"),
-                    )
-                    .clicked()
-                    {
-                        empty_bin = true;
-                    }
-                    if icon_toolbar_button(
-                        ui,
-                        summary_on,
-                        true,
-                        &tr("TOOLBAR_SUMMARY_VIEW"),
-                        draw_table_icon,
-                    )
-                    .clicked()
-                    {
-                        set_summary = Some(true);
-                    }
-                    if icon_toolbar_button(
-                        ui,
-                        !summary_on,
-                        true,
-                        &tr("TOOLBAR_CHART_VIEW"),
-                        draw_chart_icon,
-                    )
-                    .clicked()
-                    {
-                        set_summary = Some(false);
-                    }
-                    ui.separator();
-                },
+                |ui| self.toolbar_right_ui(ui, menu_by_key, &mut right),
             );
         });
-
         self.path_input = path_input;
-        self.path_input_focused = path_input_focused;
-        match menu_pick {
+        self.apply_toolbar_input(&ctx, left, right);
+    }
+
+    /// The top bar's left side: starting points (folder dialog, root, home,
+    /// rescan), then the path bar, as clickable folders or a text field.
+    fn toolbar_left_ui(
+        &self,
+        ui: &mut egui::Ui,
+        current_path: Option<&Path>,
+        focus_path_edit: bool,
+        path_input: &mut String,
+        out: &mut LeftBarInput,
+    ) {
+        let home = home_dir();
+        // Starting points: folder dialog, root, home (lit while scanned).
+        if glyph_toolbar_button(
+            ui,
+            ButtonRole::Action { lit: false },
+            self.folder_pick_rx.is_none(),
+            "🔍",
+            &tr("TOOLBAR_PICK_FOLDER"),
+        )
+        .clicked()
+        {
+            out.open_picker = true;
+        }
+        let at_root = current_path == Some(Path::new("/"));
+        if glyph_toolbar_button(
+            ui,
+            ButtonRole::Action { lit: at_root },
+            true,
+            "/",
+            &tr("TOOLBAR_SCAN_ROOT"),
+        )
+        .clicked()
+        {
+            out.start_at = Some(PathBuf::from("/"));
+        }
+        let at_home = current_path == Some(home.as_path());
+        let home_name = trf("TOOLBAR_SCAN_HOME", &[&show_path(&home)]);
+        if glyph_toolbar_button(
+            ui,
+            ButtonRole::Action { lit: at_home },
+            true,
+            "🏠",
+            &home_name,
+        )
+        .clicked()
+        {
+            out.start_at = Some(home.clone());
+        }
+        if glyph_toolbar_button(
+            ui,
+            ButtonRole::Action { lit: false },
+            self.root.is_some(),
+            "⟳",
+            &tr("TOOLBAR_RESCAN"),
+        )
+        .clicked()
+        {
+            out.rescan = true;
+        }
+
+        // The path field follows navigation, except while being typed in.
+        if !self.path_input_focused {
+            let current = current_path.map(show_path).unwrap_or_default();
+            if *path_input != current {
+                *path_input = current;
+            }
+        }
+
+        if self.path_editing || current_path.is_none() {
+            let resp = ui.add(
+                egui::TextEdit::singleline(path_input)
+                    .desired_width(ui.available_width())
+                    .hint_text(tr("TOOLBAR_PATH_HINT")),
+            );
+            // Its name for screen readers (it has no label on screen).
+            ui.ctx().accesskit_node_builder(resp.id, |node| {
+                node.set_label(tr("A11Y_PATH_BAR"));
+            });
+            if focus_path_edit {
+                resp.request_focus();
+            }
+            out.path_input_focused = resp.has_focus();
+            if resp.lost_focus() {
+                // Enter goes there; Esc or a click elsewhere goes back to the segments.
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    out.submit = Some(path_input.clone());
+                }
+                out.stop_path_edit = true;
+            }
+        } else {
+            out.crumb_click = path_crumbs_ui(ui, current_path.map(path_crumbs).unwrap_or_default());
+            // A clickable label: no button padding.
+            let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
+            if pencil
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .named(&tr("TOOLBAR_PATH_EDIT_TOOLTIP"))
+                .clicked()
+            {
+                out.start_path_edit = true;
+            }
+        }
+    }
+
+    /// The top bar's right side, right to left: the main menu (`menu_by_key`:
+    /// F10 was pressed), settings, filters, then empty trash and the view
+    /// buttons.
+    fn toolbar_right_ui(&self, ui: &mut egui::Ui, menu_by_key: bool, out: &mut RightBarInput) {
+        let menu = glyph_toolbar_button(
+            ui,
+            ButtonRole::Action { lit: false },
+            true,
+            "☰",
+            &tr("MENU_MAIN"),
+        );
+        if menu_by_key {
+            egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&menu));
+        }
+        egui::Popup::menu(&menu).show(|ui| out.menu_pick = main_menu_ui(ui, menu_by_key));
+        if glyph_toolbar_button(
+            ui,
+            ButtonRole::Toggle {
+                on: self.show_settings,
+            },
+            true,
+            "⚙",
+            &tr("SETTINGS_TITLE"),
+        )
+        .clicked()
+        {
+            out.settings_toggled = true;
+        }
+        // Lit while the panel is open or a filter is active.
+        let filter_active = self.filter.is_some() || self.pick.is_some();
+        if icon_toolbar_button(
+            ui,
+            self.show_filters || filter_active,
+            true,
+            &if filter_active {
+                tr("TOOLBAR_FILTERS_ACTIVE")
+            } else {
+                tr("FILTER_TITLE")
+            },
+            draw_filter_icon,
+        )
+        .clicked()
+        {
+            out.filters_toggled = true;
+        }
+        ui.separator();
+
+        if glyph_toolbar_button(
+            ui,
+            ButtonRole::Action { lit: false },
+            true,
+            "🗑",
+            &tr("TOOLBAR_EMPTY_TRASH"),
+        )
+        .clicked()
+        {
+            out.empty_bin = true;
+        }
+        if icon_toolbar_button(
+            ui,
+            self.summary_view,
+            true,
+            &tr("TOOLBAR_SUMMARY_VIEW"),
+            draw_table_icon,
+        )
+        .clicked()
+        {
+            out.set_summary = Some(true);
+        }
+        if icon_toolbar_button(
+            ui,
+            !self.summary_view,
+            true,
+            &tr("TOOLBAR_CHART_VIEW"),
+            draw_chart_icon,
+        )
+        .clicked()
+        {
+            out.set_summary = Some(false);
+        }
+        ui.separator();
+    }
+
+    /// Acts on what was clicked or typed in the top bar.
+    fn apply_toolbar_input(
+        &mut self,
+        ctx: &egui::Context,
+        left: LeftBarInput,
+        right: RightBarInput,
+    ) {
+        let mut start_at = left.start_at;
+        self.path_input_focused = left.path_input_focused;
+        // The folder shown, as it was when the bar was drawn.
+        let shown = self
+            .root
+            .as_ref()
+            .map(|r| get_node(r, self.current_view()).path());
+        match right.menu_pick {
             Some(MenuPick::Settings) => self.show_settings = true,
             Some(MenuPick::Filters) => self.show_filters = true,
             Some(MenuPick::Shortcuts) => self.table.show_help = true,
@@ -482,20 +389,20 @@ impl DiskScanApp {
             Some(MenuPick::Quit) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             None => {}
         }
-        if settings_toggled {
+        if right.settings_toggled {
             self.show_settings = !self.show_settings;
         }
-        if filters_toggled {
+        if right.filters_toggled {
             self.show_filters = !self.show_filters;
         }
-        if start_path_edit {
+        if left.start_path_edit {
             self.path_editing = true;
             self.path_edit_focus_pending = true;
         }
-        if stop_path_edit {
+        if left.stop_path_edit {
             self.path_editing = false;
         }
-        if let Some(p) = crumb_click {
+        if let Some(p) = left.crumb_click {
             // A folder inside the finished scan is zoomed to; anything else is
             // scanned.
             let in_tree = if self.scanning {
@@ -512,64 +419,68 @@ impl DiskScanApp {
                 None => start_at = Some(p),
             }
         }
-        if let Some(on) = set_summary {
+        if let Some(on) = right.set_summary {
             self.summary_view = on;
         }
-        if empty_bin {
+        if right.empty_bin {
             self.ask_empty_trash();
         }
-        if rescan {
-            nav_action = NavAction::Reload;
-        }
-        if open_picker {
+        if left.open_picker {
             // Open the dialog at the folder currently shown, if any.
-            let start_dir = root_arc.as_ref().map(|r| get_node(r, &cur_view_idx).path());
-            self.folder_pick_rx = Some(pick_folder_async(start_dir));
+            self.folder_pick_rx = Some(pick_folder_async(shown.clone()));
         }
-        if let Some(result) = self.folder_pick_rx.as_ref().map(|rx| rx.try_recv()) {
-            match result {
-                Ok(picked) => {
-                    self.folder_pick_rx = None;
-                    start_at = start_at.or(picked);
-                }
-                Err(TryRecvError::Empty) => {
-                    // Nothing else wakes the UI when the dialog closes.
-                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
-                }
-                Err(TryRecvError::Disconnected) => {
-                    self.folder_pick_rx = None;
-                    self.log_issue(tr("ERR_FOLDER_DIALOG_FAILED"));
-                }
-            }
+        if let Some(picked) = self.poll_folder_dialog(ctx) {
+            start_at = start_at.or(Some(picked));
         }
         if let Some(p) = start_at {
             self.start_scan(p);
         }
-        if let Some(typed) = submit.as_deref() {
-            if let Some(scheme_end) = typed.trim().find("://") {
-                // A network URL (smb://…) isn't a path until it's mounted: explain.
-                let scheme = &typed.trim()[..scheme_end];
-                self.log_issue(trf("ERR_NETWORK_URL", &[scheme]));
-            } else {
-                let p = typed_path(typed);
-                match std::fs::metadata(&p) {
-                    Ok(m) if m.is_dir() => self.start_scan(p),
-                    Ok(_) => self.log_issue(trf("ERR_NOT_A_DIRECTORY", &[&show_path(&p)])),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        self.log_issue(trf("ERR_PATH_NOT_FOUND", &[&show_path(&p)]))
-                    }
-                    Err(e) => self.log_issue(friendly_io_error(&p, &e)),
-                }
+        if let Some(typed) = left.submit.as_deref() {
+            self.go_to_typed_path(typed);
+        }
+        if left.rescan
+            && let Some(p) = shown
+        {
+            self.start_scan(p);
+        }
+    }
+
+    /// The folder picked in the folder dialog, once it closes with one.
+    fn poll_folder_dialog(&mut self, ctx: &egui::Context) -> Option<PathBuf> {
+        match self.folder_pick_rx.as_ref()?.try_recv() {
+            Ok(picked) => {
+                self.folder_pick_rx = None;
+                picked
+            }
+            Err(TryRecvError::Empty) => {
+                // Nothing else wakes the UI when the dialog closes.
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                None
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.folder_pick_rx = None;
+                self.log_issue(tr("ERR_FOLDER_DIALOG_FAILED"));
+                None
             }
         }
-        match nav_action {
-            NavAction::None => {}
-            NavAction::Reload => {
-                if let Some(root) = &root_arc {
-                    let p = get_node(root, &cur_view_idx).path();
-                    self.start_scan(p);
-                }
+    }
+
+    /// Scans the folder typed in the path bar, or says why it can't.
+    fn go_to_typed_path(&mut self, typed: &str) {
+        if let Some(scheme_end) = typed.trim().find("://") {
+            // A network URL (smb://…) isn't a path until it's mounted: explain.
+            let scheme = &typed.trim()[..scheme_end];
+            self.log_issue(trf("ERR_NETWORK_URL", &[scheme]));
+            return;
+        }
+        let p = typed_path(typed);
+        match std::fs::metadata(&p) {
+            Ok(m) if m.is_dir() => self.start_scan(p),
+            Ok(_) => self.log_issue(trf("ERR_NOT_A_DIRECTORY", &[&show_path(&p)])),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.log_issue(trf("ERR_PATH_NOT_FOUND", &[&show_path(&p)]))
             }
+            Err(e) => self.log_issue(friendly_io_error(&p, &e)),
         }
     }
 
@@ -2404,6 +2315,147 @@ fn pick_after_click(pick: Option<&Pick>, ext: &str, ctrl: bool) -> Option<Pick> 
         set = [ext.to_string()].into();
     }
     (!set.is_empty()).then_some(Pick::Extensions(set))
+}
+
+/// What was clicked or typed on the top bar's left side.
+#[derive(Default)]
+struct LeftBarInput {
+    open_picker: bool,
+    start_at: Option<PathBuf>,
+    rescan: bool,
+    crumb_click: Option<PathBuf>,
+    start_path_edit: bool,
+    stop_path_edit: bool,
+    /// The path typed, when Enter was pressed.
+    submit: Option<String>,
+    path_input_focused: bool,
+}
+
+/// What was clicked on the top bar's right side.
+#[derive(Default)]
+struct RightBarInput {
+    menu_pick: Option<MenuPick>,
+    settings_toggled: bool,
+    filters_toggled: bool,
+    empty_bin: bool,
+    set_summary: Option<bool>,
+}
+
+/// The main menu's items; `by_key`: opened with F10, so the keyboard
+/// starts on the first item. Returns the item picked.
+fn main_menu_ui(ui: &mut egui::Ui, by_key: bool) -> Option<MenuPick> {
+    let mut picked = None;
+    let mut focus_first = by_key;
+    let mut item = |ui: &mut egui::Ui, key: &str, keys: &str| {
+        let text = tr(key);
+        let resp = ui.add(egui::Button::new(&text).shortcut_text(keys));
+        // For screen readers: a menu item named by its text alone, its
+        // shortcut given separately. The Linux bridge (AT-SPI) passes on no
+        // keyboard shortcut, so the shortcut is the description too, read
+        // after the name.
+        ui.ctx().accesskit_node_builder(resp.id, |node| {
+            node.set_role(egui::accesskit::Role::MenuItem);
+            node.set_label(text);
+            if !keys.is_empty() {
+                node.set_keyboard_shortcut(keys);
+                node.set_description(keys);
+            }
+        });
+        if std::mem::take(&mut focus_first) {
+            resp.request_focus();
+        }
+        // Picked with the keyboard too, the menu closes.
+        if resp.clicked() {
+            ui.close();
+        }
+        resp.clicked()
+    };
+    if item(ui, "SETTINGS_TITLE", "") {
+        picked = Some(MenuPick::Settings);
+    }
+    if item(ui, "FILTER_TITLE", "") {
+        picked = Some(MenuPick::Filters);
+    }
+    if item(ui, "HELP_TITLE", "?") {
+        picked = Some(MenuPick::Shortcuts);
+    }
+    ui.separator();
+    if item(ui, "MENU_REPORT_BUG", "") {
+        picked = Some(MenuPick::ReportBug);
+    }
+    if item(ui, "MENU_ABOUT", "") {
+        picked = Some(MenuPick::About);
+    }
+    ui.separator();
+    if item(ui, "MENU_QUIT", &tr("HELP_KEYS_QUIT")) {
+        picked = Some(MenuPick::Quit);
+    }
+    picked
+}
+
+/// The path bar's clickable folders for `path` ("/", "mnt", "DATA", …),
+/// each with its path. A very deep path shows only its first and last
+/// few, with "…" (None) between.
+fn path_crumbs(path: &Path) -> Vec<Option<(String, PathBuf)>> {
+    const HEAD: usize = 2;
+    const TAIL: usize = 6;
+    let mut levels: Vec<&Path> = path.ancestors().collect();
+    levels.reverse();
+    let crumb = |a: &Path| {
+        let label = a.file_name().map(show_os).unwrap_or_else(|| show_path(a));
+        Some((label, a.to_path_buf()))
+    };
+    let n = levels.len();
+    if n <= HEAD + TAIL + 1 {
+        levels.iter().map(|a| crumb(a)).collect()
+    } else {
+        let mut v: Vec<_> = levels[..HEAD].iter().map(|a| crumb(a)).collect();
+        v.push(None);
+        v.extend(levels[n - TAIL..].iter().map(|a| crumb(a)));
+        v
+    }
+}
+
+/// The path bar's folders, scrolled so the deepest stay visible, with
+/// room for ✏ at the far right. Returns the folder clicked (never the
+/// last, which is the one shown).
+fn path_crumbs_ui(ui: &mut egui::Ui, crumbs: Vec<Option<(String, PathBuf)>>) -> Option<PathBuf> {
+    let mut clicked = None;
+    let edit_w = 28.0;
+    egui::ScrollArea::horizontal()
+        .id_salt("path_crumbs")
+        // Full width, so ✏ sits at the far right.
+        .auto_shrink([false, true])
+        .stick_to_right(true)
+        .max_width((ui.available_width() - edit_w).max(0.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let last = crumbs.len().saturating_sub(1);
+                let root_first = crumbs
+                    .first()
+                    .is_some_and(|c| c.as_ref().is_some_and(|(l, _)| l == "/"));
+                for (i, crumb) in crumbs.iter().enumerate() {
+                    if i > 0 && !(i == 1 && root_first) {
+                        ui.weak("/");
+                    }
+                    let Some((label, path)) = crumb else {
+                        ui.weak("…");
+                        continue;
+                    };
+                    let btn = egui::Button::new(if i == last {
+                        egui::RichText::new(label).strong()
+                    } else {
+                        egui::RichText::new(label)
+                    })
+                    .frame(false);
+                    if ui.add(btn).on_hover_text(short_path(path)).clicked() && i != last {
+                        clicked = Some(path.clone());
+                    }
+                }
+            });
+        });
+    clicked
 }
 
 /// Where the category bar's segments and labels go.
