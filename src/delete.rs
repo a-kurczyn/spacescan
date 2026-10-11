@@ -47,14 +47,46 @@ pub(crate) fn mount_guard(path: &Path) -> Result<(), String> {
 }
 
 /// Err (for the Issues log) if `path` is inside a trash folder or contains
-/// one: trashing it would lose the trash's restore information.
-fn trash_guard(path: &Path) -> Result<(), String> {
-    let Ok(folders) = trash::os_limited::trash_folders() else {
-        return Ok(());
-    };
+/// one: trashing it would lose the trash's restore information. Only the
+/// home trash and the trash folders at the top of `path`'s own drive are
+/// looked at (from `mounts`); other drives are left alone, as they can be
+/// slow to reach (network shares), and a target that contains another
+/// drive is refused anyway (`mount_guard`).
+fn trash_guard(path: &Path, mounts: &HashSet<PathBuf>) -> Result<(), String> {
+    trash_guard_with(path, home_trash().as_deref(), mounts)
+}
+
+/// The home trash as the trash specification places it, if known.
+fn home_trash() -> Option<PathBuf> {
+    let non_empty = |v: std::ffi::OsString| (!v.is_empty()).then(|| PathBuf::from(v));
+    if let Some(data) = std::env::var_os("XDG_DATA_HOME").and_then(non_empty) {
+        return Some(data.join("Trash"));
+    }
+    std::env::var_os("HOME")
+        .and_then(non_empty)
+        .map(|home| home.join(".local/share/Trash"))
+}
+
+fn trash_guard_with(
+    path: &Path,
+    home_trash: Option<&Path>,
+    mounts: &HashSet<PathBuf>,
+) -> Result<(), String> {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let canonical_parent = path.parent().and_then(|p| std::fs::canonicalize(p).ok());
-    for f in folders {
+    let top = mounts
+        .iter()
+        .filter(|m| canonical.starts_with(m))
+        .max_by_key(|m| m.as_os_str().len())
+        .map_or_else(|| PathBuf::from("/"), PathBuf::clone);
+    // SAFETY: getuid has no preconditions and can't fail.
+    let uid = unsafe { libc::getuid() };
+    let folders = [
+        home_trash.map(Path::to_path_buf),
+        Some(top.join(".Trash")),
+        Some(top.join(format!(".Trash-{uid}"))),
+    ];
+    for f in folders.into_iter().flatten() {
         let f = std::fs::canonicalize(&f).unwrap_or(f);
         // A symlink inside the trash canonicalizes to its target, so its
         // parent is checked too.
@@ -145,12 +177,37 @@ enum Confirm {
 #[derive(Default)]
 pub(crate) struct Removal {
     confirm: Option<Confirm>,
-    /// Deletes (true = permanent, false = to the trash) to carry out at the
+    /// Deletes (true = permanent, false = to the trash) to start at the
     /// start of the next frame, when the tree can be edited in place.
     pending: Option<(Vec<PathBuf>, bool)>,
+    /// Deletes under way, a slice per frame.
+    run: Option<RemovalRun>,
     /// The result of emptying the trash, which runs on its own thread.
     purge_rx: Option<Receiver<Result<(), String>>>,
 }
+
+/// Deletes and moves to the trash under way. They go a slice per frame, so
+/// the window stays responsive and the status line counts them; the tree
+/// drops what went every half second and at the end.
+struct RemovalRun {
+    /// Still to go, each with true = permanent, false = to the trash.
+    queue: std::collections::VecDeque<(PathBuf, bool)>,
+    /// Items handled so far (gone or failed), and in all.
+    handled: usize,
+    total: usize,
+    /// Items gone so far: (to the trash, deleted).
+    gone: (u64, u64),
+    /// Gone from disk but still in the tree.
+    to_drop: Vec<PathBuf>,
+    last_drop: Instant,
+    /// The status line shows the count (the run took more than a slice).
+    counting: bool,
+}
+
+/// Work per frame on deletes, so a frame stays short.
+const REMOVAL_SLICE: std::time::Duration = std::time::Duration::from_millis(30);
+/// How often a long run drops what went from the tree.
+const REMOVAL_DROP_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The dialog's warning that files hidden by the active filter go too
 /// (`key` names the delete or trash wording); nothing if none are hidden.
@@ -248,11 +305,27 @@ pub(crate) fn remove_all_from_tree(root: &mut Node, gone: &[PathBuf]) {
 }
 
 impl DiskScanApp {
-    /// Start of every frame: carries out a delete queued last frame and
-    /// picks up a finished trash purge.
+    /// Start of every frame: goes on with deletes (queued last frame or
+    /// under way) and picks up a finished trash purge.
     pub(crate) fn removal_frame_start(&mut self, ctx: &egui::Context) {
         if let Some((paths, permanent)) = self.removal.pending.take() {
-            self.remove_paths(paths, permanent);
+            let run = self.removal.run.get_or_insert_with(|| RemovalRun {
+                queue: Default::default(),
+                handled: 0,
+                total: 0,
+                gone: (0, 0),
+                to_drop: Vec::new(),
+                last_drop: Instant::now(),
+                counting: false,
+            });
+            run.total += paths.len();
+            run.queue.extend(paths.into_iter().map(|p| (p, permanent)));
+        }
+        if self.removal.run.is_some() {
+            self.removal_slice();
+            if self.removal.run.is_some() {
+                ctx.request_repaint();
+            }
         }
         if let Some(rx) = &self.removal.purge_rx {
             match rx.try_recv() {
@@ -330,8 +403,9 @@ impl DiskScanApp {
 
     pub(crate) fn queue_trash(&mut self, paths: Vec<PathBuf>) {
         let mut ok = self.mount_check(&paths);
+        let mounts = mount_points();
         for p in &paths {
-            if let Err(e) = trash_guard(p) {
+            if let Err(e) = trash_guard(p, &mounts) {
                 self.log_issue(e);
                 ok = false;
             }
@@ -542,51 +616,102 @@ impl DiskScanApp {
         }
     }
 
-    /// Deletes `paths` from disk (permanently, or to the trash), then drops
-    /// the ones that went from the tree.
-    fn remove_paths(&mut self, paths: Vec<PathBuf>, permanent: bool) {
-        let mut done: Vec<PathBuf> = Vec::new();
-        for p in paths {
-            // Checked again: something may have been mounted meanwhile.
-            if let Err(e) =
-                mount_guard(&p).and_then(|()| if permanent { Ok(()) } else { trash_guard(&p) })
-            {
-                self.log_issue(e);
-                continue;
-            }
-            // Already gone from disk: just drop it from the tree.
-            if std::fs::symlink_metadata(&p)
-                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-            {
-                done.push(p);
-                continue;
-            }
-            let result = if permanent {
-                match std::fs::symlink_metadata(&p) {
-                    Ok(m) if m.is_dir() => remove_dir_one_fs(&p, &mount_points()),
-                    _ => std::fs::remove_file(&p),
+    /// Deletes or trashes items of the run for about `REMOVAL_SLICE`, then
+    /// drops what went from the tree when it's time; at the end, the
+    /// status line says how many went if it was counting.
+    fn removal_slice(&mut self) {
+        let Some(mut run) = self.removal.run.take() else {
+            return;
+        };
+        let start = Instant::now();
+        // Read once per slice; checked again per item, as something may
+        // have been mounted since the delete was asked for.
+        let mounts = mount_points();
+        while start.elapsed() < REMOVAL_SLICE
+            && let Some((p, permanent)) = run.queue.pop_front()
+        {
+            run.handled += 1;
+            if self.remove_one(&p, permanent, &mounts) {
+                if permanent {
+                    run.gone.1 += 1;
+                } else {
+                    run.gone.0 += 1;
                 }
-                .map_err(|e| e.to_string())
-            } else {
-                trash::delete(&p).map_err(|e| trash_reason(&e))
-            };
-            match result {
-                Ok(()) => done.push(p),
-                Err(e) => {
-                    let key = if permanent {
-                        "ERR_DELETE_FAILED"
-                    } else {
-                        "ERR_TRASH_FAILED"
-                    };
-                    self.log_issue(trf(key, &[&show_path(&p), &e]));
-                    // A folder may now be partly deleted: say so.
-                    if permanent && std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir()) {
-                        self.log_issue(trf("ERR_DELETE_PARTIAL", &[&show_path(&p)]));
-                    }
-                }
+                run.to_drop.push(p);
             }
         }
-        self.drop_from_tree(&done);
+        let finished = run.queue.is_empty();
+        if finished || run.last_drop.elapsed() >= REMOVAL_DROP_EVERY {
+            self.drop_from_tree(&std::mem::take(&mut run.to_drop));
+            run.last_drop = Instant::now();
+        }
+        if finished {
+            if run.counting {
+                let (trashed, deleted) = run.gone;
+                let mut parts = Vec::new();
+                if trashed > 0 {
+                    parts.push(trn("STATUS_TRASHED", trashed, &[&format_count(trashed)]));
+                }
+                if deleted > 0 || trashed == 0 {
+                    parts.push(trn("STATUS_DELETED", deleted, &[&format_count(deleted)]));
+                }
+                self.status = parts.join(" · ");
+            }
+            return;
+        }
+        run.counting = true;
+        let key = match run.queue.front() {
+            Some((_, true)) => "STATUS_DELETING",
+            _ => "STATUS_TRASHING",
+        };
+        self.status = trf(
+            key,
+            &[
+                &format_count(run.handled as u64),
+                &format_count(run.total as u64),
+            ],
+        );
+        self.removal.run = Some(run);
+    }
+
+    /// Deletes `p` from disk (permanently, or to the trash); true if it's
+    /// gone (or already was). Why not goes to the Issues log.
+    fn remove_one(&mut self, p: &Path, permanent: bool, mounts: &HashSet<PathBuf>) -> bool {
+        if let Err(e) = mount_guard(p).and_then(|()| {
+            if permanent {
+                Ok(())
+            } else {
+                trash_guard(p, mounts)
+            }
+        }) {
+            self.log_issue(e);
+            return false;
+        }
+        // Already gone from disk: just drop it from the tree.
+        if std::fs::symlink_metadata(p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+            return true;
+        }
+        let result = if permanent {
+            match std::fs::symlink_metadata(p) {
+                Ok(m) if m.is_dir() => remove_dir_one_fs(p, mounts),
+                _ => std::fs::remove_file(p),
+            }
+            .map_err(|e| e.to_string())
+        } else {
+            trash::delete(p).map_err(|e| trash_reason(&e))
+        };
+        let Err(e) = result else { return true };
+        let key = if permanent {
+            "ERR_DELETE_FAILED"
+        } else {
+            "ERR_TRASH_FAILED"
+        };
+        self.log_issue(trf(key, &[&show_path(p), &e]));
+        // A folder may now be partly deleted: say so.
+        if permanent && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) {
+            self.log_issue(trf("ERR_DELETE_PARTIAL", &[&show_path(p)]));
+        }
+        false
     }
 
     /// After emptying the trash: drops the trash folders' contents from the
@@ -771,6 +896,118 @@ mod tests {
         app.rebuild_view_tree();
         app.queue_trash(target);
         assert!(app.removal.confirm.is_none() && app.removal.pending.is_some());
+    }
+
+    /// Inside the home trash or the trash at the top of the item's own
+    /// drive, or containing one of them, is refused; elsewhere is fine.
+    #[test]
+    fn trash_guard_knows_the_trash_folders_that_matter() {
+        let base =
+            std::env::temp_dir().join(format!("spacescan-trash-guard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // SAFETY: getuid has no preconditions and can't fail.
+        let uid = unsafe { libc::getuid() };
+        let (home, drive) = (base.join("home/Trash"), base.join("drive"));
+        let own = drive.join(format!(".Trash-{uid}/files/old.txt"));
+        let shared = drive.join(format!(".Trash/{uid}/files/old.txt"));
+        for f in [
+            home.join("files/old.txt"),
+            own.clone(),
+            shared.clone(),
+            drive.join("keep/a.txt"),
+        ] {
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(&f, "x").unwrap();
+        }
+        let mounts: HashSet<PathBuf> = [PathBuf::from("/"), drive.clone()].into();
+        let guard = |p: &Path| trash_guard_with(p, Some(&home), &mounts);
+        assert!(guard(&home.join("files/old.txt")).is_err());
+        assert!(guard(&base.join("home")).is_err());
+        assert!(guard(&own).is_err());
+        assert!(guard(&shared).is_err());
+        assert!(guard(&drive.join(".Trash")).is_err());
+        assert!(guard(&drive.join("keep/a.txt")).is_ok());
+        assert!(guard(&drive.join("keep")).is_ok());
+        // Not the drive's top: its trash folder names mean nothing there.
+        assert!(guard(&drive.join("keep")).is_ok());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Deletes asked for while others run join the same run; all of them
+    /// leave the tree, and the status line ends up saying how many went
+    /// if it counted.
+    #[test]
+    fn deletes_join_a_running_run_and_all_leave_the_tree() {
+        let base = std::env::temp_dir().join(format!("spacescan-del-run-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let names: Vec<String> = (0..6).map(|i| format!("f{i}.txt")).collect();
+        let kids = names
+            .iter()
+            .map(|n| {
+                let p = base.join(n);
+                std::fs::write(&p, "x").unwrap();
+                test_node(p.to_str().unwrap(), 1, false, vec![])
+            })
+            .collect();
+        let mut app = DiskScanApp {
+            full_root: Some(Arc::new(test_node(base.to_str().unwrap(), 0, true, kids))),
+            ..Default::default()
+        };
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        let paths: Vec<PathBuf> = names.iter().map(|n| base.join(n)).collect();
+        app.removal.pending = Some((paths[..3].to_vec(), true));
+        app.removal_frame_start(&ctx);
+        app.removal.pending = Some((paths[3..].to_vec(), true));
+        for _ in 0..100 {
+            app.removal_frame_start(&ctx);
+            if app.removal.run.is_none() {
+                break;
+            }
+        }
+        assert!(app.removal.run.is_none());
+        assert!(paths.iter().all(|p| !p.exists()));
+        assert!(app.root.as_ref().unwrap().children.is_empty());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Times moving 60 small files to the trash. Run with a fake HOME:
+    /// `HOME=/some/dir cargo test --release trash_run_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn trash_run_timing() {
+        let work = home_trash().unwrap().parent().unwrap().join("trash-timing");
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+        let paths: Vec<PathBuf> = (0..60).map(|i| work.join(format!("f{i:02}.bin"))).collect();
+        let kids = paths
+            .iter()
+            .map(|p| {
+                std::fs::write(p, [0u8; 4096]).unwrap();
+                test_node(p.to_str().unwrap(), 4096, false, vec![])
+            })
+            .collect();
+        let mut app = DiskScanApp {
+            full_root: Some(Arc::new(test_node(work.to_str().unwrap(), 0, true, kids))),
+            ..Default::default()
+        };
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        app.queue_trash(paths.clone());
+        let mut frames = 0;
+        while app.removal.pending.is_some() || app.removal.run.is_some() {
+            app.removal_frame_start(&ctx);
+            frames += 1;
+        }
+        println!(
+            "60 files to the trash: {:?} over {frames} frames",
+            start.elapsed()
+        );
+        assert!(paths.iter().all(|p| !p.exists()));
+        assert!(app.log.is_empty(), "{:?}", app.log);
+        std::fs::remove_dir_all(&work).unwrap();
     }
 
     #[test]

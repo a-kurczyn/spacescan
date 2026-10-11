@@ -841,7 +841,7 @@ impl DiskScanApp {
     }
 
     /// Work that quitting would cut short: a copy or move, or emptying the
-    /// trash. (A scan just stops; deletes finish within a frame.)
+    /// trash. (A scan just stops; deletes stop between two items.)
     fn work_running(&self) -> bool {
         self.transferring() || self.emptying_trash()
     }

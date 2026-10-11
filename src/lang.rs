@@ -346,6 +346,7 @@ mod tests {
         // X11 atom, and keys these tests make up.
         let not_a_key = |s: &str| {
             s.starts_with("SPACESCAN_")
+                || s.starts_with("XDG_")
                 || s.starts_with("CARGO_")
                 || [
                     "WAYLAND_DISPLAY",
