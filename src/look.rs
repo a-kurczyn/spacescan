@@ -407,11 +407,7 @@ fn put_first<V>(map: &mut ByPath<V>, key: &[u8], value: V) {
 struct Finished {
     size: u64,
     file_count: u64,
-    mode: u32,
-    mtime: i64,
-    ctime: i64,
-    uid: u32,
-    gid: u32,
+    stat: Stat,
     summary: Summary,
     /// Bytes, then files, of each category under it, for a picked
     /// category's share once its parent has added up its totals.
@@ -559,18 +555,7 @@ impl LiveTree {
 
     /// Folder `open` finished with these exact values; every subfolder has
     /// finished before it.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn close(
-        &self,
-        open: LiveOpen,
-        size: u64,
-        file_count: u64,
-        mode: u32,
-        mtime: i64,
-        ctime: i64,
-        uid: u32,
-        gid: u32,
-    ) {
+    pub(crate) fn close(&self, open: LiveOpen, size: u64, file_count: u64, stat: Stat) {
         let f = &open.folder;
         let mut totals = open.counters.snapshot();
         for c in f.children.lock().unwrap().iter() {
@@ -584,11 +569,7 @@ impl LiveTree {
         let _ = f.done.set(Finished {
             size,
             file_count,
-            mode,
-            mtime,
-            ctime,
-            uid,
-            gid,
+            stat,
             summary,
             by_cat,
         });
@@ -944,11 +925,7 @@ impl LiveLooks {
         node.set_path(&f.path);
         // Unfinished folders' details stay unknown ("…" in the table).
         if let Some(d) = fin {
-            node.mode = d.mode;
-            node.mtime = d.mtime;
-            node.ctime = d.ctime;
-            node.uid = d.uid;
-            node.gid = d.gid;
+            node.set_stat(d.stat);
         }
         node
     }
@@ -1752,7 +1729,7 @@ mod live_stress {
                 );
             }
             if i % 2 == 0 {
-                live.close(t, 30, 3, 0, 0, 0, 0, 0);
+                live.close(t, 30, 3, Stat::UNKNOWN);
             } else {
                 open.push(t);
             }
@@ -1787,16 +1764,16 @@ mod live_stress {
         let mixed = live.open(Some(&root.folder), Path::new("/r/mixed"), 0);
         live.count(&mixed, &file("/r/mixed/huge.mkv", 1000));
         live.count(&mixed, &file("/r/mixed/a.txt", 10));
-        live.close(mixed, 1010, 2, 0, 0, 0, 0, 0);
+        live.close(mixed, 1010, 2, Stat::UNKNOWN);
         let deep = live.open(Some(&root.folder), Path::new("/r/deep"), 0);
         let inner = live.open(Some(&deep.folder), Path::new("/r/deep/inner"), 0);
         live.count(&inner, &file("/r/deep/inner/b.txt", 20));
         live.count(&inner, &file("/r/deep/inner/c.mkv", 500));
-        live.close(inner, 520, 2, 0, 0, 0, 0, 0);
-        live.close(deep, 520, 2, 0, 0, 0, 0, 0);
+        live.close(inner, 520, 2, Stat::UNKNOWN);
+        live.close(deep, 520, 2, Stat::UNKNOWN);
         let pics = live.open(Some(&root.folder), Path::new("/r/pics"), 0);
         live.count(&pics, &file("/r/pics/x.jpg", 99));
-        live.close(pics, 99, 1, 0, 0, 0, 0, 0);
+        live.close(pics, 99, 1, Stat::UNKNOWN);
         let running = live.open(Some(&root.folder), Path::new("/r/running"), 0);
         live.count(&running, &file("/r/running/d.txt", 30));
         live.count(&running, &file("/r/running/e.jpg", 7));

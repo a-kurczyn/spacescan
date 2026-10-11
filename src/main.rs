@@ -17,6 +17,8 @@ mod cli;
 mod config;
 mod delete;
 mod filter;
+mod format;
+mod fsinfo;
 mod lang;
 mod look;
 mod panels;
@@ -24,18 +26,22 @@ mod scan;
 mod table;
 mod theme;
 mod transfer;
+mod tree;
 mod widgets;
 mod x11clip;
 use category::*;
 use chart::*;
 use config::Config;
 use filter::*;
+use format::*;
+use fsinfo::*;
 use lang::*;
 use look::*;
 use scan::*;
 use table::{Graft, SidePanel, TableState};
 use theme::*;
 use transfer::ClipMode;
+use tree::*;
 use widgets::*;
 
 #[derive(Clone)]
@@ -116,7 +122,7 @@ struct Settings {
     paths_to_clipboard: bool,
     /// Category colors told apart with any kind of color blindness.
     color_blind_safe: bool,
-    /// Sizes measured in files instead of bytes (see `scan::weight`).
+    /// Sizes measured in files instead of bytes (see `Measure`).
     measure_files: bool,
 }
 
@@ -695,7 +701,7 @@ impl DiskScanApp {
         }
         self.finish_sorting();
         if let Some(full) = &mut self.full_root {
-            scan::sort_tree_by_measure(Arc::make_mut(full), files);
+            tree::sort_tree_by_measure(Arc::make_mut(full), files);
         }
         self.tree_by_files = files;
         self.rebuild_view_tree();
@@ -1151,7 +1157,7 @@ impl DiskScanApp {
                 // that's the measure.
                 self.tree_by_files = self.settings.measure_files;
                 if self.tree_by_files {
-                    scan::sort_tree_by_measure(&mut node, true);
+                    tree::sort_tree_by_measure(&mut node, true);
                 }
             }
         }
@@ -1711,7 +1717,7 @@ mod frame_bench {
         };
         let now = now_secs();
         let folder = |path: &str, mut children: Vec<Node>| {
-            scan::sort_largest_first(&mut children);
+            tree::sort_largest_first(&mut children);
             let mut n = test_node(path, 0, true, Vec::new());
             n.size = children.iter().map(|c| c.size).sum();
             n.file_count = children.iter().map(|c| c.file_count).sum();
