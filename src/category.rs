@@ -87,6 +87,34 @@ impl CategoryModel {
         tr(self.names.get(c.0).map_or("CAT_OTHER", String::as_str))
     }
 
+    /// Every category, Other last.
+    pub(crate) fn all(&self) -> impl Iterator<Item = Category> {
+        (0..=self.other().0).map(Category)
+    }
+
+    /// The categories named in `list`: names as shown in the current
+    /// language, separated by commas, in any case. An unknown or missing
+    /// name is an error that lists the names there are.
+    pub(crate) fn named(&self, list: &str) -> Result<CatSet, String> {
+        let mut set = CatSet::default();
+        for name in list.split(',').map(str::trim) {
+            let wanted = name.to_lowercase();
+            match self.all().find(|&c| self.label(c).to_lowercase() == wanted) {
+                Some(c) if !name.is_empty() => set.insert(c),
+                _ => {
+                    let names: Vec<String> = self.all().map(|c| self.label(c)).collect();
+                    let what = if name.is_empty() {
+                        "a category name is missing".to_string()
+                    } else {
+                        format!("unknown category {name}")
+                    };
+                    return Err(format!("{what} (categories: {})", names.join(", ")));
+                }
+            }
+        }
+        Ok(set)
+    }
+
     /// The category's color on a dark or light background, in the palette
     /// chosen in the settings (see `color_in`).
     pub(crate) fn color(&self, c: Category, dark: bool) -> Color32 {

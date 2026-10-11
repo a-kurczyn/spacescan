@@ -1597,8 +1597,8 @@ fn main() -> eframe::Result<()> {
     lang::set_language(&config::language_setting());
     // A command runs and exits; otherwise the app starts.
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-    let start_path = match cli::run(&args) {
-        cli::Run::App(path) => path,
+    let start = match cli::run(&args) {
+        cli::Run::App(start) => start,
         cli::Run::Exit(code) => std::process::exit(code),
     };
     // Before anything reads the settings.
@@ -1618,9 +1618,14 @@ fn main() -> eframe::Result<()> {
             apply_theme(&cc.egui_ctx);
             install_fallback_fonts(&cc.egui_ctx, false);
             let mut app = DiskScanApp {
-                start_path,
+                start_path: start.path,
+                pick: start.categories.map(Pick::Categories),
                 ..DiskScanApp::with_user_files()
             };
+            if let Some(text) = start.filter {
+                app.filter_form.name = text;
+                app.apply_filter_form();
+            }
             for n in &not_copied {
                 app.log_issue(n.message());
             }

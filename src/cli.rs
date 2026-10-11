@@ -9,9 +9,15 @@ const HELP: &str = "\
 spacescan — see what takes the space on your disks
 
 Usage:
-  spacescan                 start the app
-  spacescan PATH            start the app and scan PATH
+  spacescan [APP OPTIONS]        start the app
+  spacescan [APP OPTIONS] PATH   start the app and scan PATH
   spacescan COMMAND PATH [OPTIONS]
+
+App options:
+  --category NAME,NAME     show only these categories' files (names as the
+                           app shows them in its language, any case)
+  --filter TEXT            start with this name filter, as typed in the
+                           app's Filters window (e.g. \"*.log,*.tmp\")
 
 Commands:
   list   the folders and files directly in PATH, with their totals
@@ -26,6 +32,8 @@ Options:
   --reverse                reverse the order
   --limit N                flat: only the first N files
   --apparent-size          count file lengths instead of disk space used
+  --filter TEXT            only files whose names match, as in the app's
+                           Filters window; folders count only those files
   -h, --help               show this help
   -V, --version            show the version
 
@@ -33,11 +41,20 @@ Sizes in CSV and JSON are in bytes; times are local, as YYYY-MM-DDTHH:MM:SS±HH:
 Names that aren't valid UTF-8 are shown escaped, as in the app (\\xFF).
 ";
 
+/// How the app starts: the folder to scan first, the categories picked
+/// and the name filter.
+#[derive(Debug, PartialEq, Default)]
+pub(crate) struct AppStart {
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) categories: Option<CatSet>,
+    pub(crate) filter: Option<String>,
+}
+
 /// What the command line asks for.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Run {
-    /// Start the app, scanning this folder first if given.
-    App(Option<PathBuf>),
+    /// Start the app.
+    App(AppStart),
     /// Done: exit with this code.
     Exit(i32),
 }
@@ -67,13 +84,20 @@ struct Request {
     reverse: bool,
     limit: Option<usize>,
     apparent: bool,
+    /// Name filter text, as typed in the Filters window.
+    filter: Option<String>,
 }
 
 /// What a command line asks for, once read.
 #[derive(Debug, PartialEq)]
 enum Parsed {
-    /// Start the app, scanning this folder first if given.
-    App(Option<PathBuf>),
+    /// Start the app: the folder to scan first, the category names and
+    /// the name filter, as given.
+    App {
+        path: Option<PathBuf>,
+        categories: Option<String>,
+        filter: Option<String>,
+    },
     Help,
     Version,
     Report(Request),
@@ -82,19 +106,12 @@ enum Parsed {
 /// Reads the command line (`args` without the program's name), or says
 /// what's wrong with it.
 fn parse(args: &[OsString]) -> Result<Parsed, String> {
-    let Some(first) = args.first() else {
-        return Ok(Parsed::App(None));
-    };
-    let command = match first.to_str() {
-        Some("-h" | "--help") => return Ok(Parsed::Help),
-        Some("-V" | "--version") => return Ok(Parsed::Version),
+    let command = match args.first().and_then(|a| a.to_str()) {
         Some("list") => Command::List,
         Some("flat") => Command::Flat,
         Some("exts") => Command::Exts,
-        Some(s) if s.starts_with('-') => return Err(format!("unknown option {s}")),
-        // Anything else is a folder to open in the app.
-        _ if args.len() == 1 => return Ok(Parsed::App(Some(PathBuf::from(first)))),
-        _ => return Err(format!("unknown command {}", first.to_string_lossy())),
+        // Anything else starts the app.
+        _ => return parse_app(args),
     };
     let name = command_name(command);
     let mut req = Request {
@@ -106,6 +123,7 @@ fn parse(args: &[OsString]) -> Result<Parsed, String> {
         reverse: false,
         limit: None,
         apparent: false,
+        filter: None,
     };
     let mut path = None;
     let mut only_paths = false;
@@ -177,6 +195,7 @@ fn parse(args: &[OsString]) -> Result<Parsed, String> {
                     other => return Err(format!("--by takes bytes or files, not {other}")),
                 }
             }
+            "--filter" => req.filter = Some(value("a name filter")?),
             "--limit" => {
                 if let Some(e) = refuse(&[Command::Flat]) {
                     return Err(e);
@@ -192,6 +211,65 @@ fn parse(args: &[OsString]) -> Result<Parsed, String> {
     }
     req.path = path.ok_or_else(|| format!("{name} needs a folder"))?;
     Ok(Parsed::Report(req))
+}
+
+/// Reads a command line that starts the app: app options and at most one
+/// folder, in any order.
+fn parse_app(args: &[OsString]) -> Result<Parsed, String> {
+    let (mut path, mut categories, mut filter) = (None, None, None);
+    let mut only_paths = false;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let text = arg.to_str().unwrap_or("");
+        if only_paths || !text.starts_with('-') || text == "-" {
+            if let Some(earlier) = path.replace(PathBuf::from(arg)) {
+                // "spacescan word PATH": most likely a mistyped command.
+                return Err(if args.first() == Some(&earlier.into_os_string()) {
+                    format!("unknown command {}", args[0].to_string_lossy())
+                } else {
+                    "only one folder can be given".to_string()
+                });
+            }
+            continue;
+        }
+        // "--opt value" or "--opt=value".
+        let (option, inline) = match text.split_once('=') {
+            Some((n, v)) if n.starts_with("--") => (n, Some(v.to_string())),
+            _ => (text, None),
+        };
+        let mut value = |what: &str| -> Result<String, String> {
+            match inline.clone() {
+                Some(v) => Ok(v),
+                None => rest
+                    .next()
+                    .and_then(|v| v.to_str())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("{option} needs {what}")),
+            }
+        };
+        match option {
+            "--" => only_paths = true,
+            "-h" | "--help" => return Ok(Parsed::Help),
+            "-V" | "--version" => return Ok(Parsed::Version),
+            "--category" => categories = Some(value("category names")?),
+            "--filter" => filter = Some(value("a name filter")?),
+            _ => return Err(format!("unknown option {option}")),
+        }
+    }
+    Ok(Parsed::App {
+        path,
+        categories,
+        filter,
+    })
+}
+
+/// The name filter in `text`, as the Filters window reads it (None: no
+/// filter).
+fn name_filter(text: &str) -> Result<Option<CompiledFilter>, String> {
+    CompiledFilter::compile(&FilterForm {
+        name: text.to_string(),
+        ..FilterForm::default()
+    })
 }
 
 fn command_name(c: Command) -> &'static str {
@@ -238,6 +316,36 @@ static CHECK_STDOUT: extern "C" fn() = {
 };
 
 /// Runs what the command line asks for, or says to start the app.
+/// How the app starts, once the category names and the filter are checked
+/// (an unusable one ends the program with code 2, before any window opens).
+fn app_start(path: Option<PathBuf>, categories: Option<String>, filter: Option<String>) -> Run {
+    let fail = |why: String| {
+        eprintln!("spacescan: {why}");
+        Run::Exit(2)
+    };
+    let categories = match categories {
+        Some(list) => {
+            let (cats, problem) = CategoryModel::load_read_only();
+            if let Some(p) = problem {
+                eprintln!("spacescan: {p}");
+            }
+            match cats.named(&list) {
+                Ok(set) => Some(set),
+                Err(why) => return fail(format!("--category: {why}")),
+            }
+        }
+        None => None,
+    };
+    if let Some(Err(why)) = filter.as_deref().map(name_filter) {
+        return fail(format!("--filter: {why}"));
+    }
+    Run::App(AppStart {
+        path,
+        categories,
+        filter,
+    })
+}
+
 pub(crate) fn run(args: &[OsString]) -> Run {
     let parsed = parse(args);
     // Anything printing to a closed output fails, as in other Unix tools.
@@ -250,7 +358,11 @@ pub(crate) fn run(args: &[OsString]) -> Run {
         return Run::Exit(1);
     }
     let req = match parsed {
-        Ok(Parsed::App(path)) => return Run::App(path),
+        Ok(Parsed::App {
+            path,
+            categories,
+            filter,
+        }) => return app_start(path, categories, filter),
         Ok(Parsed::Help) => return print_out(HELP),
         Ok(Parsed::Version) => {
             return print_out(&format!("spacescan {}\n", env!("CARGO_PKG_VERSION")));
@@ -275,6 +387,13 @@ pub(crate) fn run(args: &[OsString]) -> Run {
             return Run::Exit(1);
         }
     }
+    let filter = match req.filter.as_deref().map(name_filter).transpose() {
+        Ok(f) => f.flatten(),
+        Err(why) => {
+            eprintln!("spacescan: --filter: {why}");
+            return Run::Exit(2);
+        }
+    };
     let (tree, problems, unreadable) = scan_for_cli(&path, req.apparent);
     for p in &problems {
         eprintln!("spacescan: {p}");
@@ -293,6 +412,11 @@ pub(crate) fn run(args: &[OsString]) -> Run {
         cats
     } else {
         CategoryModel::defaults()
+    };
+    // Folders count only the files that match, as in the app.
+    let tree = match &filter {
+        Some(f) => filter_tree(&tree, f, Measure::Bytes).unwrap_or_else(|| empty_like(&tree)),
+        None => tree,
     };
     let out = std::io::stdout().lock();
     let mut out = std::io::BufWriter::new(out);
@@ -813,6 +937,7 @@ mod tests {
             reverse: false,
             limit: None,
             apparent: false,
+            filter: None,
         }
     }
 
@@ -840,16 +965,73 @@ mod tests {
         rows
     }
 
+    /// The name filter of a report's command line.
+    fn ok_filter(a: &[&str]) -> Option<String> {
+        match parse(&args(a)) {
+            Ok(Parsed::Report(r)) => r.filter,
+            other => panic!("{a:?}: {other:?}"),
+        }
+    }
+
+    /// Category names as the app shows them, in any case and with spaces
+    /// around them; an unknown or empty one is refused with the list of
+    /// names there are.
+    #[test]
+    fn category_names_are_read() {
+        let cats = CategoryModel::defaults();
+        let (video, docs) = (cats.of_name("a.mkv"), cats.of_name("a.txt"));
+        let (v, d) = (cats.label(video), cats.label(docs));
+        let mut both = CatSet::of(video);
+        both.insert(docs);
+        assert_eq!(cats.named(&v), Ok(CatSet::of(video)));
+        assert_eq!(
+            cats.named(&format!(" {} , {}", v.to_uppercase(), d.to_lowercase())),
+            Ok(both)
+        );
+        assert_eq!(cats.named(&format!("{v},{v}")), Ok(CatSet::of(video)));
+        let other = cats.label(cats.other());
+        assert_eq!(cats.named(&other), Ok(CatSet::of(cats.other())));
+        for bad in ["Nope", "", ",", &format!("{v},"), &format!("{v},Nope")] {
+            let why = cats.named(bad).unwrap_err();
+            assert!(why.contains(&v) && why.contains(&other), "{bad:?}: {why}");
+        }
+    }
+
     /// Command lines read as meant, and wrong ones refused: options before
     /// or after the folder, "--opt=value", "--" before a folder named like
     /// an option, help and version anywhere; values on on/off options,
     /// options of another command, missing or bad values, two folders.
     #[test]
     fn command_lines_are_read_or_refused() {
-        assert_eq!(parse(&args(&[])), Ok(Parsed::App(None)));
+        let app = |path: Option<&str>, categories: Option<&str>, filter: Option<&str>| {
+            Ok(Parsed::App {
+                path: path.map(PathBuf::from),
+                categories: categories.map(str::to_string),
+                filter: filter.map(str::to_string),
+            })
+        };
+        assert_eq!(parse(&args(&[])), app(None, None, None));
+        assert_eq!(parse(&args(&["/tmp"])), app(Some("/tmp"), None, None));
         assert_eq!(
-            parse(&args(&["/tmp"])),
-            Ok(Parsed::App(Some("/tmp".into())))
+            parse(&args(&["--category", "Video,Documents", "/tmp"])),
+            app(Some("/tmp"), Some("Video,Documents"), None)
+        );
+        assert_eq!(
+            parse(&args(&["/tmp", "--filter=*.log,a b", "--category=x"])),
+            app(Some("/tmp"), Some("x"), Some("*.log,a b"))
+        );
+        assert_eq!(
+            parse(&args(&["--filter", "", "--", "--odd"])),
+            app(Some("--odd"), None, Some(""))
+        );
+        assert_eq!(parse(&args(&["--filter", "x", "-h"])), Ok(Parsed::Help));
+        assert_eq!(
+            parse(&args(&["notacommand", "/a"])),
+            Err("unknown command notacommand".to_string())
+        );
+        assert_eq!(
+            ok_filter(&["flat", "/a", "--filter", "*.log"]),
+            Some("*.log".to_string())
         );
         assert_eq!(
             parse(&args(&["list"])),
@@ -915,6 +1097,12 @@ mod tests {
             &["list", "/a", "--reverse=yes"],
             &["list", "/a", "-x"],
             &["a", "b"],
+            &["--category"],
+            &["/a", "--filter"],
+            &["--limit", "3"],
+            &["/a", "/b", "--category", "x"],
+            &["list", "/a", "--category", "Video"],
+            &["--sort", "name", "/a"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }
