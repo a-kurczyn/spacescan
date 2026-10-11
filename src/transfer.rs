@@ -1752,7 +1752,8 @@ mod tests {
         let d = scratch("stays");
         let (mut w, reports) = worker(ClashChoice::Skip);
         let outcome = w.put_item(&src, &d.join("m"), ClipMode::Move).ok();
-        std::fs::set_permissions(src.join("ro"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Gone already when running as root.
+        let _ = std::fs::set_permissions(src.join("ro"), std::fs::Permissions::from_mode(0o755));
         if !src.join("ro/x").exists() {
             // Running as root: permissions don't stop anything.
             let _ = std::fs::remove_dir_all(&src_root);
