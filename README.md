@@ -77,11 +77,11 @@ plain-text, CSV or JSON reports from the command line.
 ### Fedora
 
 SpaceScan is packaged for Fedora in a
-[COPR repository](https://copr.fedorainfracloud.org/coprs/a-kurczyn/spacescan/),
+[COPR repository](https://copr.fedorainfracloud.org/coprs/akurczyn/spacescan/),
 which also brings its updates through the usual system updates:
 
 ```sh
-sudo dnf copr enable a-kurczyn/spacescan
+sudo dnf copr enable akurczyn/spacescan
 sudo dnf install spacescan
 ```
 
