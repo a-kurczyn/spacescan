@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SpaceScan
+GenericName=Disk Usage Visualizer
+Comment=Sunburst chart of drive and folder disk usage
+Exec=spacescan
+Icon=spacescan
+StartupWMClass=spacescan
+Terminal=false
+StartupNotify=true
+Categories=Utility;
+Keywords=disk;usage;storage;sunburst;scanner;space;

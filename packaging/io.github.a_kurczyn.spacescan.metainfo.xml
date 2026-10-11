@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.a_kurczyn.spacescan</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>SpaceScan</name>
+  <summary>See what takes up space on your drives</summary>
+  <developer id="io.github.a_kurczyn">
+    <name>Alejandro Kurczyn</name>
+  </developer>
+  <description>
+    <p>
+      SpaceScan scans a drive or folder and shows where the space goes, as a
+      sunburst chart and as a table you can drive from the keyboard.
+    </p>
+    <ul>
+      <li>Fast scans of large filesystems, shown live while they run</li>
+      <li>Files grouped by kind (video, images, code…), with filters by name and category</li>
+      <li>Delete, move to the trash, copy and move without leaving the app; other mounted drives are never touched</li>
+      <li>Text, CSV and JSON reports from the command line</li>
+      <li>In ten languages</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">spacescan.desktop</launchable>
+  <provides>
+    <binary>spacescan</binary>
+  </provides>
+  <url type="homepage">https://github.com/a-kurczyn/spacescan</url>
+  <url type="bugtracker">https://github.com/a-kurczyn/spacescan/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Sunburst chart of a folder</caption>
+      <image>https://raw.githubusercontent.com/a-kurczyn/spacescan/main/docs/screenshot.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Table view</caption>
+      <image>https://raw.githubusercontent.com/a-kurczyn/spacescan/main/docs/table.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.1.0" date="2026-10-11">
+      <description>
+        <p>Pick chart categories by clicking the legend, start the app with --category and --filter, and trash many files quickly even with network drives mounted.</p>
+      </description>
+    </release>
+    <release version="1.0.0" date="2026-10-06"/>
+  </releases>
+</component>
