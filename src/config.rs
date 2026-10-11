@@ -540,8 +540,8 @@ mod tests {
         std::fs::create_dir_all(home.join(".config/spacescan")).unwrap();
         let old = std::env::var_os("HOME");
         // SAFETY: tests that change HOME hold LOCK, and no other test reads
-        // HOME: the app and translations skip the user's files under
-        // cfg(test).
+        // HOME: tests build the app and load languages without the user's
+        // files.
         unsafe { std::env::set_var("HOME", &home) };
         f(&home);
         match old {

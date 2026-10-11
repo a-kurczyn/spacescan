@@ -425,7 +425,7 @@ mod tests {
     }
 
     fn lang(code: &str, own: &[(&str, &str)]) -> Lang {
-        let mut lang = Lang::load("en");
+        let mut lang = Lang::load_from("en", false);
         lang.code = code.into();
         for (k, v) in own {
             lang.map.insert(k.to_string(), v.to_string());
@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(fr.tn("N", 2, &["2"]), "2 pl");
         let ja = lang("ja", &[("N", "%s x"), ("N_ONE", "%s never")]);
         assert_eq!(ja.tn("N", 1, &["1"]), "1 x");
-        let en = Lang::load("en");
+        let en = Lang::load_from("en", false);
         assert_eq!(en.tn("COUNT_FILES", 1, &["1"]), "1 file");
         assert_eq!(en.tn("COUNT_FILES", 0, &["0"]), "0 files");
         assert_eq!(en.tn("COUNT_FILES", 2, &["2"]), "2 files");
