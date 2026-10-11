@@ -1461,11 +1461,53 @@ impl DiskScanApp {
     /// `compact`: a narrow panel, with the bar alone (no heading or labels;
     /// tooltips and keys still work).
     fn category_bar_ui(&mut self, ui: &mut egui::Ui, height: f32, compact: bool) {
-        let measure = self.measure;
-        let mut clicked: Option<Category> = None;
+        let clear = self.side_panel_heading_ui(ui, compact);
+        let height = if compact {
+            height
+        } else {
+            height - self.pick_note_ui(ui)
+        };
+
+        if !compact && self.table.side == SidePanel::Extensions {
+            self.extension_table_ui(ui, height);
+            if clear {
+                self.pick_pending = Some(None);
+            }
+            return;
+        }
+
+        let total: u64 = self
+            .cat_breakdown
+            .iter()
+            .map(|r| r.weight(self.measure))
+            .fold(0u64, u64::saturating_add);
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), height.max(80.0)),
+            egui::Sense::hover(),
+        );
+        let clicked = if self.cat_breakdown.is_empty() || total == 0 {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.weak(tr("CAT_NO_FILES"));
+            });
+            None
+        } else {
+            self.category_segments_ui(ui, rect, total, compact)
+        };
+
+        if clear || clicked.is_some() {
+            self.pick_pending = Some(match clicked {
+                Some(c) if self.pick != Some(Pick::Category(c)) => Some(Pick::Category(c)),
+                _ => None,
+            });
+        }
+    }
+
+    /// The left panel's heading row: the Categories | Extensions toggle
+    /// (not in the narrow panel) and ✕ while something is picked. True if
+    /// ✕ was clicked.
+    fn side_panel_heading_ui(&mut self, ui: &mut egui::Ui, compact: bool) -> bool {
         let mut clear = false;
         ui.horizontal(|ui| {
-            // Toggle: category bar or extensions table.
             if !compact {
                 let views: [(SidePanel, &str, DrawIcon); 2] = [
                     (
@@ -1491,301 +1533,230 @@ impl DiskScanApp {
                 clear = true;
             }
         });
-        let mut height = height;
-        let line_h = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
-        // Notes under the heading (not in the narrow panel).
+        clear
+    }
+
+    /// A note under the heading about the pick: an extension pick applies
+    /// once the scan is done, and a pick may have no files in this folder.
+    /// Returns the height it took.
+    fn pick_note_ui(&self, ui: &mut egui::Ui) -> f32 {
         // A picked category shows in the live view; extensions only once the
         // scan is done.
-        if !compact && self.scanning && matches!(self.pick, Some(Pick::Extensions(_))) {
+        if self.scanning && matches!(self.pick, Some(Pick::Extensions(_))) {
             ui.weak(tr("FILTER_APPLIES_ON_FINISH"));
-            height -= line_h;
-        } else if !compact
-            && let Some(pick) = &self.pick
-            && !self.cat_breakdown.iter().any(|r| match pick {
-                Pick::Category(c) => r.cat == *c,
-                Pick::Extensions(set) => r.exts.iter().any(|x| set.contains(&x.0)),
-            })
-        {
-            // The picked category or extension has no files in this folder.
-            let hidden: u64 = self.cat_breakdown.iter().map(|r| r.files).sum();
-            let key = match pick {
-                Pick::Category(_) => "CAT_NONE_HERE",
-                Pick::Extensions(_) => "EXT_NONE_HERE",
-            };
-            let text = trn(
-                key,
-                hidden,
-                &[&self.cats.pick_label(pick), &format_count(hidden)],
-            );
-            let label = ui.add(
-                egui::Label::new(egui::RichText::new(text).color(ui.visuals().warn_fg_color))
-                    .wrap(),
-            );
-            height -= label.rect.height() + ui.spacing().item_spacing.y;
+            return ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
         }
-
-        if !compact && self.table.side == SidePanel::Extensions {
-            self.extension_table_ui(ui, height);
-            if clear {
-                self.pick_pending = Some(None);
-            }
-            return;
+        let Some(pick) = &self.pick else {
+            return 0.0;
+        };
+        if self.cat_breakdown.iter().any(|r| match pick {
+            Pick::Category(c) => r.cat == *c,
+            Pick::Extensions(set) => r.exts.iter().any(|x| set.contains(&x.0)),
+        }) {
+            return 0.0;
         }
-
-        let rows = &self.cat_breakdown;
-        let total: u64 = rows
-            .iter()
-            .map(|r| r.weight(measure))
-            .fold(0u64, u64::saturating_add);
-        let (rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), height.max(80.0)),
-            egui::Sense::hover(),
+        // The picked category or extension has no files in this folder.
+        let hidden: u64 = self.cat_breakdown.iter().map(|r| r.files).sum();
+        let key = match pick {
+            Pick::Category(_) => "CAT_NONE_HERE",
+            Pick::Extensions(_) => "EXT_NONE_HERE",
+        };
+        let text = trn(
+            key,
+            hidden,
+            &[&self.cats.pick_label(pick), &format_count(hidden)],
         );
-        if rows.is_empty() || total == 0 {
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.weak(tr("CAT_NO_FILES"));
-            });
-        } else {
-            let painter = ui.painter_at(rect);
-            let dark = ui.visuals().dark_mode;
-            let gap = 2.0;
-            let bar_w = 22.0;
-            let min_h = 3.0;
-            // Heights proportional to size; a sliver too thin to see or
-            // click gets `min_h`, taken from the others.
-            let usable = rect.height() - gap * (rows.len() - 1) as f32;
-            let raw: Vec<f32> = rows
-                .iter()
-                .map(|r| r.weight(measure) as f32 / total as f32 * usable)
-                .collect();
-            let thin = raw.iter().filter(|h| **h < min_h).count() as f32;
-            let big_sum: f32 = raw.iter().filter(|h| **h >= min_h).sum();
-            let scale = if big_sum > 0.0 {
-                (usable - thin * min_h).max(0.0) / big_sum
-            } else {
-                1.0
-            };
-            let heights: Vec<f32> = raw
-                .iter()
-                .map(|h| if *h < min_h { min_h } else { h * scale })
-                .collect();
+        let label = ui.add(
+            egui::Label::new(egui::RichText::new(text).color(ui.visuals().warn_fg_color)).wrap(),
+        );
+        label.rect.height() + ui.spacing().item_spacing.y
+    }
 
-            // Labels: two lines each if they all fit, else one line; if even
-            // that doesn't fit, only the largest categories are labelled (the
-            // rest keep their tooltips and keys).
-            let font = egui::FontId::default();
-            let line_h = ui.text_style_height(&egui::TextStyle::Body);
-            // Half a line of space above and below each label.
-            let pad = line_h * 0.5;
-            let n = rows.len();
-            let two_lines = (line_h * 2.0 + 2.0 * pad) * n as f32 <= rect.height();
-            let label_h = if two_lines {
-                line_h * 2.0 + 2.0 * pad
-            } else {
-                line_h + 2.0 * pad
-            };
-            let room = (rect.height() / label_h).floor() as usize;
-            let mut by_size: Vec<usize> = (0..n).collect();
-            by_size.sort_by_key(|&i| std::cmp::Reverse(rows[i].weight(measure)));
-            let mut labelled = vec![false; n];
-            if !compact {
-                for &i in by_size.iter().take(room) {
-                    labelled[i] = true;
-                }
-            }
-            let mut y = rect.top();
-            let mut spans = Vec::with_capacity(rows.len());
-            for h in &heights {
-                spans.push((y, y + h));
-                y += h + gap;
-            }
-            let mut label_y: Vec<f32> = spans
-                .iter()
-                .map(|(a, b)| (a + b) / 2.0 - label_h / 2.0)
-                .collect();
-            // Each label at its segment's middle, pushed apart so they never
-            // overlap (then pulled back up if they ran off the bottom).
-            let shown: Vec<usize> = (0..n).filter(|&i| labelled[i]).collect();
-            for k in 0..shown.len() {
-                let min = if k == 0 {
-                    rect.top()
-                } else {
-                    label_y[shown[k - 1]] + label_h
-                };
-                label_y[shown[k]] = label_y[shown[k]].max(min);
-            }
-            for k in (0..shown.len()).rev() {
-                let max = if k + 1 == shown.len() {
-                    rect.bottom() - label_h
-                } else {
-                    label_y[shown[k + 1]] - label_h
-                };
-                label_y[shown[k]] = label_y[shown[k]].min(max).max(rect.top());
-            }
+    /// The category bar's segments in `rect`, with labels beside them
+    /// (none when `compact`). `total` is the rows' total weight. Returns
+    /// the category clicked.
+    fn category_segments_ui(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        total: u64,
+        compact: bool,
+    ) -> Option<Category> {
+        let measure = self.measure;
+        let rows = &self.cat_breakdown;
+        let painter = ui.painter_at(rect);
+        let dark = ui.visuals().dark_mode;
+        let font = egui::FontId::default();
+        let line_h = ui.text_style_height(&egui::TextStyle::Body);
+        let weights: Vec<u64> = rows.iter().map(|r| r.weight(measure)).collect();
+        let bar = BarLayout::new(&weights, total, rect, line_h, !compact);
+        let BarLayout {
+            gap,
+            pad,
+            label_h,
+            two_lines,
+            ..
+        } = bar;
+        let n = rows.len();
+        let mut clicked = None;
 
-            // Room for leader lines to slope gently to labels that moved.
-            let label_x = rect.left() + bar_w + 34.0;
-            let name_w = (rect.right() - label_x - 4.0).max(0.0);
-            for (i, row) in rows.iter().enumerate() {
-                let (y0, y1) = spans[i];
-                let seg = egui::Rect::from_min_max(
-                    Pos2::new(rect.left(), y0),
-                    Pos2::new(rect.left() + bar_w, y1),
-                );
-                let label_rect = egui::Rect::from_min_size(
-                    Pos2::new(label_x - 6.0, label_y[i]),
-                    Vec2::new(rect.right() - label_x + 6.0, label_h),
-                );
-                // An extension pick highlights its category without
-                // selecting it.
-                let picked = self.pick == Some(Pick::Category(row.cat));
-                let dimmed = self
-                    .pick
-                    .as_ref()
-                    .is_some_and(|p| !self.cats.pick_in_category(p, row.cat));
+        // Room for leader lines to slope gently to labels that moved.
+        let label_x = rect.left() + BarLayout::BAR_W + 34.0;
+        let name_w = (rect.right() - label_x - 4.0).max(0.0);
+        for (i, row) in rows.iter().enumerate() {
+            let (y0, y1) = bar.spans[i];
+            let labelled = bar.labelled[i];
+            let seg = egui::Rect::from_min_max(
+                Pos2::new(rect.left(), y0),
+                Pos2::new(rect.left() + BarLayout::BAR_W, y1),
+            );
+            let label_rect = egui::Rect::from_min_size(
+                Pos2::new(label_x - 6.0, bar.label_y[i]),
+                Vec2::new(rect.right() - label_x + 6.0, label_h),
+            );
+            // An extension pick highlights its category without
+            // selecting it.
+            let picked = self.pick == Some(Pick::Category(row.cat));
+            let dimmed = self
+                .pick
+                .as_ref()
+                .is_some_and(|p| !self.cats.pick_in_category(p, row.cat));
 
-                let id = ui.id().with(("cat", i));
-                let mut hit = ui.interact(
-                    seg.expand2(Vec2::new(0.0, gap / 2.0)),
-                    id,
-                    egui::Sense::click(),
-                );
-                if labelled[i] {
-                    hit |= ui.interact(label_rect, id.with("label"), egui::Sense::click());
-                }
-                let hovered = hit.hovered();
+            let id = ui.id().with(("cat", i));
+            let mut hit = ui.interact(
+                seg.expand2(Vec2::new(0.0, gap / 2.0)),
+                id,
+                egui::Sense::click(),
+            );
+            if labelled {
+                hit |= ui.interact(label_rect, id.with("label"), egui::Sense::click());
+            }
+            let hovered = hit.hovered();
 
-                if picked && labelled[i] {
-                    painter.rect_filled(
-                        label_rect,
-                        egui::CornerRadius::same(4),
-                        ui.visuals().selection.bg_fill.gamma_multiply(0.5),
-                    );
-                } else if hovered && labelled[i] {
-                    painter.rect_filled(
-                        label_rect,
-                        egui::CornerRadius::same(4),
-                        ui.visuals().widgets.hovered.weak_bg_fill,
-                    );
-                }
-                let r = 4u8;
-                let radius = egui::CornerRadius {
-                    nw: if i == 0 { r } else { 0 },
-                    ne: if i == 0 { r } else { 0 },
-                    sw: if i + 1 == n { r } else { 0 },
-                    se: if i + 1 == n { r } else { 0 },
-                };
-                let color = self.cats.color(row.cat, dark);
+            if picked && labelled {
                 painter.rect_filled(
+                    label_rect,
+                    egui::CornerRadius::same(4),
+                    ui.visuals().selection.bg_fill.gamma_multiply(0.5),
+                );
+            } else if hovered && labelled {
+                painter.rect_filled(
+                    label_rect,
+                    egui::CornerRadius::same(4),
+                    ui.visuals().widgets.hovered.weak_bg_fill,
+                );
+            }
+            let r = 4u8;
+            let radius = egui::CornerRadius {
+                nw: if i == 0 { r } else { 0 },
+                ne: if i == 0 { r } else { 0 },
+                sw: if i + 1 == n { r } else { 0 },
+                se: if i + 1 == n { r } else { 0 },
+            };
+            let color = self.cats.color(row.cat, dark);
+            painter.rect_filled(
+                seg,
+                radius,
+                if dimmed {
+                    color.gamma_multiply(0.3)
+                } else {
+                    color
+                },
+            );
+            if hovered || picked {
+                painter.rect_stroke(
                     seg,
                     radius,
-                    if dimmed {
-                        color.gamma_multiply(0.3)
-                    } else {
-                        color
-                    },
+                    egui::Stroke::new(1.5, ui.visuals().strong_text_color()),
+                    egui::StrokeKind::Outside,
                 );
-                if hovered || picked {
-                    painter.rect_stroke(
-                        seg,
-                        radius,
-                        egui::Stroke::new(1.5, ui.visuals().strong_text_color()),
-                        egui::StrokeKind::Outside,
-                    );
-                }
+            }
 
-                // A short leader from the segment to a label that had to move.
-                let mid = (y0 + y1) / 2.0;
-                let ink = if dimmed {
-                    ui.visuals().weak_text_color()
+            // A short leader from the segment to a label that had to move.
+            let mid = (y0 + y1) / 2.0;
+            let ink = if dimmed {
+                ui.visuals().weak_text_color()
+            } else {
+                ui.visuals().strong_text_color()
+            };
+            let name_mid = bar.label_y[i] + pad + line_h / 2.0;
+            if labelled && (mid - name_mid).abs() > 2.0 {
+                let stroke =
+                    egui::Stroke::new(1.0, ui.visuals().weak_text_color().gamma_multiply(0.6));
+                let elbow = Pos2::new(seg.right() + 8.0, mid);
+                painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
+                painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
+            }
+            // Key 1–9 for the first nine (in the spoken name, not drawn).
+            let key = (i < 9).then(|| (i + 1).to_string());
+            if labelled {
+                // A long name ends in "…"; the tooltip has it in full.
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    self.cats.label(row.cat),
+                    font.clone(),
+                    ink,
+                );
+                job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
+                painter.galley(
+                    Pos2::new(label_x, bar.label_y[i] + pad),
+                    painter.layout_job(job),
+                    ink,
+                );
+            }
+            let pct = row.weight(measure) as f64 * 100.0 / total as f64;
+            // The name screen readers announce.
+            let spoken = trf(
+                "A11Y_CATEGORY",
+                &[
+                    &self.cats.label(row.cat),
+                    &format!("{pct:.1}%"),
+                    &human_size(row.size),
+                    &format_count(row.files),
+                ],
+            );
+            let spoken = match &key {
+                Some(key) => trf("A11Y_CATEGORY_KEY", &[&spoken, key]),
+                None => spoken,
+            };
+            hit.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, &spoken)
+            });
+            if labelled && two_lines {
+                painter.text(
+                    Pos2::new(label_x, bar.label_y[i] + pad + line_h),
+                    egui::Align2::LEFT_TOP,
+                    format!("{pct:.1}% · {}", measure_text(row.size, row.files, measure)),
+                    font.clone(),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+
+            let hit = hit.on_hover_ui(|ui| {
+                ui.strong(self.cats.label(row.cat));
+                ui.label(format!(
+                    "{} · {pct:.1}% · {} {}",
+                    human_size(row.size),
+                    tr("HOVER_FILES"),
+                    format_count(row.files)
+                ));
+                let exts: Vec<String> = row
+                    .exts
+                    .iter()
+                    .take(6)
+                    .map(|(e, sz, _)| format!("{} {}", ext_label(e), human_size(*sz)))
+                    .collect();
+                ui.weak(exts.join("  ·  "));
+                ui.weak(tr(if picked {
+                    "CAT_CLICK_AGAIN"
                 } else {
-                    ui.visuals().strong_text_color()
-                };
-                let name_mid = label_y[i] + pad + line_h / 2.0;
-                if labelled[i] && (mid - name_mid).abs() > 2.0 {
-                    let stroke =
-                        egui::Stroke::new(1.0, ui.visuals().weak_text_color().gamma_multiply(0.6));
-                    let elbow = Pos2::new(seg.right() + 8.0, mid);
-                    painter.line_segment([Pos2::new(seg.right() + 2.0, mid), elbow], stroke);
-                    painter.line_segment([elbow, Pos2::new(label_x - 10.0, name_mid)], stroke);
-                }
-                // Key 1–9 for the first nine (in the spoken name, not drawn).
-                let key = (i < 9).then(|| (i + 1).to_string());
-                if labelled[i] {
-                    // A long name ends in "…"; the tooltip has it in full.
-                    let mut job = egui::text::LayoutJob::simple_singleline(
-                        self.cats.label(row.cat),
-                        font.clone(),
-                        ink,
-                    );
-                    job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
-                    painter.galley(
-                        Pos2::new(label_x, label_y[i] + pad),
-                        painter.layout_job(job),
-                        ink,
-                    );
-                }
-                let pct = row.weight(measure) as f64 * 100.0 / total as f64;
-                // The name screen readers announce.
-                let spoken = trf(
-                    "A11Y_CATEGORY",
-                    &[
-                        &self.cats.label(row.cat),
-                        &format!("{pct:.1}%"),
-                        &human_size(row.size),
-                        &format_count(row.files),
-                    ],
-                );
-                let spoken = match &key {
-                    Some(key) => trf("A11Y_CATEGORY_KEY", &[&spoken, key]),
-                    None => spoken,
-                };
-                hit.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, &spoken)
-                });
-                if labelled[i] && two_lines {
-                    painter.text(
-                        Pos2::new(label_x, label_y[i] + pad + line_h),
-                        egui::Align2::LEFT_TOP,
-                        format!("{pct:.1}% · {}", measure_text(row.size, row.files, measure)),
-                        font.clone(),
-                        ui.visuals().weak_text_color(),
-                    );
-                }
-
-                let hit = hit.on_hover_ui(|ui| {
-                    ui.strong(self.cats.label(row.cat));
-                    ui.label(format!(
-                        "{} · {pct:.1}% · {} {}",
-                        human_size(row.size),
-                        tr("HOVER_FILES"),
-                        format_count(row.files)
-                    ));
-                    let exts: Vec<String> = row
-                        .exts
-                        .iter()
-                        .take(6)
-                        .map(|(e, sz, _)| format!("{} {}", ext_label(e), human_size(*sz)))
-                        .collect();
-                    ui.weak(exts.join("  ·  "));
-                    ui.weak(tr(if picked {
-                        "CAT_CLICK_AGAIN"
-                    } else {
-                        "CAT_CLICK"
-                    }));
-                });
-                if hit.clicked() {
-                    clicked = Some(row.cat);
-                }
+                    "CAT_CLICK"
+                }));
+            });
+            if hit.clicked() {
+                clicked = Some(row.cat);
             }
         }
-
-        if clear || clicked.is_some() {
-            self.pick_pending = Some(match clicked {
-                Some(c) if self.pick != Some(Pick::Category(c)) => Some(Pick::Category(c)),
-                _ => None,
-            });
-        }
+        clicked
     }
 
     /// How far the chart's legends have faded in after the last scan: 0
@@ -1911,11 +1882,9 @@ impl DiskScanApp {
         );
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &chart_name));
-        let bg = ui.visuals().panel_fill;
-        let free_color = free_space_color(ui.visuals(), self.settings.free_space_gamma);
 
         // The hub; clicking it goes up a level.
-        painter.circle_filled(center, hub_radius, bg);
+        painter.circle_filled(center, hub_radius, ui.visuals().panel_fill);
         draw_hub_text(
             painter,
             center,
@@ -1938,104 +1907,27 @@ impl DiskScanApp {
             measure: self.measure,
         };
         let segs = layout_sunburst(view_node, free, opts);
-        // Slice looks of the whole tree, worked out once per tree.
-        if self
-            .looks
-            .as_ref()
-            .is_none_or(|(generation, _)| *generation != self.tree_gen)
-        {
-            // The files' stored categories hold if the tree was scanned with
-            // the categories in use now.
-            let stored = self
-                .tree_cats
-                .as_ref()
-                .is_some_and(|c| Arc::ptr_eq(c, &self.cats));
-            let looks = Looks::build(root, &self.cats, stored, self.measure);
-            if let Some(old) = self.looks.replace((self.tree_gen, looks)) {
-                drop_in_background(old);
-            }
-        }
-        let now = now_secs();
+        self.update_looks(root);
         if self.color_fade() < 1.0 {
             ui.ctx().request_repaint();
         }
 
-        let pointer = ctx.input(|i| i.pointer.hover_pos());
-        let mut new_hover: Option<HoverInfo> = None;
-        // Relative to view_node, like the segments' idx_paths.
-        let mut hover_idx_path: Option<Vec<usize>> = None;
-        let mut hover_is_other = false;
-
+        let colors = SliceColoring {
+            free_color: free_space_color(ui.visuals(), self.settings.free_space_gamma),
+            view: Some(view_node),
+            live: false,
+            now: now_secs(),
+        };
         for seg in &segs {
-            let colors = SliceColoring {
-                free_color,
-                view: Some(view_node),
-                live: false,
-                now,
-            };
             self.draw_segment(painter, seg, geom, &colors);
-            let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
-
-            if let Some(p) = pointer {
-                let v = p - center;
-                let dist = v.length();
-                if dist >= r0 && dist <= r1 {
-                    let mut ang = v.x.atan2(-v.y);
-                    if ang < 0.0 {
-                        ang += std::f32::consts::TAU;
-                    }
-                    if ang >= seg.start_angle && ang <= seg.end_angle {
-                        // "Other" and free space have no node of their own.
-                        let real_node = if seg.is_other || seg.is_free {
-                            None
-                        } else {
-                            Some(get_node(view_node, &seg.idx_path))
-                        };
-                        new_hover = Some(HoverInfo {
-                            path: match real_node {
-                                Some(n) => n.path(),
-                                None if seg.is_free => PathBuf::from(&seg.name), // "Free space"
-                                // "Other": its idx_path leads to the folder holding the grouped items.
-                                None => get_node(view_node, &seg.idx_path).path().join(&seg.name),
-                            },
-                            size: seg.size,
-                            file_count: seg.file_count,
-                            is_dir: seg.is_dir || seg.is_other,
-                            is_free: seg.is_free,
-                            is_other: seg.is_other,
-                            mode: seg.mode,
-                            mtime: real_node.map(|n| n.mtime),
-                            ctime: real_node.map(|n| n.ctime),
-                            uid: real_node.map(|n| n.uid),
-                            gid: real_node.map(|n| n.gid),
-                            age_range: self.looks.as_ref().and_then(|(_, looks)| {
-                                let look = if seg.is_other {
-                                    let parent = get_node(
-                                        view_node,
-                                        &seg.idx_path[..seg.idx_path.len() - 1],
-                                    );
-                                    let rest =
-                                        seg.rest.iter().filter_map(|&i| parent.children.get(i));
-                                    looks.of_group(rest, &self.cats, self.measure)
-                                } else {
-                                    let n = real_node.filter(|n| n.is_dir)?;
-                                    looks.of(n, &self.cats, self.measure)
-                                };
-                                Some((look.newest, look.oldest))
-                            }),
-                        });
-                        // Free space can't be opened or used by the menu.
-                        hover_idx_path = if seg.is_free {
-                            None
-                        } else {
-                            Some(seg.idx_path.clone())
-                        };
-                        hover_is_other = seg.is_other;
-                    }
-                }
-            }
         }
-        self.hovered = new_hover;
+        let pointer = ctx.input(|i| i.pointer.hover_pos());
+        let hovered = pointer.and_then(|p| segment_at(&segs, p, geom));
+        self.hovered = hovered.map(|seg| self.hover_info(view_node, seg));
+        // Relative to view_node, like the segments' idx_paths. Free space
+        // can't be opened or used by the menu.
+        let hover_idx_path = hovered.filter(|s| !s.is_free).map(|s| s.idx_path.clone());
+        let hover_is_other = hovered.is_some_and(|s| s.is_other);
 
         // Slices the arrow keys move between (all but free space), and the
         // highlighted slice's outline.
@@ -2062,23 +1954,7 @@ impl DiskScanApp {
         if response.clicked()
             && let Some(p) = pointer
         {
-            let dist = (p - center).length();
-            if dist <= hub_radius {
-                if self.view_stack.len() > 1 {
-                    self.view_stack.pop();
-                }
-            } else if let Some(ip) = &hover_idx_path {
-                if is_other_marker(ip) {
-                    self.open_other_bucket(ip);
-                } else {
-                    let node = get_node(view_node, ip);
-                    if node.is_dir {
-                        let mut vp = self.current_view().clone();
-                        vp.extend(ip.iter());
-                        self.view_stack.push(vp);
-                    }
-                }
-            }
+            self.chart_click(view_node, p, geom, hover_idx_path.as_deref());
         }
 
         // Right-click menu. Its target is fixed as a path when it opens. None for
@@ -2089,146 +1965,243 @@ impl DiskScanApp {
                 _ => None,
             };
         }
-        response.context_menu(|ui| {
-            let Some(target) = self.context_target.clone() else {
-                ui.close();
-                return;
-            };
-            if ui.button(tr("MENU_ZOOM")).clicked() {
-                if let Some(vp) = index_path_to(root, &target) {
-                    self.view_stack.push(vp);
-                }
-                ui.close();
-            }
-            if ui.button(tr("MENU_RESCAN")).clicked() {
-                self.start_scan(target.clone());
-                ui.close();
-            }
-            if ui.button(tr("MENU_OPEN")).clicked() {
-                let dir = if target.is_dir() {
-                    target.clone()
-                } else {
-                    target
-                        .parent()
-                        .map(Path::to_path_buf)
-                        .unwrap_or(target.clone())
-                };
-                if let Err(e) = open_externally(&dir) {
-                    self.log_issue(trf("ERR_OPEN_FAILED", &[&show_path(&dir), &e.to_string()]));
-                }
-                ui.close();
-            }
-            if ui.button(tr("MENU_HIDE")).clicked() {
-                self.hidden.insert(target.clone());
-                ui.close();
-            }
-            // Like Ctrl+C, Ctrl+X and Ctrl+V.
-            if ui.button(tr("MENU_COPY")).clicked() {
-                self.clip(&ctx, vec![target.clone()], ClipMode::Copy);
-                ui.close();
-            }
-            if ui.button(tr("MENU_CUT")).clicked() {
-                self.clip(&ctx, vec![target.clone()], ClipMode::Move);
-                ui.close();
-            }
-            if target.is_dir()
-                && ui
-                    .add_enabled(
-                        self.transfer.clip.is_some(),
-                        egui::Button::new(tr("MENU_PASTE_INTO")),
-                    )
-                    .clicked()
-            {
-                self.paste_into(target.clone(), "");
-                ui.close();
-            }
-            // Like T and D; a permanent delete asks first.
-            if ui.button(tr("MENU_TRASH")).clicked() {
-                self.queue_trash(vec![target.clone()]);
-                ui.close();
-            }
-            if ui.button(tr("MENU_DELETE")).clicked() {
-                self.ask_delete(vec![target.clone()]);
-                ui.close();
-            }
-        });
+        response.context_menu(|ui| self.chart_menu_ui(ui, root));
 
-        // Hover details float next to the pointer. (A copy, since
-        // ensure_mime_lookup needs &mut self.)
-        let hover_snapshot = self.hovered.clone();
-        // None while the right-click menu is open.
-        let hover_snapshot = hover_snapshot.filter(|_| !egui::Popup::is_any_open(&ctx));
-        if let (Some(h), Some(p)) = (&hover_snapshot, pointer) {
-            if !h.is_dir {
-                self.ensure_mime_lookup(&h.path);
-            }
-            let mime = if h.is_dir {
-                None
-            } else {
-                self.mime_cache.get(&h.path).cloned().flatten()
-            };
-
-            // Opens away from the nearest window edge.
-            let gap = 14.0;
-            let (align, offset) = match (p.x > center.x, p.y > center.y) {
-                (false, false) => (egui::Align2::LEFT_TOP, Vec2::new(gap, gap)),
-                (true, false) => (egui::Align2::RIGHT_TOP, Vec2::new(-gap, gap)),
-                (false, true) => (egui::Align2::LEFT_BOTTOM, Vec2::new(gap, -gap)),
-                (true, true) => (egui::Align2::RIGHT_BOTTOM, Vec2::new(-gap, -gap)),
-            };
-            let is_real_folder = h.is_dir && !h.is_other;
-            let is_real_file = !h.is_dir && !h.is_free;
-            // No icon for "other" or free space.
-            let icon: Option<DrawIcon> = if is_real_file {
-                Some(draw_file_icon)
-            } else if is_real_folder {
-                Some(draw_folder_icon)
-            } else {
-                None
-            };
-            let path_str = short_path(&h.path);
-
-            // Keyed by path: egui remembers an area's size per id, and one id for
-            // every item would keep the box as wide as the widest seen.
-            // Above the chart's other overlays (the category legend, …).
-            egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path))
-                .order(egui::Order::Tooltip)
-                .pivot(align)
-                .fixed_pos(p + offset)
-                .show(&ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if let Some(draw_icon) = icon {
-                                let (icon_rect, _resp) =
-                                    ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
-                                draw_icon(ui.painter(), icon_rect, ui.visuals().text_color());
-                            }
-                            // One line, unless the path is very long.
-                            let galley = ui.painter().layout_no_wrap(
-                                path_str.clone(),
-                                egui::FontId::monospace(12.0),
-                                ui.visuals().text_color(),
-                            );
-                            let label =
-                                egui::Label::new(egui::RichText::new(&path_str).monospace());
-                            if galley.size().x > 900.0 {
-                                ui.add(label.wrap());
-                            } else {
-                                ui.add(label.extend());
-                            }
-                        });
-                        ui.separator();
-                        details_grid(
-                            ui,
-                            egui::Id::new("hover_tooltip_grid").with(&h.path),
-                            h,
-                            mime.as_deref(),
-                            &mut self.user_cache,
-                            &mut self.group_cache,
-                        );
-                    });
-                });
+        if let Some(p) = pointer {
+            self.hover_details_ui(&ctx, p, center);
         }
+    }
+
+    /// Works out the slice looks of the whole tree, once per tree.
+    fn update_looks(&mut self, root: &Node) {
+        if self
+            .looks
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == self.tree_gen)
+        {
+            return;
+        }
+        // The files' stored categories hold if the tree was scanned with
+        // the categories in use now.
+        let stored = self
+            .tree_cats
+            .as_ref()
+            .is_some_and(|c| Arc::ptr_eq(c, &self.cats));
+        let looks = Looks::build(root, &self.cats, stored, self.measure);
+        if let Some(old) = self.looks.replace((self.tree_gen, looks)) {
+            drop_in_background(old);
+        }
+    }
+
+    /// The hover details of slice `seg` of the chart of `view_node`.
+    fn hover_info(&self, view_node: &Node, seg: &Segment) -> HoverInfo {
+        // "Other" and free space have no node of their own.
+        let real_node = if seg.is_other || seg.is_free {
+            None
+        } else {
+            Some(get_node(view_node, &seg.idx_path))
+        };
+        HoverInfo {
+            path: match real_node {
+                Some(n) => n.path(),
+                None if seg.is_free => PathBuf::from(&seg.name), // "Free space"
+                // "Other": its idx_path leads to the folder holding the grouped items.
+                None => get_node(view_node, &seg.idx_path).path().join(&seg.name),
+            },
+            size: seg.size,
+            file_count: seg.file_count,
+            is_dir: seg.is_dir || seg.is_other,
+            is_free: seg.is_free,
+            is_other: seg.is_other,
+            mode: seg.mode,
+            mtime: real_node.map(|n| n.mtime),
+            ctime: real_node.map(|n| n.ctime),
+            uid: real_node.map(|n| n.uid),
+            gid: real_node.map(|n| n.gid),
+            age_range: self.looks.as_ref().and_then(|(_, looks)| {
+                let look = if seg.is_other {
+                    let parent = get_node(view_node, &seg.idx_path[..seg.idx_path.len() - 1]);
+                    let rest = seg.rest.iter().filter_map(|&i| parent.children.get(i));
+                    looks.of_group(rest, &self.cats, self.measure)
+                } else {
+                    let n = real_node.filter(|n| n.is_dir)?;
+                    looks.of(n, &self.cats, self.measure)
+                };
+                Some((look.newest, look.oldest))
+            }),
+        }
+    }
+
+    /// A click at `p` on the chart of `view_node`: the hub goes up a level,
+    /// a folder's slice (`hover_idx_path`) opens it.
+    fn chart_click(
+        &mut self,
+        view_node: &Node,
+        p: Pos2,
+        geom: (Pos2, f32, f32),
+        hover_idx_path: Option<&[usize]>,
+    ) {
+        let (center, hub_radius, _) = geom;
+        if (p - center).length() <= hub_radius {
+            if self.view_stack.len() > 1 {
+                self.view_stack.pop();
+            }
+        } else if let Some(ip) = hover_idx_path {
+            if is_other_marker(ip) {
+                self.open_other_bucket(ip);
+            } else if get_node(view_node, ip).is_dir {
+                let mut vp = self.current_view().clone();
+                vp.extend(ip.iter());
+                self.view_stack.push(vp);
+            }
+        }
+    }
+
+    /// The chart's right-click menu, for `context_target`.
+    fn chart_menu_ui(&mut self, ui: &mut egui::Ui, root: &Node) {
+        let ctx = ui.ctx().clone();
+        let Some(target) = self.context_target.clone() else {
+            ui.close();
+            return;
+        };
+        if ui.button(tr("MENU_ZOOM")).clicked() {
+            if let Some(vp) = index_path_to(root, &target) {
+                self.view_stack.push(vp);
+            }
+            ui.close();
+        }
+        if ui.button(tr("MENU_RESCAN")).clicked() {
+            self.start_scan(target.clone());
+            ui.close();
+        }
+        if ui.button(tr("MENU_OPEN")).clicked() {
+            let dir = if target.is_dir() {
+                target.clone()
+            } else {
+                target
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or(target.clone())
+            };
+            if let Err(e) = open_externally(&dir) {
+                self.log_issue(trf("ERR_OPEN_FAILED", &[&show_path(&dir), &e.to_string()]));
+            }
+            ui.close();
+        }
+        if ui.button(tr("MENU_HIDE")).clicked() {
+            self.hidden.insert(target.clone());
+            ui.close();
+        }
+        // Like Ctrl+C, Ctrl+X and Ctrl+V.
+        if ui.button(tr("MENU_COPY")).clicked() {
+            self.clip(&ctx, vec![target.clone()], ClipMode::Copy);
+            ui.close();
+        }
+        if ui.button(tr("MENU_CUT")).clicked() {
+            self.clip(&ctx, vec![target.clone()], ClipMode::Move);
+            ui.close();
+        }
+        if target.is_dir()
+            && ui
+                .add_enabled(
+                    self.transfer.clip.is_some(),
+                    egui::Button::new(tr("MENU_PASTE_INTO")),
+                )
+                .clicked()
+        {
+            self.paste_into(target.clone(), "");
+            ui.close();
+        }
+        // Like T and D; a permanent delete asks first.
+        if ui.button(tr("MENU_TRASH")).clicked() {
+            self.queue_trash(vec![target.clone()]);
+            ui.close();
+        }
+        if ui.button(tr("MENU_DELETE")).clicked() {
+            self.ask_delete(vec![target.clone()]);
+            ui.close();
+        }
+    }
+
+    /// The hovered slice's details, floating next to the pointer `p`
+    /// (away from the nearest window edge, judged from the chart's
+    /// `center`). Hidden while a menu is open.
+    fn hover_details_ui(&mut self, ctx: &egui::Context, p: Pos2, center: Pos2) {
+        if egui::Popup::is_any_open(ctx) {
+            return;
+        }
+        // A copy, since ensure_mime_lookup needs &mut self.
+        let Some(h) = self.hovered.clone() else {
+            return;
+        };
+        if !h.is_dir {
+            self.ensure_mime_lookup(&h.path);
+        }
+        let mime = if h.is_dir {
+            None
+        } else {
+            self.mime_cache.get(&h.path).cloned().flatten()
+        };
+
+        // Opens away from the nearest window edge.
+        let gap = 14.0;
+        let (align, offset) = match (p.x > center.x, p.y > center.y) {
+            (false, false) => (egui::Align2::LEFT_TOP, Vec2::new(gap, gap)),
+            (true, false) => (egui::Align2::RIGHT_TOP, Vec2::new(-gap, gap)),
+            (false, true) => (egui::Align2::LEFT_BOTTOM, Vec2::new(gap, -gap)),
+            (true, true) => (egui::Align2::RIGHT_BOTTOM, Vec2::new(-gap, -gap)),
+        };
+        let is_real_folder = h.is_dir && !h.is_other;
+        let is_real_file = !h.is_dir && !h.is_free;
+        // No icon for "other" or free space.
+        let icon: Option<DrawIcon> = if is_real_file {
+            Some(draw_file_icon)
+        } else if is_real_folder {
+            Some(draw_folder_icon)
+        } else {
+            None
+        };
+        let path_str = short_path(&h.path);
+
+        // Keyed by path: egui remembers an area's size per id, and one id for
+        // every item would keep the box as wide as the widest seen.
+        // Above the chart's other overlays (the category legend, …).
+        egui::Area::new(egui::Id::new("hover_tooltip").with(&h.path))
+            .order(egui::Order::Tooltip)
+            .pivot(align)
+            .fixed_pos(p + offset)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if let Some(draw_icon) = icon {
+                            let (icon_rect, _resp) =
+                                ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+                            draw_icon(ui.painter(), icon_rect, ui.visuals().text_color());
+                        }
+                        // One line, unless the path is very long.
+                        let galley = ui.painter().layout_no_wrap(
+                            path_str.clone(),
+                            egui::FontId::monospace(12.0),
+                            ui.visuals().text_color(),
+                        );
+                        let label = egui::Label::new(egui::RichText::new(&path_str).monospace());
+                        if galley.size().x > 900.0 {
+                            ui.add(label.wrap());
+                        } else {
+                            ui.add(label.extend());
+                        }
+                    });
+                    ui.separator();
+                    details_grid(
+                        ui,
+                        egui::Id::new("hover_tooltip_grid").with(&h.path),
+                        &h,
+                        mime.as_deref(),
+                        &mut self.user_cache,
+                        &mut self.group_cache,
+                    );
+                });
+            });
     }
 
     /// Chart order, in the chart's top-right corner: largest first ("9")
@@ -2432,6 +2405,131 @@ fn pick_after_click(pick: Option<&Pick>, ext: &str, ctrl: bool) -> Option<Pick> 
     }
     (!set.is_empty()).then_some(Pick::Extensions(set))
 }
+
+/// Where the category bar's segments and labels go.
+struct BarLayout {
+    /// Space between segments.
+    gap: f32,
+    /// Space above and below each label's text.
+    pad: f32,
+    /// Each label's height.
+    label_h: f32,
+    /// Labels have a second line (share and size).
+    two_lines: bool,
+    /// Each segment's top and bottom.
+    spans: Vec<(f32, f32)>,
+    /// Each label's top.
+    label_y: Vec<f32>,
+    /// Which segments get a label.
+    labelled: Vec<bool>,
+}
+
+impl BarLayout {
+    const BAR_W: f32 = 22.0;
+    /// The thinnest segment: one too thin to see or click gets this much,
+    /// taken from the others.
+    const MIN_H: f32 = 3.0;
+
+    /// Segments for `weights` (adding up to `total`) in `rect`, heights in
+    /// proportion. With `labels`: two lines each if they all fit, else one
+    /// line; if even that doesn't fit, only the largest categories are
+    /// labelled. Each label sits at its segment's middle, pushed apart so
+    /// they never overlap.
+    fn new(weights: &[u64], total: u64, rect: egui::Rect, line_h: f32, labels: bool) -> Self {
+        let gap = 2.0;
+        let n = weights.len();
+        let usable = rect.height() - gap * n.saturating_sub(1) as f32;
+        let raw: Vec<f32> = weights
+            .iter()
+            .map(|&w| w as f32 / total as f32 * usable)
+            .collect();
+        let thin = raw.iter().filter(|h| **h < Self::MIN_H).count() as f32;
+        let big_sum: f32 = raw.iter().filter(|h| **h >= Self::MIN_H).sum();
+        let scale = if big_sum > 0.0 {
+            (usable - thin * Self::MIN_H).max(0.0) / big_sum
+        } else {
+            1.0
+        };
+        let mut y = rect.top();
+        let mut spans = Vec::with_capacity(n);
+        for h in &raw {
+            let h = if *h < Self::MIN_H {
+                Self::MIN_H
+            } else {
+                h * scale
+            };
+            spans.push((y, y + h));
+            y += h + gap;
+        }
+
+        // Half a line of space above and below each label.
+        let pad = line_h * 0.5;
+        let two_lines = (line_h * 2.0 + 2.0 * pad) * n as f32 <= rect.height();
+        let label_h = if two_lines {
+            line_h * 2.0 + 2.0 * pad
+        } else {
+            line_h + 2.0 * pad
+        };
+        let room = (rect.height() / label_h).floor() as usize;
+        let mut by_size: Vec<usize> = (0..n).collect();
+        by_size.sort_by_key(|&i| std::cmp::Reverse(weights[i]));
+        let mut labelled = vec![false; n];
+        if labels {
+            for &i in by_size.iter().take(room) {
+                labelled[i] = true;
+            }
+        }
+        let mut label_y: Vec<f32> = spans
+            .iter()
+            .map(|(a, b)| (a + b) / 2.0 - label_h / 2.0)
+            .collect();
+        // Pushed down past the label above, then pulled back up if they ran
+        // off the bottom.
+        let shown: Vec<usize> = (0..n).filter(|&i| labelled[i]).collect();
+        for k in 0..shown.len() {
+            let min = if k == 0 {
+                rect.top()
+            } else {
+                label_y[shown[k - 1]] + label_h
+            };
+            label_y[shown[k]] = label_y[shown[k]].max(min);
+        }
+        for k in (0..shown.len()).rev() {
+            let max = if k + 1 == shown.len() {
+                rect.bottom() - label_h
+            } else {
+                label_y[shown[k + 1]] - label_h
+            };
+            label_y[shown[k]] = label_y[shown[k]].min(max).max(rect.top());
+        }
+        BarLayout {
+            gap,
+            pad,
+            label_h,
+            two_lines,
+            spans,
+            label_y,
+            labelled,
+        }
+    }
+}
+
+/// The slice of `segs` under point `p` on a chart with `geom` (center,
+/// hub radius, ring thickness), the last one drawn if several are.
+fn segment_at(segs: &[Segment], p: Pos2, geom: (Pos2, f32, f32)) -> Option<&Segment> {
+    let (center, hub_radius, ring_thickness) = geom;
+    let v = p - center;
+    let dist = v.length();
+    let mut ang = v.x.atan2(-v.y);
+    if ang < 0.0 {
+        ang += std::f32::consts::TAU;
+    }
+    segs.iter().rev().find(|seg| {
+        let (r0, r1) = ring_radii(seg.ring, hub_radius, ring_thickness);
+        dist >= r0 && dist <= r1 && ang >= seg.start_angle && ang <= seg.end_angle
+    })
+}
+
 #[cfg(test)]
 mod category_bar_tests {
     use super::*;
