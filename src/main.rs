@@ -1210,10 +1210,96 @@ impl DiskScanApp {
             self.start_scan(path);
         }
         let scan_backlog = self.poll_scan();
-        // The live chart and table: the live tree, read every 100 ms as deep
-        // as the chart currently shows, and at once when the depth, the
-        // smallest slice, the picked category or the measure changes.
-        // (A picked extension applies when the scan finishes.)
+        self.read_live_tree();
+        // The Korean font: once a Korean name is found, or for a Korean UI.
+        let korean_needed = self.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
+            || current_lang_code() == "ko";
+        if !self.korean_font && korean_needed {
+            self.korean_font = true;
+            install_fallback_fonts(&ctx, true);
+        }
+        self.poll_mime();
+        self.removal_frame_start(&ctx);
+        self.table_frame_start(&ctx);
+        self.esc_cancels_scan(&ctx);
+        // While scanning, redraw 10 times a second, as often as the live tree
+        // is read; 4 times with a screen reader, whose updates take CPU from
+        // the scan. At once while messages are waiting.
+        if scan_backlog || !self.mime_inflight.is_empty() {
+            ctx.request_repaint();
+        } else if self.scanning {
+            let screen_reader = ctx
+                .accesskit_node_builder(egui::accesskit_root_id(), |_| ())
+                .is_some();
+            let every = if screen_reader { 250 } else { 100 };
+            ctx.request_repaint_after(std::time::Duration::from_millis(every));
+        }
+
+        self.toolbar_ui(ui);
+        self.filter_panel_ui(ui);
+        self.settings_panel_ui(ui);
+        self.log_panel_ui(ui);
+        let area = self.main_area_ui(ui);
+        let chart_shown = !self.summary_view && (self.root.is_some() || self.scanning);
+        if chart_shown {
+            self.chart_order_buttons(&ctx, area);
+        }
+        if chart_shown && !self.scanning {
+            self.chart_stats_overlay(&ctx, area);
+        }
+        if chart_shown {
+            self.chart_legend_ui(&ctx, area);
+        }
+
+        self.save_config_if_changed(&ctx);
+        // The table also runs live during a scan (see live_table_ui).
+        if self.summary_view && (self.root.is_some() || self.scanning) {
+            self.table_keys(&ctx);
+            self.table_overlays(&ctx, area);
+        }
+        // Opened from the main menu in any view, or with "?" in the table.
+        if self.table.show_help {
+            // "?" closes it in any view (the table checks it with its own keys).
+            if !self.summary_view
+                && ctx.input(|i| {
+                    i.events
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::Text(t) if t == "?"))
+                })
+            {
+                self.table.show_help = false;
+            } else {
+                self.help_overlay(&ctx);
+            }
+        }
+        if self.show_about {
+            self.about_window(&ctx);
+        }
+        quit_on_ctrl_q(&ctx);
+        self.guard_quit(&ctx);
+        // Not while the right-click menu is open (Esc still closes it).
+        let menu_open = egui::Popup::is_any_open(&ctx);
+        if self.root.is_some()
+            && !self.scanning
+            && !self.summary_view
+            && !self.typing
+            && !self.delete_dialog_open()
+            && !menu_open
+            && !self.table.show_help
+            && !self.show_about
+            && !self.quit_asked
+        {
+            self.chart_keys(&ctx);
+        }
+        self.confirm_dialog(&ctx);
+        self.transfer_ui(&ctx);
+    }
+
+    /// During a scan, reads the live tree for the live chart and table:
+    /// every 100 ms as deep as the chart currently shows, and at once when
+    /// the depth, the smallest slice, the picked category or the measure
+    /// changes. (A picked extension applies when the scan finishes.)
+    fn read_live_tree(&mut self) {
         // The smallest slice the chart can draw, as a share of the circle.
         let min_angle = if self.settings.unlimited_slices {
             0.02
@@ -1266,211 +1352,136 @@ impl DiskScanApp {
         if !self.scanning && self.color_fade() >= 1.0 && !self.live_looks.is_empty() {
             self.live_looks = Default::default();
         }
-        // The Korean font: once a Korean name is found, or for a Korean UI.
-        let korean_needed = self.saw_hangul.load(std::sync::atomic::Ordering::Relaxed)
-            || current_lang_code() == "ko";
-        if !self.korean_font && korean_needed {
-            self.korean_font = true;
-            install_fallback_fonts(&ctx, true);
-        }
-        self.poll_mime();
-        self.removal_frame_start(&ctx);
-        self.table_frame_start(&ctx);
-        self.esc_cancels_scan(&ctx);
-        // While scanning, redraw 10 times a second, as often as the live tree
-        // is read; 4 times with a screen reader, whose updates take CPU from
-        // the scan. At once while messages are waiting.
-        if scan_backlog || !self.mime_inflight.is_empty() {
-            ctx.request_repaint();
-        } else if self.scanning {
-            let screen_reader = ctx
-                .accesskit_node_builder(egui::accesskit_root_id(), |_| ())
-                .is_some();
-            let every = if screen_reader { 250 } else { 100 };
-            ctx.request_repaint_after(std::time::Duration::from_millis(every));
-        }
+    }
 
-        self.toolbar_ui(ui);
-        self.filter_panel_ui(ui);
-        self.settings_panel_ui(ui);
-        self.log_panel_ui(ui);
-        let area = self.main_area_ui(ui);
-        if !self.summary_view && (self.root.is_some() || self.scanning) {
-            self.chart_order_buttons(&ctx, area);
-        }
-
-        // Chart view, after a scan: stats of the highlighted slice (else the
-        // folder viewed) in the top-left corner.
-        if !self.scanning
-            && !self.summary_view
-            && let Some(root) = &self.root
-        {
-            let view_node = self.current_view_node(root);
-            let selected = self
-                .selected_rel()
-                .and_then(|rel| try_get_node(view_node, rel));
-            egui::Area::new("folder_stats_overlay".into())
-                .order(egui::Order::Foreground)
-                .interactable(false)
-                .fixed_pos(area.left_top() + Vec2::new(8.0, 8.0))
-                .show(&ctx, |ui| {
-                    let n = selected.unwrap_or(view_node);
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                    ui.strong(short_path(&n.path()));
-                    folder_stats_ui(ui, n);
-                });
-        }
-
-        // Chart view: the categories in the category bar's order, bottom
-        // left. While scanning, those found so far, re-sorted as totals
-        // grow; each row glides to its new place.
-        if !self.summary_view && (self.scanning || self.root.is_some()) {
-            let rows: Vec<Category> = if self.scanning {
-                self.live_looks.order()
-            } else {
-                let root = self.root.clone().expect("checked above");
-                self.refresh_cat_breakdown(self.current_view_node(&root));
-                self.cat_breakdown.iter().map(|r| r.cat).collect()
-            };
-            let dark = ctx.global_style().visuals.dark_mode;
-            egui::Area::new("category_legend".into())
-                .order(egui::Order::Foreground)
-                .interactable(false)
-                .pivot(egui::Align2::LEFT_BOTTOM)
-                .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
-                .show(&ctx, |ui| {
-                    let font = egui::TextStyle::Small.resolve(ui.style());
-                    let text_color = ui.visuals().text_color();
-                    let labels: Vec<_> = rows
-                        .iter()
-                        .map(|&c| {
-                            ui.painter().layout_no_wrap(
-                                self.cats.label(c),
-                                font.clone(),
-                                text_color,
-                            )
-                        })
-                        .collect();
-                    const SWATCH: f32 = 10.0;
-                    let gap = ui.spacing().item_spacing.x;
-                    let row_h = font.size.max(SWATCH) + ui.spacing().item_spacing.y + 4.0;
-                    let width =
-                        labels.iter().map(|g| g.size().x).fold(0.0, f32::max) + SWATCH + gap;
-                    let (rect, _) = ui.allocate_exact_size(
-                        Vec2::new(width, row_h * rows.len() as f32),
-                        egui::Sense::hover(),
-                    );
-                    for (i, (&cat, label)) in rows.iter().zip(labels).enumerate() {
-                        // Glides to row `i` when the order changes.
-                        let y = ui.ctx().animate_value_with_time(
-                            egui::Id::new(("legend_row", cat.0)),
-                            i as f32 * row_h,
-                            0.25,
-                        );
-                        let top = rect.top() + y;
-                        let mid = top + row_h / 2.0;
-                        let swatch = egui::Rect::from_center_size(
-                            Pos2::new(rect.left() + SWATCH / 2.0, mid),
-                            Vec2::splat(SWATCH),
-                        );
-                        ui.painter()
-                            .rect_filled(swatch, 2.0, self.cats.color(cat, dark));
-                        let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
-                        ui.painter().galley(at, label, text_color);
-                    }
-                });
-        }
-
-        // Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
-        // Esc clears, D / T delete or trash, r rescans. The table's keys are in
-        // table.rs.
-        self.save_config_if_changed(&ctx);
-        // The table also runs live during a scan (see live_table_ui).
-        if self.summary_view && (self.root.is_some() || self.scanning) {
-            self.table_keys(&ctx);
-            self.table_overlays(&ctx, area);
-        }
-        // Opened from the main menu in any view, or with "?" in the table.
-        if self.table.show_help {
-            // "?" closes it in any view (the table checks it with its own keys).
-            if !self.summary_view
-                && ctx.input(|i| {
-                    i.events
-                        .iter()
-                        .any(|e| matches!(e, egui::Event::Text(t) if t == "?"))
-                })
-            {
-                self.table.show_help = false;
-            } else {
-                self.help_overlay(&ctx);
-            }
-        }
-        if self.show_about {
-            self.about_window(&ctx);
-        }
-        quit_on_ctrl_q(&ctx);
-        self.guard_quit(&ctx);
-        // Not while the right-click menu is open (Esc still closes it).
-        let menu_open = egui::Popup::is_any_open(&ctx);
-        if self.root.is_some()
-            && !self.scanning
-            && !self.summary_view
-            && !self.typing
-            && !self.delete_dialog_open()
-            && !menu_open
-            && !self.table.show_help
-            && !self.show_about
-            && !self.quit_asked
-        {
-            if let Some(d) = ctx.input(arrow_nav) {
-                self.move_selection(d);
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Backspace)) {
-                self.chart_parent_folder();
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                self.open_selection();
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.selection = None;
-            }
-            let typed = ctx.input(|i| {
-                let plain = !i.modifiers.command && !i.modifiers.alt;
-                i.events
-                    .iter()
-                    .filter_map(|e| match e {
-                        egui::Event::Text(t) if plain => Some(t.clone()),
-                        _ => None,
-                    })
-                    .collect::<String>()
+    /// Chart view, after a scan: stats of the highlighted slice (else the
+    /// folder viewed) in the top-left corner of `area`.
+    fn chart_stats_overlay(&self, ctx: &egui::Context, area: egui::Rect) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        let view_node = self.current_view_node(root);
+        let selected = self
+            .selected_rel()
+            .and_then(|rel| try_get_node(view_node, rel));
+        egui::Area::new("folder_stats_overlay".into())
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .fixed_pos(area.left_top() + Vec2::new(8.0, 8.0))
+            .show(ctx, |ui| {
+                let n = selected.unwrap_or(view_node);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                ui.strong(short_path(&n.path()));
+                folder_stats_ui(ui, n);
             });
-            if typed.contains('r') {
-                self.rescan_current();
-            }
-            // Ctrl+C / Ctrl+X take the selected slice; Ctrl+V pastes into the
-            // folder shown.
-            let (copy, cut, paste) = self.clipboard_events(&ctx);
-            if let Some(target) = self.selected_slice_path().filter(|_| copy || cut) {
-                let mode = if cut { ClipMode::Move } else { ClipMode::Copy };
-                self.clip(&ctx, vec![target], mode);
-            }
-            if let (Some(text), Some(root)) = (paste, self.root.clone()) {
-                let dest = self.current_view_node(&root).path();
-                self.paste_into(dest, &text);
-            }
-            if (typed.contains('D') || typed.contains('T'))
-                && let Some(target) = self.selected_slice_path()
-            {
-                if typed.contains('D') {
-                    self.ask_delete(vec![target]);
-                } else {
-                    self.queue_trash(vec![target]);
-                    ctx.request_repaint();
+    }
+
+    /// Chart view: the categories in the category bar's order, bottom left
+    /// of `area`. While scanning, those found so far, re-sorted as totals
+    /// grow; each row glides to its new place.
+    fn chart_legend_ui(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        let rows: Vec<Category> = if self.scanning {
+            self.live_looks.order()
+        } else {
+            let root = self.root.clone().expect("checked above");
+            self.refresh_cat_breakdown(self.current_view_node(&root));
+            self.cat_breakdown.iter().map(|r| r.cat).collect()
+        };
+        let dark = ctx.global_style().visuals.dark_mode;
+        egui::Area::new("category_legend".into())
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
+            .show(ctx, |ui| {
+                let font = egui::TextStyle::Small.resolve(ui.style());
+                let text_color = ui.visuals().text_color();
+                let labels: Vec<_> = rows
+                    .iter()
+                    .map(|&c| {
+                        ui.painter()
+                            .layout_no_wrap(self.cats.label(c), font.clone(), text_color)
+                    })
+                    .collect();
+                const SWATCH: f32 = 10.0;
+                let gap = ui.spacing().item_spacing.x;
+                let row_h = font.size.max(SWATCH) + ui.spacing().item_spacing.y + 4.0;
+                let width = labels.iter().map(|g| g.size().x).fold(0.0, f32::max) + SWATCH + gap;
+                let (rect, _) = ui.allocate_exact_size(
+                    Vec2::new(width, row_h * rows.len() as f32),
+                    egui::Sense::hover(),
+                );
+                for (i, (&cat, label)) in rows.iter().zip(labels).enumerate() {
+                    // Glides to row `i` when the order changes.
+                    let y = ui.ctx().animate_value_with_time(
+                        egui::Id::new(("legend_row", cat.0)),
+                        i as f32 * row_h,
+                        0.25,
+                    );
+                    let top = rect.top() + y;
+                    let mid = top + row_h / 2.0;
+                    let swatch = egui::Rect::from_center_size(
+                        Pos2::new(rect.left() + SWATCH / 2.0, mid),
+                        Vec2::splat(SWATCH),
+                    );
+                    ui.painter()
+                        .rect_filled(swatch, 2.0, self.cats.color(cat, dark));
+                    let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
+                    ui.painter().galley(at, label, text_color);
                 }
+            });
+    }
+
+    /// Chart keys: arrows move the highlight, Backspace goes up, Enter opens,
+    /// Esc clears, D / T delete or trash, r rescans, Ctrl+C / X / V copy,
+    /// cut and paste. The table's keys are in table.rs.
+    fn chart_keys(&mut self, ctx: &egui::Context) {
+        if let Some(d) = ctx.input(arrow_nav) {
+            self.move_selection(d);
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Backspace)) {
+            self.chart_parent_folder();
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            self.open_selection();
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.selection = None;
+        }
+        let typed = ctx.input(|i| {
+            let plain = !i.modifiers.command && !i.modifiers.alt;
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::Text(t) if plain => Some(t.clone()),
+                    _ => None,
+                })
+                .collect::<String>()
+        });
+        if typed.contains('r') {
+            self.rescan_current();
+        }
+        // Ctrl+C / Ctrl+X take the selected slice; Ctrl+V pastes into the
+        // folder shown.
+        let (copy, cut, paste) = self.clipboard_events(ctx);
+        if let Some(target) = self.selected_slice_path().filter(|_| copy || cut) {
+            let mode = if cut { ClipMode::Move } else { ClipMode::Copy };
+            self.clip(ctx, vec![target], mode);
+        }
+        if let (Some(text), Some(root)) = (paste, self.root.clone()) {
+            let dest = self.current_view_node(&root).path();
+            self.paste_into(dest, &text);
+        }
+        if (typed.contains('D') || typed.contains('T'))
+            && let Some(target) = self.selected_slice_path()
+        {
+            if typed.contains('D') {
+                self.ask_delete(vec![target]);
+            } else {
+                self.queue_trash(vec![target]);
+                ctx.request_repaint();
             }
         }
-        self.confirm_dialog(&ctx);
-        self.transfer_ui(&ctx);
     }
 }
 
