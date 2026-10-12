@@ -1609,6 +1609,19 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([1100.0, 800.0])
             .with_title("SpaceScan")
             .with_app_id("spacescan"),
+        // The graphics device is asked for the limits it has; egui's fixed
+        // set is more than some software renderers offer.
+        wgpu_options: eframe::WgpuConfiguration {
+            wgpu_setup: eframe::egui_wgpu::WgpuSetupCreateNew {
+                device_descriptor: Arc::new(|adapter| eframe::wgpu::DeviceDescriptor {
+                    required_limits: adapter.limits(),
+                    ..Default::default()
+                }),
+                ..eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle()
+            }
+            .into(),
+            ..Default::default()
+        },
         ..Default::default()
     };
     eframe::run_native(
