@@ -103,14 +103,16 @@ newer `.deb` the same way; to remove it, run `sudo apt remove spacescan`.
 
 ### Arch Linux
 
-SpaceScan is in the [AUR](https://aur.archlinux.org/packages/spacescan).
-Install it with your AUR helper, for example `yay -S spacescan`, or by hand:
+Build and install the package with the PKGBUILD in this repository:
 
 ```sh
-git clone https://aur.archlinux.org/spacescan.git
-cd spacescan
+git clone https://github.com/a-kurczyn/spacescan.git
+cd spacescan/packaging/aur
 makepkg -si
 ```
+
+It builds the latest release from its source and installs it with
+pacman; `sudo pacman -Rns spacescan` removes it.
 
 ### AppImage (any distribution)
 
