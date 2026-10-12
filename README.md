@@ -88,6 +88,30 @@ sudo dnf install spacescan
 It appears in the application menu under Utilities. To remove it, run
 `sudo dnf remove spacescan`.
 
+### Debian and Ubuntu
+
+Download the `.deb` file from the latest
+[release](https://github.com/a-kurczyn/spacescan/releases/latest) and
+install it (Debian 10, Ubuntu 20.04 or newer):
+
+```sh
+sudo apt install ./spacescan_*_amd64.deb
+```
+
+It appears in the application menu under Utilities. To update, install the
+newer `.deb` the same way; to remove it, run `sudo apt remove spacescan`.
+
+### Arch Linux
+
+SpaceScan is in the [AUR](https://aur.archlinux.org/packages/spacescan).
+Install it with your AUR helper, for example `yay -S spacescan`, or by hand:
+
+```sh
+git clone https://aur.archlinux.org/spacescan.git
+cd spacescan
+makepkg -si
+```
+
 ### AppImage (any distribution)
 
 Download `SpaceScan-x86_64.AppImage` from the
