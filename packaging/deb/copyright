@@ -1,0 +1,24 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: SpaceScan
+Upstream-Contact: https://github.com/a-kurczyn/spacescan/issues
+Source: https://github.com/a-kurczyn/spacescan
+
+Files: *
+Copyright: 2026 Alejandro Kurczyn
+License: GPL-3.0-only
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, version 3 of the License only.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".
+Comment:
+ The program is built with Rust libraries under MIT, Apache-2.0,
+ BSD-2-Clause, BSD-3-Clause, BSL-1.0, ISC, Zlib, Unicode-3.0, OFL-1.1
+ and Ubuntu-font-1.0 licenses. Their notices are in
+ /usr/share/doc/spacescan/THIRD-PARTY-LICENSES.html.
