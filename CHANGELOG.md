@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 (2026-10-11)
+
+### Fixed
+- About › Third-party licenses opens the notices installed with the
+  Fedora package; without them, it opens the page for this version
+  instead of the latest one.
+- The Fedora package installs the icon in all common sizes, and the
+  screenshots its README shows. The app-store screenshots fit the
+  AppStream size limits.
+
 ## 1.1.0 (2026-10-11)
 
 ### New
@@ -23,6 +33,9 @@
 ### Fixed
 - The chart no longer shows a slice's details under an open dialog, menu
   or the legend.
+- The AppImage includes the license notices of the libraries it's built
+  with (About › Third-party licenses), and starts on systems that have
+  only FUSE 3, such as Ubuntu 22.04 and Debian 12 or newer.
 
 ## 1.0.0 (2026-10-06)
 

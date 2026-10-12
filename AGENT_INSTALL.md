@@ -29,12 +29,11 @@ how SpaceScan is updated.
 "$HOME/.local/bin/spacescan" --version
 ```
 
-This prints the version and opens no window. If it fails with a message
-about FUSE (`libfuse.so.2` missing), either install the distribution's
-FUSE 2 package (`fuse-libs` on Fedora, `libfuse2` or `libfuse2t64` on
-Debian and Ubuntu, `fuse2` on Arch) or add
-`APPIMAGE_EXTRACT_AND_RUN=1` in front of the command, and use
-`Exec=env APPIMAGE_EXTRACT_AND_RUN=1 ...` in step 4.
+This prints the version and opens no window. If it fails with "Cannot
+mount AppImage, please check your FUSE setup", the system has no FUSE
+tools: either install the distribution's `fuse3` package (`fuse` on
+older ones) or add `APPIMAGE_EXTRACT_AND_RUN=1` in front of the command,
+and use `Exec=env APPIMAGE_EXTRACT_AND_RUN=1 ...` in step 4.
 
 ## 3. Install the icon
 

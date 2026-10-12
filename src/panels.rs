@@ -87,8 +87,8 @@ fn third_party_licenses() -> String {
     licenses_in(appdir.into_iter().chain([PathBuf::from("/")]))
 }
 
-/// The licenses file under the first of `bases` that has it, else the
-/// project's page.
+/// The licenses file under the first of `bases` that has it, else its
+/// page for this version on the project's site.
 fn licenses_in(bases: impl IntoIterator<Item = PathBuf>) -> String {
     const FILE: &str = "usr/share/doc/spacescan/THIRD-PARTY-LICENSES.html";
     let installed = bases
@@ -97,7 +97,10 @@ fn licenses_in(bases: impl IntoIterator<Item = PathBuf>) -> String {
         .find(|p| p.is_file());
     match installed {
         Some(p) => p.display().to_string(),
-        None => format!("{WEBSITE_URL}/blob/main/THIRD-PARTY-LICENSES.html"),
+        None => format!(
+            "{WEBSITE_URL}/blob/v{}/THIRD-PARTY-LICENSES.html",
+            env!("CARGO_PKG_VERSION")
+        ),
     }
 }
 
@@ -3122,14 +3125,17 @@ mod about_tests {
     }
 
     /// The installed licenses file wins (the AppImage's before the
-    /// system's); with none, the project's page.
+    /// system's); with none, the page for this version.
     #[test]
     fn third_party_licenses_are_found() {
         let dir = std::env::temp_dir().join(format!("spacescan-about-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (app, system) = (dir.join("app"), dir.join("system"));
         let file = "usr/share/doc/spacescan/THIRD-PARTY-LICENSES.html";
-        let page = format!("{WEBSITE_URL}/blob/main/THIRD-PARTY-LICENSES.html");
+        let page = format!(
+            "{WEBSITE_URL}/blob/v{}/THIRD-PARTY-LICENSES.html",
+            env!("CARGO_PKG_VERSION")
+        );
         assert_eq!(licenses_in([app.clone(), system.clone()]), page);
         std::fs::create_dir_all(system.join(file).parent().unwrap()).unwrap();
         std::fs::write(system.join(file), "x").unwrap();

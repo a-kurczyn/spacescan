@@ -30,11 +30,11 @@
   <screenshots>
     <screenshot type="default">
       <caption>Sunburst chart of a folder</caption>
-      <image>https://raw.githubusercontent.com/a-kurczyn/spacescan/main/docs/screenshot.png</image>
+      <image>https://raw.githubusercontent.com/a-kurczyn/spacescan/v1.1.1/packaging/screenshots/chart.png</image>
     </screenshot>
     <screenshot>
       <caption>Table view</caption>
-      <image>https://raw.githubusercontent.com/a-kurczyn/spacescan/main/docs/table.png</image>
+      <image>https://raw.githubusercontent.com/a-kurczyn/spacescan/v1.1.1/packaging/screenshots/table.png</image>
     </screenshot>
   </screenshots>
   <categories>
@@ -42,6 +42,11 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.1.1" date="2026-10-11">
+      <description>
+        <p>Packaging fixes: icons in all common sizes, and the library licenses installed with the app.</p>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-10-11">
       <description>
         <p>Pick chart categories by clicking the legend, start the app with --category and --filter, and trash many files quickly even with network drives mounted.</p>
