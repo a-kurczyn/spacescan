@@ -103,6 +103,9 @@ To add it to the application menu (under Utilities), follow
 [AGENT_INSTALL.md](AGENT_INSTALL.md); its steps also work for an AI agent
 installing SpaceScan for you.
 
+On systems without FUSE, run it with
+`APPIMAGE_EXTRACT_AND_RUN=1 ./SpaceScan-x86_64.AppImage`.
+
 It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
 release is built from the tagged source in this repository.
 
