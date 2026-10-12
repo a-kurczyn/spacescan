@@ -31,6 +31,7 @@ fn run(args: &[&str], closed: bool) -> Output {
         0,
         "home stays empty"
     );
+    std::fs::remove_dir(&home).unwrap();
     out
 }
 

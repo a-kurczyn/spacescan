@@ -1793,8 +1793,10 @@ mod tests {
                 ]
             )
         );
-        let _ = std::fs::remove_dir_all(&src_root);
-        let _ = std::fs::remove_dir_all(&d);
+        // The copy kept the folder's read-only permissions.
+        std::fs::set_permissions(d.join("m/ro"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_dir_all(&src_root).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     /// A merge into a folder with a read-only part: what can't go there
