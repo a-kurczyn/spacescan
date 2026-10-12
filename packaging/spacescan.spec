@@ -1,5 +1,5 @@
 Name:           spacescan
-Version:        1.1.1
+Version:        1.1.2
 Release:        1%{?dist}
 Summary:        Disk-usage explorer with a sunburst chart, a keyboard-driven table and reports
 
@@ -56,11 +56,13 @@ writes text, CSV and JSON reports from the command line.
 
 %install
 install -Dpm 0755 target/rpm/%{name} %{buildroot}%{_bindir}/%{name}
+%{_mandir}/man1/%{name}.1*
 install -Dpm 0644 packaging/%{name}.desktop %{buildroot}%{_datadir}/applications/%{name}.desktop
 for size in 16 24 32 48 64 128 256; do
   install -Dpm 0644 packaging/icons/${size}x${size}/%{name}.png \
     %{buildroot}%{_datadir}/icons/hicolor/${size}x${size}/apps/%{name}.png
 done
+install -Dpm 0644 packaging/%{name}.1 %{buildroot}%{_mandir}/man1/%{name}.1
 install -Dpm 0644 packaging/io.github.a_kurczyn.%{name}.metainfo.xml %{buildroot}%{_metainfodir}/io.github.a_kurczyn.%{name}.metainfo.xml
 
 %check
@@ -74,11 +76,16 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.a_ku
 # the screenshots README.md shows.
 %doc README.md CHANGELOG.md THIRD-PARTY-LICENSES.html docs
 %{_bindir}/%{name}
+%{_mandir}/man1/%{name}.1*
 %{_datadir}/applications/%{name}.desktop
 %{_datadir}/icons/hicolor/*/apps/%{name}.png
 %{_metainfodir}/io.github.a_kurczyn.%{name}.metainfo.xml
 
 %changelog
+* Sun Oct 11 2026 Alejandro Kurczyn <335237751+a-kurczyn@users.noreply.github.com> - 1.1.2-1
+- The window opens on software renderers with fewer capabilities
+- Manual page
+
 * Sun Oct 11 2026 Alejandro Kurczyn <335237751+a-kurczyn@users.noreply.github.com> - 1.1.1-1
 - Icons in all common sizes; library licenses and README screenshots installed
 

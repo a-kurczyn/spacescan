@@ -108,11 +108,12 @@ Build and install the package with the PKGBUILD in this repository:
 ```sh
 git clone https://github.com/a-kurczyn/spacescan.git
 cd spacescan/packaging/aur
-makepkg -si
+makepkg -sri
 ```
 
-It builds the latest release from its source and installs it with
-pacman; `sudo pacman -Rns spacescan` removes it.
+It builds the latest release from its tagged source and installs it with
+pacman (`-r` removes the tools needed only for building);
+`sudo pacman -Rns spacescan` removes it.
 
 ### AppImage (any distribution)
 

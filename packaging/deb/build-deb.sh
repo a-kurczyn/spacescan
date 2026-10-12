@@ -24,6 +24,9 @@ for size in 16 24 32 48 64 128 256; do
 done
 install -Dm644 "$src/packaging/io.github.a_kurczyn.spacescan.metainfo.xml" \
     "$root/usr/share/metainfo/io.github.a_kurczyn.spacescan.metainfo.xml"
+mkdir -p "$root/usr/share/man/man1"
+gzip -9n < "$src/packaging/spacescan.1" > "$root/usr/share/man/man1/spacescan.1.gz"
+install -Dm644 "$src/packaging/deb/lintian-overrides" "$root/usr/share/lintian/overrides/spacescan"
 
 doc="$root/usr/share/doc/spacescan"
 install -Dm644 "$src/packaging/deb/copyright" "$doc/copyright"

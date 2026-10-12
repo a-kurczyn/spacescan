@@ -1,0 +1,150 @@
+.TH SPACESCAN 1 "2026-10-11" "SpaceScan 1.1.2" "User Commands"
+.SH NAME
+spacescan \- see what takes the space on your disks
+.SH SYNOPSIS
+.B spacescan
+.RI [ "APP OPTIONS" ]
+.RI [ PATH ]
+.br
+.B spacescan
+.I COMMAND PATH
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B SpaceScan
+scans a drive, mount point or folder and shows where the space went, as an
+interactive sunburst chart or as a table driven from the keyboard. Files
+are grouped by category (video, audio, images, code and others), with
+filters by name, size and date. Files can be moved to the trash, deleted,
+copied and moved; anything that is or contains a mounted filesystem is
+never deleted.
+.PP
+Without a
+.IR COMMAND ,
+.B spacescan
+opens its window, and scans
+.I PATH
+right away when one is given. With a
+.IR COMMAND ,
+it writes a report of
+.I PATH
+to standard output and opens no window.
+.SH APP OPTIONS
+.TP
+.BI \-\-category " NAME,NAME"
+Show only these categories' files. Names are as the app shows them in its
+language, in any case.
+.TP
+.BI \-\-filter " TEXT"
+Start with this name filter, as typed in the app's Filters window, for
+example
+.BR "*.log,*.tmp" .
+.SH COMMANDS
+.TP
+.B list
+The folders and files directly in
+.IR PATH ,
+with their totals.
+.TP
+.B flat
+Every file under
+.IR PATH ,
+in all its subfolders.
+.TP
+.B exts
+File extensions under
+.IR PATH ,
+with their sizes and file counts.
+.SH OPTIONS
+.TP
+.BR \-\-format " txt|csv|json"
+Output format (default: txt).
+.TP
+.BR \-\-sort " size|files|name|modified|changed"
+Order of
+.B list
+and
+.B flat
+(default: size;
+.B files
+applies to
+.B list
+only).
+.TP
+.BR \-\-by " bytes|files"
+Order of
+.B exts
+(default: bytes).
+.TP
+.B \-\-reverse
+Reverse the order.
+.TP
+.BI \-\-limit " N"
+.BR flat :
+only the first
+.I N
+files.
+.TP
+.B \-\-apparent\-size
+Count file lengths instead of disk space used.
+.TP
+.BI \-\-filter " TEXT"
+Only files whose names match, as in the app's Filters window; folders count
+only those files.
+.TP
+.BR \-h ", " \-\-help
+Show the help.
+.TP
+.BR \-V ", " \-\-version
+Show the version.
+.PP
+Sizes in CSV and JSON are in bytes; times are local, as
+YYYY\-MM\-DDTHH:MM:SS\(+-HH:MM. Names that aren't valid UTF\-8 are shown
+escaped, as in the app (\exFF).
+.SH EXIT STATUS
+.TP
+.B 0
+Success. Unreadable subfolders are reported on standard error but don't
+fail the run.
+.TP
+.B 1
+The folder can't be read, or standard output is closed.
+.TP
+.B 2
+A mistake on the command line.
+.SH FILES
+.TP
+.I ~/.config/spacescan/settings.json
+Settings, saved from the app's Settings window.
+.TP
+.I ~/.config/spacescan/categories.json
+File categories and their extensions, written with the defaults on first
+start and read again at every scan.
+.TP
+.I ~/.config/spacescan/lang/
+Language files that add a language or change lines of a built-in one.
+.SH EXAMPLES
+The 20 biggest files in the Downloads folder:
+.PP
+.RS
+.B spacescan flat ~/Downloads \-\-limit 20
+.RE
+.PP
+A spreadsheet of what's in the home folder:
+.PP
+.RS
+.B spacescan list ~ \-\-format csv > home.csv
+.RE
+.PP
+The app, showing only the videos in the home folder:
+.PP
+.RS
+.B spacescan \-\-category video ~
+.RE
+.SH BUGS
+Report bugs at https://github.com/a\-kurczyn/spacescan/issues
+.SH AUTHOR
+Alejandro Kurczyn
+.SH COPYRIGHT
+Copyright \(co 2026 Alejandro Kurczyn. License GPL\-3.0\-only: GNU GPL
+version 3 only. This is free software: you are free to change and
+redistribute it. There is NO WARRANTY, to the extent permitted by law.

@@ -1,0 +1,4 @@
+# Built for the project's own releases, not uploaded to Debian.
+spacescan: initial-upload-closes-no-bugs
+# README.md links to the changelog by this name.
+spacescan: wrong-name-for-upstream-changelog [usr/share/doc/spacescan/CHANGELOG.md]

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.2 (2026-10-11)
+
+### New
+- **Debian and Ubuntu package** (`.deb`, Debian 10 and Ubuntu 20.04 or
+  newer), attached to each release.
+- **Arch Linux package file** (PKGBUILD) in `packaging/aur`, to build and
+  install with `makepkg`.
+- **Manual page** (`man spacescan`) in the Fedora, Debian/Ubuntu and Arch
+  packages.
+
+### Fixed
+- The window opens on computers whose graphics driver offers fewer
+  capabilities, such as virtual machines without 3D acceleration; it used
+  to stop at start with a graphics error.
+
 ## 1.1.1 (2026-10-11)
 
 ### Fixed
