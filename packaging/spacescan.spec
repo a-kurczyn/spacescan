@@ -56,7 +56,6 @@ writes text, CSV and JSON reports from the command line.
 
 %install
 install -Dpm 0755 target/rpm/%{name} %{buildroot}%{_bindir}/%{name}
-%{_mandir}/man1/%{name}.1*
 install -Dpm 0644 packaging/%{name}.desktop %{buildroot}%{_datadir}/applications/%{name}.desktop
 for size in 16 24 32 48 64 128 256; do
   install -Dpm 0644 packaging/icons/${size}x${size}/%{name}.png \
