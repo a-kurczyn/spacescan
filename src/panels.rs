@@ -2139,7 +2139,7 @@ impl DiskScanApp {
     /// or A–Z ("A"), the active one highlighted.
     pub(crate) fn chart_order_buttons(&mut self, ctx: &egui::Context, area: egui::Rect) {
         let mut clear_category = false;
-        egui::Area::new("chart_order".into())
+        let shown = egui::Area::new("chart_order".into())
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::RIGHT_TOP)
             .fixed_pos(area.right_top() + Vec2::new(-8.0, 8.0))
@@ -2170,6 +2170,8 @@ impl DiskScanApp {
                     }
                 });
             });
+        // Where the top-left path line has to stop.
+        ctx.data_mut(|d| d.insert_temp(chart_order_left_id(), shown.response.rect.left()));
         if clear_category {
             self.pick = None;
             self.repick();
@@ -2442,6 +2444,20 @@ fn path_crumbs(path: &Path) -> Vec<Option<(String, PathBuf)>> {
 fn path_crumbs_ui(ui: &mut egui::Ui, crumbs: Vec<Option<(String, PathBuf)>>) -> Option<PathBuf> {
     let mut clicked = None;
     let edit_w = 28.0;
+    let max_w = (ui.available_width() - edit_w).max(0.0);
+    // The plain wheel scrolls the folders sideways, as Shift+wheel does.
+    let bar = egui::Rect::from_min_size(
+        ui.next_widget_position(),
+        Vec2::new(max_w, ui.spacing().interact_size.y),
+    );
+    if ui.rect_contains_pointer(bar) {
+        ui.input_mut(|i| {
+            if i.smooth_scroll_delta.x == 0.0 {
+                i.smooth_scroll_delta.x = i.smooth_scroll_delta.y;
+                i.smooth_scroll_delta.y = 0.0;
+            }
+        });
+    }
     egui::ScrollArea::horizontal()
         .id_salt("path_crumbs")
         // A bar over the folders would cover them; the wheel still scrolls.
@@ -2449,7 +2465,7 @@ fn path_crumbs_ui(ui: &mut egui::Ui, crumbs: Vec<Option<(String, PathBuf)>>) -> 
         // Full width, so ✏ sits at the far right.
         .auto_shrink([false, true])
         .stick_to_right(true)
-        .max_width((ui.available_width() - edit_w).max(0.0))
+        .max_width(max_w)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
@@ -3151,4 +3167,9 @@ mod about_tests {
         assert_eq!(both(), app.join(file).display().to_string());
         std::fs::remove_dir_all(&dir).unwrap();
     }
+}
+
+/// Memory key for the left edge of the chart order buttons.
+pub(crate) fn chart_order_left_id() -> egui::Id {
+    egui::Id::new("chart_order_left")
 }

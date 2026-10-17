@@ -13,7 +13,11 @@
   that library and uses it only when the system has none.
 - **Path bar in a narrow window**: a long path no longer shows a
   scrollbar over the folders; the deepest folder stays in view and the
-  mouse wheel still scrolls.
+  mouse wheel still scrolls (the plain wheel too, not only Shift+wheel).
+- **Narrow windows**: the window can't be made narrower than 460 px, where
+  the toolbar's buttons and the path bar overlapped. In the chart view the
+  top-left path line stops before the sort buttons instead of running under
+  them.
 
 ## 1.1.2 (2026-10-11)
 

@@ -1368,7 +1368,12 @@ impl DiskScanApp {
             .fixed_pos(area.left_top() + Vec2::new(8.0, 8.0))
             .show(ctx, |ui| {
                 let n = selected.unwrap_or(view_node);
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                // Stops short of the chart order buttons at the top right.
+                let right = ctx
+                    .data(|d| d.get_temp::<f32>(panels::chart_order_left_id()))
+                    .unwrap_or(area.right() - 90.0);
+                ui.set_max_width((right - 8.0 - area.left() - 8.0).max(40.0));
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.strong(short_path(&n.path()));
                 folder_stats_ui(ui, n);
             });
@@ -1607,6 +1612,8 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 800.0])
+            // Narrower, the toolbar's buttons and the path bar overlap.
+            .with_min_inner_size([460.0, 300.0])
             .with_title("SpaceScan")
             .with_app_id("spacescan"),
         // The graphics device is asked for the limits it has; egui's fixed
