@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Scan with SpaceScan
+Comment=See what takes the space in %f
+Exec=spacescan %F
+Icon-Name=spacescan
+Selection=s
+Extensions=dir;

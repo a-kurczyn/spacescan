@@ -148,6 +148,60 @@ This builds an optimized binary and installs it to `~/.cargo/bin/spacescan`.
 To build without installing, run `cargo build --release`; the binary is
 `target/release/spacescan`.
 
+## Scan from the file manager
+
+You can add **Scan with SpaceScan** to the right-click menu of folders (and
+mounted drives) in your file manager. It is optional and not installed by
+default. The files are in
+[`packaging/filemanagers`](packaging/filemanagers); the Fedora,
+Debian/Ubuntu and Arch packages put copies in
+`/usr/share/doc/spacescan/filemanagers/`. The examples assume `spacescan` is
+on your `PATH`; with the AppImage, write its full path instead (e.g.
+`/home/you/Apps/SpaceScan-x86_64.AppImage`). To remove an entry, delete the
+file you added.
+
+**Dolphin (KDE)**: save as
+`~/.local/share/kio/servicemenus/spacescan-servicemenu.desktop`, make it
+executable (`chmod +x`) and restart Dolphin:
+
+```ini
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+Actions=scan;
+X-KDE-Priority=TopLevel
+
+[Desktop Action scan]
+Name=Scan with SpaceScan
+Icon=spacescan
+Exec=spacescan %f
+```
+
+**Nemo (Cinnamon)**: save as `~/.local/share/nemo/actions/spacescan.nemo_action`:
+
+```ini
+[Nemo Action]
+Name=Scan with SpaceScan
+Comment=See what takes the space in %f
+Exec=spacescan %F
+Icon-Name=spacescan
+Selection=s
+Extensions=dir;
+```
+
+**Nautilus (GNOME)**: save as `~/.local/share/nautilus/scripts/Scan with SpaceScan`
+and make it executable (`chmod +x`). It appears under Scripts in the
+right-click menu:
+
+```sh
+#!/bin/sh
+exec spacescan "$1"
+```
+
+**Thunar (Xfce)**: in Edit › Configure custom actions, add an action with
+the command `spacescan %f`, and under Appearance Conditions tick
+"Directories".
+
 ## Usage
 
 Start `spacescan`, or `spacescan PATH` to scan a folder right away (see

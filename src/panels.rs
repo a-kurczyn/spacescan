@@ -2444,6 +2444,8 @@ fn path_crumbs_ui(ui: &mut egui::Ui, crumbs: Vec<Option<(String, PathBuf)>>) -> 
     let edit_w = 28.0;
     egui::ScrollArea::horizontal()
         .id_salt("path_crumbs")
+        // A bar over the folders would cover them; the wheel still scrolls.
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         // Full width, so ✏ sits at the far right.
         .auto_shrink([false, true])
         .stick_to_right(true)

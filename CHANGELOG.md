@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.3 (2026-10-17)
+
+### New
+- **Right-click "Scan with SpaceScan"** for folders and drives in Dolphin,
+  Nemo, Nautilus and Thunar. It is optional and not installed by default;
+  the README tells how to add it.
+
+### Fixed
+- **AppImage on systems without `libxkbcommon-x11`** (minimal or
+  headless X setups) quit at start with a panic. The AppImage now carries
+  that library and uses it only when the system has none.
+- **Path bar in a narrow window**: a long path no longer shows a
+  scrollbar over the folders; the deepest folder stays in view and the
+  mouse wheel still scrolls.
+
 ## 1.1.2 (2026-10-11)
 
 ### New

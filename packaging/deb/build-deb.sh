@@ -31,7 +31,8 @@ install -Dm644 "$src/packaging/deb/lintian-overrides" "$root/usr/share/lintian/o
 doc="$root/usr/share/doc/spacescan"
 install -Dm644 "$src/packaging/deb/copyright" "$doc/copyright"
 install -m644 "$src/README.md" "$src/CHANGELOG.md" "$src/THIRD-PARTY-LICENSES.html" "$doc/"
-mkdir -p "$doc/docs"
+mkdir -p "$doc/docs" "$doc/filemanagers"
+install -m644 "$src"/packaging/filemanagers/* "$doc/filemanagers/"
 install -m644 "$src"/docs/*.png "$doc/docs/"
 printf '%s\n' \
     "spacescan ($version-$revision) unstable; urgency=medium" \

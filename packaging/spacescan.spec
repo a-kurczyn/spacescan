@@ -1,5 +1,5 @@
 Name:           spacescan
-Version:        1.1.2
+Version:        1.1.3
 Release:        1%{?dist}
 Summary:        Disk-usage explorer with a sunburst chart, a keyboard-driven table and reports
 
@@ -74,6 +74,8 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.a_ku
 # The About window opens THIRD-PARTY-LICENSES.html from here; docs/ holds
 # the screenshots README.md shows.
 %doc README.md CHANGELOG.md THIRD-PARTY-LICENSES.html docs
+# Optional right-click entries for file managers; the user copies them in.
+%doc packaging/filemanagers
 %{_bindir}/%{name}
 %{_mandir}/man1/%{name}.1*
 %{_datadir}/applications/%{name}.desktop
@@ -81,6 +83,11 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.a_ku
 %{_metainfodir}/io.github.a_kurczyn.%{name}.metainfo.xml
 
 %changelog
+* Sat Oct 17 2026 Alejandro Kurczyn <335237751+a-kurczyn@users.noreply.github.com> - 1.1.3-1
+- The AppImage starts on systems without libxkbcommon-x11
+- No scrollbar over the path bar in a narrow window
+- Optional right-click "Scan with SpaceScan" for file managers
+
 * Sun Oct 11 2026 Alejandro Kurczyn <335237751+a-kurczyn@users.noreply.github.com> - 1.1.2-1
 - The window opens on software renderers with fewer capabilities
 - Manual page

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+Actions=scan;
+X-KDE-Priority=TopLevel
+
+[Desktop Action scan]
+Name=Scan with SpaceScan
+Icon=spacescan
+Exec=spacescan %f

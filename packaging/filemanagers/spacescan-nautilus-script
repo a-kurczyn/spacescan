@@ -1,0 +1,3 @@
+#!/bin/sh
+# Nautilus script: scan the selected folder with SpaceScan.
+exec spacescan "$1"
