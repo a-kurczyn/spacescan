@@ -323,9 +323,11 @@ pub(crate) fn rect_poly(rect: egui::Rect) -> Poly {
 const MAX_CELLS: usize = 40;
 /// How many levels the map shows at once.
 const MAP_LEVELS: usize = 3;
-/// Smallest area (square points) an item's cell may have; smaller items
-/// share the "other" cell.
-const MIN_CELL_AREA: f32 = 160.0;
+/// Smallest area (square points) of a cell, so the smallest items can still
+/// be seen: they're drawn bigger than their share. Outer cells, which
+/// clicks open, get more, to be easy to hit.
+const MIN_CELL_AREA: f32 = 500.0;
+const MIN_OUTER_CELL_AREA: f32 = 2500.0;
 /// Smallest area of a folder's cell for the items inside to be shown.
 const MIN_SPLIT_AREA: f32 = 5000.0;
 /// The gap between a folder's cell and the cells inside it.
@@ -386,14 +388,23 @@ fn map_items(
     if total == 0 {
         return Vec::new();
     }
-    let share = |w: u64| area * (w as f64 / total as f64) as f32;
-    let shown = visible
-        .iter()
-        .take(MAX_CELLS)
-        .take_while(|(_, c)| share(weight(c)) >= MIN_CELL_AREA)
-        .count()
-        // With "other" taking a cell, one item alone isn't worth a split.
-        .max(visible.len().min(1));
+    // Every item gets a cell while they fit at their smallest size (taking
+    // at most half the area); beyond that, the last cell is "other".
+    let smallest = if depth == 0 {
+        MIN_OUTER_CELL_AREA
+    } else {
+        MIN_CELL_AREA
+    };
+    let cells = (MAX_CELLS as f32).min(area * 0.5 / smallest).max(1.0) as usize;
+    let shown = if visible.len() <= cells {
+        visible.len()
+    } else {
+        (cells - 1).max(1)
+    };
+    // Weights for laying out: none below the smallest cell's share.
+    let floor = total as f64 * f64::from(smallest / area);
+    let laid = |w: u64| (w as f64).max(floor);
+    let share = |w: u64| area * (laid(w) / total as f64) as f32;
     let mut items: Vec<MapItem> = visible[..shown]
         .iter()
         .map(|&(i, c)| {
@@ -420,7 +431,7 @@ fn map_items(
                     mode: Some(c.mode),
                     rest: Vec::new(),
                 },
-                weight: weight(c) as f64,
+                weight: laid(weight(c)),
                 key: c.name.clone(),
                 children,
             }
@@ -449,7 +460,7 @@ fn map_items(
                 mode: None,
                 rest: rest.iter().map(|(i, _)| *i).collect(),
             },
-            weight: rest.iter().map(|(_, c)| weight(c) as f64).sum(),
+            weight: laid(rest.iter().map(|(_, c)| weight(c)).sum()),
             key: OTHER_KEY.into(),
             children: Vec::new(),
         });
@@ -762,8 +773,9 @@ enum PadPress {
     Open,
 }
 
-/// The width of the strip left of the map.
-const STRIP_WIDTH: f32 = 190.0;
+/// The narrowest and widest the strip left of the map gets.
+const STRIP_MIN_WIDTH: f32 = 110.0;
+const STRIP_MAX_WIDTH: f32 = 360.0;
 
 impl DiskScanApp {
     /// The map view, `size` big: the strip on the left (the folder's
@@ -777,12 +789,14 @@ impl DiskScanApp {
         live: bool,
     ) {
         ui.horizontal_top(|ui| {
+            // As wide as its contents, within limits; the map takes the rest.
+            let widest = (size.x * 0.35).clamp(STRIP_MIN_WIDTH, STRIP_MAX_WIDTH);
             let pad = ui.allocate_ui_with_layout(
-                Vec2::new(STRIP_WIDTH, size.y),
+                Vec2::new(widest, size.y),
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
-                    ui.set_min_size(Vec2::new(STRIP_WIDTH, size.y));
-                    ui.set_max_width(STRIP_WIDTH);
+                    ui.set_min_size(Vec2::new(STRIP_MIN_WIDTH, size.y));
+                    ui.set_max_width(widest);
                     self.map_strip_ui(ui, live)
                 },
             );
@@ -821,7 +835,7 @@ impl DiskScanApp {
                         "MAP_IN_OTHER",
                         &[&format_count(items as u64), &depth.to_string()],
                     ))
-                    .wrap(),
+                    .truncate(),
                 );
             }
             folder_stats_ui(ui, n);
@@ -1459,9 +1473,10 @@ mod tests {
         }
     }
 
-    /// Items too small for a cell share "other", which knows which they
-    /// are; hidden and empty items get none; folders are split only a few
-    /// levels deep and only when there's room.
+    /// Every item gets a cell, however small, while they fit; past that,
+    /// the smallest share "other", which knows which they are. Hidden and
+    /// empty items get none; folders are split only a few levels deep and
+    /// only when there's room.
     #[test]
     fn items_get_cells_by_size() {
         let mut files: Vec<Node> = (0..60)
@@ -1491,17 +1506,25 @@ mod tests {
         let hidden: HashSet<PathBuf> = [PathBuf::from("/t/hidden")].into();
         let settings = Settings::default();
         let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0);
+        // 62 items: the 39 largest get cells, the other 23 share one.
         let names: Vec<&str> = tree.items.iter().map(|i| &*i.key).collect();
-        assert_eq!(names, ["big", "d1", OTHER_KEY]);
-        let other = &tree.items[2].seg;
-        assert!(other.is_other && other.rest.len() == 60);
+        assert_eq!(names.len(), MAX_CELLS);
+        assert_eq!(
+            (names[0], names[1], names[MAX_CELLS - 1]),
+            ("big", "d1", OTHER_KEY)
+        );
+        let other = &tree.items[MAX_CELLS - 1].seg;
+        assert!(other.is_other && other.rest.len() == 62 - (MAX_CELLS - 1));
+        // Even the smallest is laid out at the smallest cell size.
+        assert!(tree.items[MAX_CELLS - 2].weight > 10.0);
         assert_eq!(other.idx_path, [OTHER_MARKER]);
         // d1 → d2 → d3: three levels, the third not split.
         let d2 = &tree.items[1].children[0];
-        assert_eq!(d2.seg.idx_path, [60 + 3, 0]);
+        assert_eq!(d2.seg.idx_path, [63, 0]);
         assert!(d2.children.len() == 1 && d2.children[0].children.is_empty());
         // In a small area, folders aren't split at all.
         let tree = map_tree(&root, None, opts(&hidden, &settings), 3000.0);
+        assert_eq!(tree.items.len(), 2);
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
     }
 
@@ -1717,25 +1740,21 @@ mod tests {
         };
         let shown = |app: &DiskScanApp| app.map.last_picture.len();
         laid_out(&mut app);
-        assert_eq!(shown(&app), 2);
-        for (depth, cells) in [
-            (1, MAX_CELLS + 1),
-            (2, MAX_CELLS + 1),
-            (3, 100 - 2 * MAX_CELLS),
-        ] {
+        // 101 items: 39 and "other" (62), then 39 and "other" (23), then 23.
+        assert_eq!(shown(&app), MAX_CELLS);
+        for (depth, cells) in [(1, MAX_CELLS), (2, 23)] {
             assert!(app.map.open_top_other(&[]));
             laid_out(&mut app);
             assert_eq!(app.map.other_depth(&[]), depth);
             assert_eq!(shown(&app), cells, "level {depth}");
         }
-        assert!(!app.map.open_top_other(&[]) || shown(&app) == 0);
+        assert!(!app.map.open_top_other(&[]));
         app.chart_parent_folder();
         laid_out(&mut app);
-        assert_eq!(app.map.other_depth(&[]), 2);
-        app.chart_parent_folder();
+        assert_eq!(app.map.other_depth(&[]), 1);
         app.chart_parent_folder();
         laid_out(&mut app);
-        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, 2));
+        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, MAX_CELLS));
         assert_eq!(app.current_view(), &Vec::<usize>::new());
     }
 }
