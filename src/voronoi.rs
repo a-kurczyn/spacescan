@@ -323,9 +323,9 @@ pub(crate) fn rect_poly(rect: egui::Rect) -> Poly {
 const MAX_CELLS: usize = 40;
 /// How many levels the map shows at once.
 const MAP_LEVELS: usize = 3;
-/// Smallest area (square points) an item's cell may have; smaller items
-/// go into "other". Outer cells, which clicks open, must be bigger, to be
-/// easy to hit.
+/// Smallest area (square points) of a cell, so the smallest items can still
+/// be seen: they're drawn bigger than their share. Outer cells, which
+/// clicks open, get more, to be easy to hit.
 const MIN_CELL_AREA: f32 = 500.0;
 const MIN_OUTER_CELL_AREA: f32 = 2500.0;
 /// The area of an "other" cell: a fixed size, like a button to the next
@@ -392,39 +392,23 @@ fn map_items(
     if total == 0 {
         return Vec::new();
     }
-    // Cells are as big as their items' shares, except "other", a small
-    // cell of fixed size. The largest items get cells while the smallest
-    // of them is still big enough to see; the rest go into "other".
+    // Every item gets a cell while they fit at their smallest size (taking
+    // at most half the area); beyond that, the last cell is "other".
     let smallest = if depth == 0 {
         MIN_OUTER_CELL_AREA
     } else {
         MIN_CELL_AREA
     };
-    let reserve = other_area(area, depth);
-    let fits = |k: usize| {
-        let sum: u64 = visible[..k].iter().map(|(_, c)| weight(c)).sum();
-        let room = if k < visible.len() {
-            area - reserve
-        } else {
-            area
-        };
-        room * (weight(visible[k - 1].1) as f64 / sum as f64) as f32 >= smallest
-    };
-    let mut shown = if visible.len() <= MAX_CELLS {
+    let cells = (MAX_CELLS as f32).min(area * 0.5 / smallest).max(1.0) as usize;
+    let shown = if visible.len() <= cells {
         visible.len()
     } else {
-        MAX_CELLS - 1
+        (cells - 1).max(1)
     };
-    while shown > 1 && !fits(shown) {
-        shown -= 1;
-    }
-    let shown_total: u64 = visible[..shown].iter().map(|(_, c)| weight(c)).sum();
-    let room = if shown < visible.len() {
-        area - reserve
-    } else {
-        area
-    };
-    let share = |w: u64| room * (w as f64 / shown_total as f64) as f32;
+    // Weights for laying out: none below the smallest cell's share.
+    let floor = total as f64 * f64::from(smallest / area);
+    let laid = |w: u64| (w as f64).max(floor);
+    let share = |w: u64| area * (laid(w) / total as f64) as f32;
     let mut items: Vec<MapItem> = visible[..shown]
         .iter()
         .map(|&(i, c)| {
@@ -451,7 +435,7 @@ fn map_items(
                     mode: Some(c.mode),
                     rest: Vec::new(),
                 },
-                weight: weight(c) as f64,
+                weight: laid(weight(c)),
                 key: c.name.clone(),
                 children,
             }
@@ -491,19 +475,15 @@ fn map_items(
 /// Where an item is drawn: from its folder's key and its name.
 type PlaceOf<'a> = &'a dyn Fn(&[Box<str>], &str) -> Option<Place>;
 
-/// The fixed area of "other" in `area`: at most a quarter of it.
-fn other_area(area: f32, depth: usize) -> f32 {
+/// The weight that gives "other" its fixed area next to `items` in `area`
+/// (at most a quarter of it).
+fn other_weight(items: &[MapItem], area: f32, depth: usize) -> f64 {
     let wanted = if depth == 0 {
         OTHER_CELL_AREA
     } else {
         INNER_OTHER_CELL_AREA
     };
-    wanted.min(area / 4.0)
-}
-
-/// The weight that gives "other" its fixed area next to `items` in `area`.
-fn other_weight(items: &[MapItem], area: f32, depth: usize) -> f64 {
-    let other = f64::from(other_area(area, depth));
+    let other = f64::from(wanted.min(area / 4.0));
     let shown: f64 = items.iter().map(|i| i.weight).sum();
     shown * other / (f64::from(area) - other).max(1.0)
 }
@@ -1510,9 +1490,10 @@ mod tests {
         }
     }
 
-    /// Items too small to see at their true share go into "other", which
-    /// knows which they are; hidden and empty items get no cell; folders
-    /// are split only a few levels deep and only when there's room.
+    /// Every item gets a cell, however small, while they fit; past that,
+    /// the smallest share "other", which knows which they are. Hidden and
+    /// empty items get none; folders are split only a few levels deep and
+    /// only when there's room.
     #[test]
     fn items_get_cells_by_size() {
         let mut files: Vec<Node> = (0..60)
@@ -1542,12 +1523,18 @@ mod tests {
         let hidden: HashSet<PathBuf> = [PathBuf::from("/t/hidden")].into();
         let settings = Settings::default();
         let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0);
-        // The small files' true shares are too small to see: they're in
-        // "other", which knows which they are.
+        // 62 items: the 39 largest get cells, the other 23 share one.
         let names: Vec<&str> = tree.items.iter().map(|i| &*i.key).collect();
-        assert_eq!(names, ["big", "d1", OTHER_KEY]);
-        let other = &tree.items[2].seg;
-        assert!(other.is_other && other.rest.len() == 60);
+        assert_eq!(names.len(), MAX_CELLS);
+        assert_eq!(
+            (names[0], names[1], names[MAX_CELLS - 1]),
+            ("big", "d1", OTHER_KEY)
+        );
+        let other = &tree.items[MAX_CELLS - 1].seg;
+        assert!(other.is_other && other.rest.len() == 62 - (MAX_CELLS - 1));
+        // Even the smallest is laid out at the smallest cell size.
+        assert!(tree.items[MAX_CELLS - 2].weight > 10.0);
+        assert_eq!(other.idx_path, [OTHER_MARKER]);
         // d1 → d2 → d3: three levels, the third not split.
         let d2 = &tree.items[1].children[0];
         assert_eq!(d2.seg.idx_path, [63, 0]);
@@ -1770,10 +1757,9 @@ mod tests {
         };
         let shown = |app: &DiskScanApp| app.map.last_picture.len();
         laid_out(&mut app);
-        // The big file and "other" (100 small ones); opened: 39 and "other"
-        // (61), 39 and "other" (22), then the last 22.
-        assert_eq!(shown(&app), 2);
-        for (depth, cells) in [(1, MAX_CELLS), (2, MAX_CELLS), (3, 22)] {
+        // 101 items: 39 and "other" (62), then 39 and "other" (23), then 23.
+        assert_eq!(shown(&app), MAX_CELLS);
+        for (depth, cells) in [(1, MAX_CELLS), (2, 23)] {
             assert!(app.map.open_top_other(&[]));
             laid_out(&mut app);
             assert_eq!(app.map.other_depth(&[]), depth);
@@ -1782,11 +1768,10 @@ mod tests {
         assert!(!app.map.open_top_other(&[]));
         app.chart_parent_folder();
         laid_out(&mut app);
-        assert_eq!(app.map.other_depth(&[]), 2);
-        app.chart_parent_folder();
+        assert_eq!(app.map.other_depth(&[]), 1);
         app.chart_parent_folder();
         laid_out(&mut app);
-        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, 2));
+        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, MAX_CELLS));
         assert_eq!(app.current_view(), &Vec::<usize>::new());
     }
 
@@ -1824,24 +1809,5 @@ mod tests {
         );
         let file = cells.iter().find(|c| !c.item.seg.is_other).unwrap();
         assert!(area(&file.poly) > area(&other.poly) * 2.0);
-        // Besides "other", areas follow the sizes: two folders, one twice
-        // the other, and many tiny files.
-        let mut items: Vec<Node> = (0..500)
-            .map(|i| test_node(&format!("/u/f{i}"), 1, false, vec![]))
-            .collect();
-        items.push(test_node("/u/a", 2_000_000, false, vec![]));
-        items.push(test_node("/u/b", 1_000_000, false, vec![]));
-        let root = test_node("/u", 0, true, items);
-        let opts = LayoutOpts {
-            measure: Measure::Bytes,
-            ..opts
-        };
-        let tree = map_tree(&root, None, opts, area(&bounds));
-        let places = lay_out(&tree, &bounds, &Places::new());
-        let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
-        let cells = map_cells(&tree, &bounds, &place_of);
-        assert_eq!(cells.len(), 3);
-        let ratio = area(&cells[0].poly) / area(&cells[1].poly);
-        assert!((ratio - 2.0).abs() < 0.1, "{ratio}");
     }
 }
