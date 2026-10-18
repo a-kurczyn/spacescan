@@ -13,10 +13,15 @@ plain-text, CSV or JSON reports from the command line.
   space they use, and the drive's free space is shown too. Click a slice to
   zoom in, click the center to go back up. Ctrl+scroll enlarges the chart
   and dragging pans it, to reach very thin slices.
+- **Map view.** The folder as a map of cells sized by the space they use
+  (a Voronoi treemap), three levels deep: big files and crowded folders
+  stand out at a glance. Click a cell to zoom into it; the map grows live
+  during a scan.
 - **Colors that mean something.** A slice takes the color of the file
   category using most of it (video, audio, images, code…), and gets darker
   the longer its files have been on the disk. A color-blind-safe palette
-  is one click away in the settings.
+  is one click away in the settings, and categories, their extensions and
+  colors can be edited there. Light, dark or automatic theme.
 - **Hover details:** size, file count, owner, permissions, dates, and the
   newest and oldest file inside a folder.
 - **Summary table.** Keyboard-driven, like ncdu: sort by size, name, file

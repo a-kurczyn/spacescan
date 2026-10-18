@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0 (not released yet)
+
+### New
+- **Map view**: a third view next to the table and the sunburst. The
+  folder is split into cells whose areas match their sizes (a Voronoi
+  treemap), three levels deep, colored by category and shaded by age from
+  the newest files in the middle to the oldest at the border. Hover shows
+  the same details as the sunburst; a click opens the folder under the
+  pointer, the ⬆ button goes back up. The map grows live during a scan,
+  glides when it changes and zooms into and out of folders; the
+  animations can be turned off in the settings.
+- **Theme setting**: Auto (as before), Light or Dark.
+- **Categories window** (Settings › Edit categories…): rename, add, remove
+  and reorder categories, change their extensions and pick their colors
+  from a list of 32 that suit light and dark themes, or type any color as
+  `#RRGGBB`. It warns about extensions in two categories and colors that
+  are hard to tell apart, also for color-blind eyes when the color-blind
+  palette is on.
+- **`spacescan -U`** updates the AppImage to the latest release, checked
+  against the release's checksums. SpaceScan never looks for updates on
+  its own.
+
 ## 1.1.3 (2026-10-17)
 
 ### New
