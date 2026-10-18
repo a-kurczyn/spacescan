@@ -5,17 +5,17 @@
 ### New
 - **Map view**: a third view next to the table and the sunburst. The
   folder is split into cells whose areas match their sizes (a Voronoi
-  treemap), colored by category and shaded by age from
-  the newest files in the middle to the oldest at the border. Hover shows
-  the same details as the sunburst; a click opens the folder under the
-  pointer. Cells share the area by size, at every level, and even the
-  smallest item gets a cell of at least 16 × 16 pixels, easy to see and
-  click. Only when a folder
-  holds more items than fit at that size (or more than 400) do the
-  smallest share a grey "other" corner of 16 × 16 pixels, which opens the
-  next of them like a folder, as many times as needed. A strip beside the map, as wide as it needs, holds the
-  folder's details, an arrow pad (like the arrow keys; ⬅ and Backspace go
-  back up) and the category legend. The map grows live during a scan,
+  treemap), colored by category and shaded by age from the newest files
+  in the middle to the oldest at the border. Hover shows the same
+  details as the sunburst; a click opens the folder under the pointer.
+  Cells share the area by size, at every level, and even the smallest
+  item gets a cell of at least 16 × 16 pixels, easy to see and click.
+  Only when a folder holds more items than fit at that size (or more
+  than 400) do the smallest share a grey "other" corner of 16 × 16
+  pixels, which opens the next of them like a folder, as many times as
+  needed. A strip beside the map, as wide as it needs, holds the
+  folder's details, an arrow pad (like the arrow keys; ⬅ and Backspace
+  go back up) and the category legend. The map grows live during a scan,
   glides when it changes and zooms into and out of folders; the
   animations can be turned off in the settings. The map shows one level
   of folders by default; Settings › Map levels shows up to three, the
