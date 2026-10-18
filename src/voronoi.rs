@@ -612,34 +612,25 @@ fn map_items(
     if total == 0 {
         return Vec::new();
     }
-    // Areas follow the sizes. If the smallest items' cells would be too
-    // small to see, "other" takes a small fixed area and the largest items
-    // that still get cells big enough share the rest.
-    let smallest_share = weight(visible[visible.len() - 1].1) as f64 / total as f64;
-    let fits_all = visible.len() <= MAX_CELLS && area * smallest_share as f32 >= sizes.smallest;
-    let (shown, room) = if fits_all {
+    // Every item gets a cell while they all fit at the smallest size; if
+    // they don't, "other" takes a small fixed corner and as many items as
+    // fit in the rest get cells. The cells share the area by size, none
+    // smaller than the smallest size.
+    let fits = |room: f32| (room / sizes.smallest) as usize;
+    let (shown, room) = if visible.len() <= MAX_CELLS.min(fits(area)) {
         (visible.len(), area)
     } else {
         let room = (area - sizes.other).max(0.0);
-        let mut sum = 0;
-        let mut shown = 0;
-        for &(_, c) in visible.iter().take(MAX_CELLS - 1) {
-            sum += weight(c);
-            if shown > 0 && sizes.smallest > room * (weight(c) as f64 / sum as f64) as f32 {
-                break;
-            }
-            shown += 1;
-        }
-        (shown, room)
+        (fits(room).clamp(1, MAX_CELLS - 1).min(visible.len()), room)
     };
-    let shown_total: u64 = visible[..shown].iter().map(|(_, c)| weight(c)).sum();
-    let share = |w: u64| room * (w as f64 / shown_total as f64) as f32;
+    let weights: Vec<u64> = visible[..shown].iter().map(|(_, c)| weight(c)).collect();
+    let areas = shares(&weights, room, sizes.smallest);
     let mut items: Vec<MapItem> = visible[..shown]
         .iter()
-        .map(|&(i, c)| {
+        .zip(&areas)
+        .map(|(&(i, c), &child_area)| {
             let mut path = idx_path.to_vec();
             path.push(i);
-            let child_area = share(weight(c));
             let children =
                 if c.is_dir && depth + 1 < opts.settings.map_levels && child_area >= MIN_SPLIT_AREA
                 {
@@ -662,7 +653,7 @@ fn map_items(
                     mode: Some(c.mode),
                     rest: Vec::new(),
                 },
-                weight: weight(c) as f64,
+                weight: f64::from(child_area),
                 corner: None,
                 key: c.name.clone(),
                 children,
@@ -699,6 +690,33 @@ fn map_items(
         });
     }
     items
+}
+
+/// `room` shared by `weights` (largest first), each share at least
+/// `smallest`: the items whose share by weight would be smaller get just
+/// that, and the others share what's left by weight.
+fn shares(weights: &[u64], room: f32, smallest: f32) -> Vec<f32> {
+    let n = weights.len();
+    let mut raised = 0;
+    loop {
+        let kept = n - raised;
+        let left = (room - smallest * raised as f32).max(0.0);
+        let sum: u64 = weights[..kept].iter().sum();
+        let share = |w: u64| left * (w as f64 / sum.max(1) as f64) as f32;
+        if kept > 0 && share(weights[kept - 1]) < smallest {
+            raised += 1;
+            continue;
+        }
+        return (0..n)
+            .map(|i| {
+                if i < kept {
+                    share(weights[i])
+                } else {
+                    smallest
+                }
+            })
+            .collect();
+    }
 }
 
 /// Where an item is drawn: from its folder's key and its name.
@@ -1889,34 +1907,37 @@ mod tests {
         );
         assert_eq!(tree.items.len(), 62);
         assert!(tree.items.iter().all(|i| !i.seg.is_other));
-        // 1-byte files aren't: they share "other", which has the fixed area
-        // of a small button.
+        // 1-byte files too, far smaller than their share of a point: each
+        // gets the smallest cell, the others share the rest by size.
         let root = small(1);
         let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0, 1.0);
-        let names: Vec<&str> = tree.items.iter().map(|i| &*i.key).collect();
-        assert_eq!(names, ["big", "d1", OTHER_KEY]);
-        let other = &tree.items[2];
-        assert!(other.seg.is_other && other.seg.rest.len() == 60);
+        assert_eq!(tree.items.len(), 62);
+        assert!(tree.items.iter().all(|i| !i.seg.is_other));
+        let (big, tiny) = (&tree.items[0], &tree.items[61]);
+        assert_eq!(tiny.weight, f64::from(MIN_CELL_PIXELS));
+        let sum: f64 = tree.items.iter().map(|i| i.weight).sum();
+        assert!((sum - 800.0 * 600.0).abs() < 1.0);
+        assert!((big.weight - (800.0 * 600.0 - 60.0 * 16.0) / 2.0).abs() < 1.0);
+        // More items than fit at the smallest size: "other" is a 6 × 6
+        // corner and as many as fit in the rest get cells.
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 900.0, 1.0);
+        assert_eq!(tree.items.len(), 54 + 1);
+        let other = &tree.items[54];
+        assert!(other.seg.is_other && other.seg.rest.len() == 62 - 54);
         assert_eq!(other.seg.idx_path, [OTHER_MARKER]);
         assert_eq!(other.corner, Some(OTHER_CELL_PIXELS));
-        // Laid out, it's a corner of exactly that area; the others share
-        // the rest by size.
-        let bounds = rect_poly(egui::Rect::from_min_size(
-            Pos2::ZERO,
-            Vec2::new(800.0, 600.0),
-        ));
+        // Laid out, it's a corner of exactly that area.
+        let bounds = rect_poly(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(30.0, 30.0)));
         let places = lay_out(&tree, &bounds, &Places::new());
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
         let cells = map_cells(&tree, &bounds, &place_of);
-        let top: Vec<&MapCell> = cells.iter().filter(|c| c.item.seg.ring == 0).collect();
-        assert_eq!(top.len(), 3);
-        assert!((area(&top[2].poly) - OTHER_CELL_PIXELS).abs() < 0.5);
-        assert!(contains(&top[2].poly, Pos2::new(799.0, 599.0)));
-        let ratio = area(&top[0].poly) / area(&top[1].poly);
-        assert!((ratio - 1.0).abs() < 0.05, "{ratio}");
+        let corner = cells.iter().find(|c| c.item.seg.is_other).unwrap();
+        assert!((area(&corner.poly) - OTHER_CELL_PIXELS).abs() < 0.5);
+        assert!(contains(&corner.poly, Pos2::new(29.5, 29.5)));
         // On a screen of 2 pixels per point, 36 pixels are 9 square points.
-        let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0, 2.0);
-        assert_eq!(tree.items[2].corner, Some(9.0));
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 200.0, 2.0);
+        assert_eq!(tree.items.last().unwrap().corner, Some(9.0));
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0, 1.0);
         // d1 → d2 → d3: three levels, the third not split.
         let d2 = &tree.items[1].children[0];
         assert_eq!(d2.seg.idx_path, [63, 0]);
@@ -1927,7 +1948,7 @@ mod tests {
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
         // In a small area, folders aren't split at all.
         let tree = map_tree(&root, None, opts(&hidden, &settings), 3000.0, 1.0);
-        assert_eq!(tree.items.len(), 3);
+        assert_eq!(tree.items.len(), 62);
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
     }
 
@@ -2149,11 +2170,10 @@ mod tests {
         };
         let shown = |app: &DiskScanApp| app.map.last_picture.len();
         laid_out(&mut app);
-        // The big file and "other" (1000 small ones, each too small to see
-        // next to it); opened: 399 and "other" (601), 399 and "other"
-        // (202), then the last 202.
-        assert_eq!(shown(&app), 2);
-        for (depth, cells) in [(1, MAX_CELLS), (2, MAX_CELLS), (3, 202)] {
+        // 1001 items, more than the most cells: 399 and "other" (602);
+        // opened: 399 and "other" (203), then the last 203.
+        assert_eq!(shown(&app), MAX_CELLS);
+        for (depth, cells) in [(1, MAX_CELLS), (2, 203)] {
             assert!(app.map.open_top_other(&[]));
             laid_out(&mut app);
             assert_eq!(app.map.other_depth(&[]), depth);
@@ -2162,11 +2182,10 @@ mod tests {
         assert!(!app.map.open_top_other(&[]));
         app.chart_parent_folder();
         laid_out(&mut app);
-        assert_eq!(app.map.other_depth(&[]), 2);
-        app.chart_parent_folder();
+        assert_eq!(app.map.other_depth(&[]), 1);
         app.chart_parent_folder();
         laid_out(&mut app);
-        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, 2));
+        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, MAX_CELLS));
         assert_eq!(app.current_view(), &Vec::<usize>::new());
     }
 }
