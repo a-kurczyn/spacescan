@@ -384,33 +384,38 @@ impl Config {
     /// the file it points to is updated instead of being replaced, keeping
     /// its permissions.
     pub(crate) fn save(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(config_dir())?;
-        let link = settings_file();
-        let target = match std::fs::symlink_metadata(&link) {
-            Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(&link)?,
-            _ => link,
-        };
-        let name = target
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let tmp = target.with_file_name(format!(".{name}.tmp"));
-        let write = || -> std::io::Result<()> {
-            std::fs::write(
-                &tmp,
-                serde_json::to_string_pretty(self).map_err(std::io::Error::other)?,
-            )?;
-            if let Ok(m) = std::fs::metadata(&target) {
-                std::fs::set_permissions(&tmp, m.permissions())?;
-            }
-            std::fs::rename(&tmp, &target)
-        };
-        let result = write();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        result
+        let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        write_whole(&settings_file(), text.as_bytes())
     }
+}
+
+/// Writes `contents` to `path` without ever leaving a half-written file:
+/// to a temporary file first, which then takes its place (keeping the old
+/// file's permissions). A symlink is followed, so the file it points to is
+/// updated in place.
+pub(crate) fn write_whole(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new("/")))?;
+    let target = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
+        _ => path.to_path_buf(),
+    };
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = target.with_file_name(format!(".{name}.tmp"));
+    let write = || -> std::io::Result<()> {
+        std::fs::write(&tmp, contents)?;
+        if let Ok(m) = std::fs::metadata(&target) {
+            std::fs::set_permissions(&tmp, m.permissions())?;
+        }
+        std::fs::rename(&tmp, &target)
+    };
+    let result = write();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 impl DiskScanApp {

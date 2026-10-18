@@ -21,6 +21,7 @@ mod format;
 mod fsinfo;
 mod lang;
 mod look;
+mod palette;
 mod panels;
 mod scan;
 mod table;
@@ -38,6 +39,7 @@ use format::*;
 use fsinfo::*;
 use lang::*;
 use look::*;
+use palette::*;
 use scan::*;
 use table::{Graft, SidePanel, TableState};
 use theme::*;
@@ -544,8 +546,19 @@ impl DiskScanApp {
         }
         let (model, problem) = CategoryModel::load();
         if *self.cats != model {
-            self.cats = Arc::new(model);
-            self.pick = None;
+            let model = Arc::new(model);
+            if self.cats.same_classes(&model) {
+                // Only names or colors changed: what each file was
+                // classified as still holds, and so does a pick.
+                for held in [&mut self.tree_cats, &mut self.scan_cats] {
+                    if held.as_ref().is_some_and(|c| Arc::ptr_eq(c, &self.cats)) {
+                        *held = Some(model.clone());
+                    }
+                }
+            } else {
+                self.pick = None;
+            }
+            self.cats = model;
             self.cat_breakdown_for = None;
             // Colors worked out with the old categories are redone.
             self.tree_gen += 1;

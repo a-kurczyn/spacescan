@@ -49,10 +49,6 @@ const SAFE_PALETTE: [(u32, u32); 8] = [
 pub(crate) static COLOR_BLIND_SAFE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-fn rgb(hex: u32) -> Color32 {
-    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
-}
-
 /// A category, as its position in the list; `CategoryModel::other()` (one
 /// past the end) is Other.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -63,6 +59,10 @@ pub(crate) struct Category(pub(crate) usize);
 pub(crate) struct CategoryModel {
     /// Name tokens, translated when shown.
     names: Vec<String>,
+    /// Each category's extensions, in the file's order.
+    extensions: Vec<Vec<String>>,
+    /// Each category's picked color; None: from the palette, by position.
+    colors: Vec<Option<CatColor>>,
     by_ext: FxHashMap<String, usize>,
 }
 
@@ -122,12 +122,15 @@ impl CategoryModel {
         self.color_in(c, dark, safe)
     }
 
-    /// The category's color on a dark or light background: palette colors
-    /// (`safe`: the color-blind-safe ones) in list order, then evenly spread
-    /// hues; Other is gray.
+    /// The category's color on a dark or light background: the one picked
+    /// for it, else palette colors (`safe`: the color-blind-safe ones) in
+    /// list order, then evenly spread hues; Other is gray.
     pub(crate) fn color_in(&self, c: Category, dark: bool, safe: bool) -> Color32 {
         if c == self.other() {
             return rgb(if dark { OTHER_COLOR.0 } else { OTHER_COLOR.1 });
+        }
+        if let Some(Some(picked)) = self.colors.get(c.0) {
+            return picked.on(dark);
         }
         let palette = if safe { &SAFE_PALETTE } else { &PALETTE };
         match palette.get(c.0) {
@@ -154,6 +157,8 @@ impl CategoryModel {
             .ok_or_else(|| tr("ERR_CATEGORIES_NO_LIST"))?;
         let mut model = CategoryModel {
             names: Vec::new(),
+            extensions: Vec::new(),
+            colors: Vec::new(),
             by_ext: FxHashMap::default(),
         };
         let mut problems = Vec::new();
@@ -177,6 +182,18 @@ impl CategoryModel {
             }
             let idx = model.names.len();
             model.names.push(name);
+            model.extensions.push(Vec::new());
+            let color = match entry.get("color") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let color = v.as_str().and_then(CatColor::parse);
+                    if color.is_none() {
+                        problems.push(trf("ERR_CATEGORIES_ENTRY", &[&at, "color", &v.to_string()]));
+                    }
+                    color
+                }
+            };
+            model.colors.push(color);
 
             let strings = |key: &str, problems: &mut Vec<String>| -> Vec<String> {
                 match entry.get(key) {
@@ -208,7 +225,8 @@ impl CategoryModel {
                         &[&format!(".{ext}"), &tr(&model.names[first])],
                     )),
                     None => {
-                        model.by_ext.insert(ext, idx);
+                        model.by_ext.insert(ext.clone(), idx);
+                        model.extensions[idx].push(ext);
                     }
                 }
             }
@@ -272,6 +290,88 @@ impl CategoryModel {
             ),
         }
     }
+}
+
+/// A category as categories.json holds it: what the categories editor
+/// changes.
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct CategoryEntry {
+    /// A language token ("CAT_VIDEO"), shown translated, or a plain name.
+    pub(crate) name: String,
+    /// Lowercase, without the dot.
+    pub(crate) extensions: Vec<String>,
+    /// None: a palette color, by position.
+    pub(crate) color: Option<CatColor>,
+}
+
+impl CategoryModel {
+    /// The categories, as categories.json would list them.
+    pub(crate) fn entries(&self) -> Vec<CategoryEntry> {
+        (0..self.names.len())
+            .map(|i| CategoryEntry {
+                name: self.names[i].clone(),
+                extensions: self.extensions[i].clone(),
+                color: self.colors[i],
+            })
+            .collect()
+    }
+
+    /// True if both put every extension in the same category (by position),
+    /// so files classified with one are classified right for the other.
+    pub(crate) fn same_classes(&self, other: &CategoryModel) -> bool {
+        self.names.len() == other.names.len() && self.by_ext == other.by_ext
+    }
+}
+
+/// categories.json text for `entries`, laid out like the built-in file.
+pub(crate) fn categories_json(entries: &[CategoryEntry]) -> String {
+    let quoted = |s: &str| serde_json::to_string(s).expect("a string is valid JSON");
+    let mut out = String::from("{\n  \"categories\": [\n");
+    for (i, entry) in entries.iter().enumerate() {
+        out += &format!("    {{\n      \"name\": {},\n", quoted(&entry.name));
+        if let Some(color) = entry.color {
+            out += &format!("      \"color\": {},\n", quoted(&color.to_text()));
+        }
+        if entry.extensions.is_empty() {
+            out += "      \"extensions\": []\n";
+        } else {
+            out += "      \"extensions\": [\n";
+            let mut line = String::new();
+            for (k, ext) in entry.extensions.iter().enumerate() {
+                let item = quoted(ext)
+                    + if k + 1 < entry.extensions.len() {
+                        ","
+                    } else {
+                        ""
+                    };
+                if !line.is_empty() && 8 + line.len() + 1 + item.len() > 100 {
+                    out += &format!("        {}\n", line.trim_end());
+                    line.clear();
+                }
+                line += &item;
+                line.push(' ');
+            }
+            out += &format!("        {}\n      ]\n", line.trim_end());
+        }
+        out += if i + 1 < entries.len() {
+            "    },\n"
+        } else {
+            "    }\n"
+        };
+    }
+    out + "  ]\n}\n"
+}
+
+/// Saves `entries` as the user's categories.json. A file that couldn't be
+/// used as it was is first copied to categories.json.bad.
+pub(crate) fn save_categories(entries: &[CategoryEntry]) -> std::io::Result<()> {
+    let path = config_dir().join("categories.json");
+    if let Ok(text) = std::fs::read_to_string(&path)
+        && !CategoryModel::parse(&text).is_ok_and(|(_, problems)| problems.is_empty())
+    {
+        std::fs::copy(&path, path.with_extension("json.bad"))?;
+    }
+    config::write_whole(&path, categories_json(entries).as_bytes())
 }
 
 /// A set of categories: those with an index below 256 (what a file's
@@ -579,6 +679,34 @@ pub(crate) fn category_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Written back and read again, categories stay the same, picked
+    /// colors and empty lists included.
+    #[test]
+    fn categories_are_written_as_read() {
+        let mut entries = CategoryModel::defaults().entries();
+        let text = categories_json(&entries);
+        assert!(text.lines().all(|l| l.len() <= 100));
+        assert_eq!(
+            CategoryModel::parse(&text).unwrap().0,
+            CategoryModel::defaults()
+        );
+        entries[1].color = Some(CatColor::parse("#a1b2c3").unwrap());
+        entries[2].color = Some(CatColor::Listed(5));
+        entries.push(CategoryEntry {
+            name: "Mine \"quoted\"".to_string(),
+            extensions: Vec::new(),
+            color: None,
+        });
+        let (model, problems) = CategoryModel::parse(&categories_json(&entries)).unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(model.entries(), entries);
+        assert!(model.same_classes(&CategoryModel::parse(&categories_json(&entries)).unwrap().0));
+        assert!(!model.same_classes(&CategoryModel::defaults()));
+        let (_, problems) =
+            CategoryModel::parse(r#"{"categories":[{"name":"A","color":"pink"}]}"#).unwrap();
+        assert_eq!(problems.len(), 1);
+    }
 
     /// Sets of categories: every index that a stored byte can hold, the
     /// edges of each word, and indexes past what the set can hold.
