@@ -13,7 +13,7 @@ const SETTINGS_PANEL_WIDTH: f32 = 480.0;
 /// closed. Where separate windows aren't possible, and while a screen
 /// reader is in use (it only sees the app's main window), it floats over
 /// the app instead.
-fn tool_window(
+pub(crate) fn tool_window(
     ui: &egui::Ui,
     id: &str,
     title: &str,
@@ -770,6 +770,9 @@ impl DiskScanApp {
                         });
                         ui.checkbox(&mut s.color_blind_safe, tr("SETTINGS_COLOR_BLIND"))
                             .on_hover_text(tr("SETTINGS_COLOR_BLIND_HOVER"));
+                        if ui.button(tr("CATS_EDIT")).clicked() && self.cat_editor.is_none() {
+                            self.cat_editor = Some(CategoryEditor::new(self.cats.entries()));
+                        }
                         ui.add(
                             egui::Slider::new(&mut s.age_days, Settings::AGE_DAYS)
                                 .logarithmic(true)

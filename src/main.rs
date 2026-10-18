@@ -11,6 +11,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Instant;
 
+mod cat_editor;
 mod category;
 mod chart;
 mod cli;
@@ -31,6 +32,7 @@ mod tree;
 mod update;
 mod widgets;
 mod x11clip;
+use cat_editor::CategoryEditor;
 use category::*;
 use chart::*;
 use config::Config;
@@ -386,6 +388,8 @@ struct DiskScanApp {
     kde_colors: Option<KdeColors>,
     /// The theme the window's colors are set for; None before the first.
     applied_theme: Option<ThemeChoice>,
+    /// The Categories window's edits, while it's open.
+    cat_editor: Option<CategoryEditor>,
 }
 
 impl Default for DiskScanApp {
@@ -489,6 +493,7 @@ impl Default for DiskScanApp {
             user_files: false,
             kde_colors: None,
             applied_theme: None,
+            cat_editor: None,
         };
         app.reload_categories();
         app
@@ -1272,6 +1277,7 @@ impl DiskScanApp {
         self.toolbar_ui(ui);
         self.filter_panel_ui(ui);
         self.settings_panel_ui(ui);
+        self.categories_window_ui(ui);
         self.log_panel_ui(ui);
         let area = self.main_area_ui(ui);
         let chart_shown = !self.summary_view && (self.root.is_some() || self.scanning);

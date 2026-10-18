@@ -127,16 +127,17 @@ impl CategoryModel {
     /// list order, then evenly spread hues; Other is gray.
     pub(crate) fn color_in(&self, c: Category, dark: bool, safe: bool) -> Color32 {
         if c == self.other() {
-            return rgb(if dark { OTHER_COLOR.0 } else { OTHER_COLOR.1 });
+            return Self::other_color(dark);
         }
-        if let Some(Some(picked)) = self.colors.get(c.0) {
-            return picked.on(dark);
+        match self.colors.get(c.0) {
+            Some(Some(picked)) => picked.on(dark),
+            _ => position_color(c.0, dark, safe),
         }
-        let palette = if safe { &SAFE_PALETTE } else { &PALETTE };
-        match palette.get(c.0) {
-            Some(&(d, l)) => rgb(if dark { d } else { l }),
-            None => hsv_to_rgb(hue_for_branch(c.0), 0.6, if dark { 0.8 } else { 0.7 }),
-        }
+    }
+
+    /// Other's gray, on a dark or light background.
+    pub(crate) fn other_color(dark: bool) -> Color32 {
+        rgb(if dark { OTHER_COLOR.0 } else { OTHER_COLOR.1 })
     }
 
     pub(crate) fn defaults() -> Self {
@@ -175,8 +176,7 @@ impl CategoryModel {
             let at = format!("\"{}\"", tr(&name));
             // Other is built in: a category of that name would look like a
             // second one.
-            let bare = |n: String| n.trim_matches(['(', ')', '（', '）']).to_lowercase();
-            if name == "CAT_OTHER" || bare(tr(&name)) == bare(tr("CAT_OTHER")) {
+            if is_other_name(&name) {
                 problems.push(trf("ERR_CATEGORIES_OTHER", &[&at]));
                 continue;
             }
@@ -290,6 +290,23 @@ impl CategoryModel {
             ),
         }
     }
+}
+
+/// The color of the category at `index` when none is picked: palette colors
+/// (`safe`: the color-blind-safe ones) in list order, then evenly spread
+/// hues.
+pub(crate) fn position_color(index: usize, dark: bool, safe: bool) -> Color32 {
+    let palette = if safe { &SAFE_PALETTE } else { &PALETTE };
+    match palette.get(index) {
+        Some(&(d, l)) => rgb(if dark { d } else { l }),
+        None => hsv_to_rgb(hue_for_branch(index), 0.6, if dark { 0.8 } else { 0.7 }),
+    }
+}
+
+/// True if `name` (a token or plain text) is Other's, which is built in.
+pub(crate) fn is_other_name(name: &str) -> bool {
+    let bare = |n: String| n.trim_matches(['(', ')', '（', '）']).to_lowercase();
+    name == "CAT_OTHER" || bare(tr(name)) == bare(tr("CAT_OTHER"))
 }
 
 /// A category as categories.json holds it: what the categories editor
