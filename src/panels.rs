@@ -812,6 +812,11 @@ impl DiskScanApp {
 
                         ui.checkbox(&mut s.animations, tr("SETTINGS_ANIMATIONS"))
                             .on_hover_text(tr("SETTINGS_ANIMATIONS_HOVER"));
+                        ui.add(
+                            egui::Slider::new(&mut s.map_levels, Settings::MAP_LEVELS)
+                                .text(tr("SETTINGS_MAP_LEVELS")),
+                        )
+                        .on_hover_text(tr("SETTINGS_MAP_LEVELS_HOVER"));
 
                         ui.separator();
                         ui.label(tr("SETTINGS_LINE_RENDERING"));

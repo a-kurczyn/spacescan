@@ -402,8 +402,6 @@ pub(crate) fn rect_poly(rect: egui::Rect) -> Poly {
 
 /// Most cells a folder is split into; the rest share one "other" cell.
 const MAX_CELLS: usize = 400;
-/// How many levels the map shows at once.
-const MAP_LEVELS: usize = 3;
 /// Smallest area (square pixels) of an item's cell: 4 × 4, still visible
 /// inside its border.
 const MIN_CELL_PIXELS: f32 = 16.0;
@@ -515,11 +513,13 @@ fn map_items(
             let mut path = idx_path.to_vec();
             path.push(i);
             let child_area = share(weight(c));
-            let children = if c.is_dir && depth + 1 < MAP_LEVELS && child_area >= MIN_SPLIT_AREA {
-                map_items(c, None, &path, depth + 1, child_area, sizes, opts)
-            } else {
-                Vec::new()
-            };
+            let children =
+                if c.is_dir && depth + 1 < opts.settings.map_levels && child_area >= MIN_SPLIT_AREA
+                {
+                    map_items(c, None, &path, depth + 1, child_area, sizes, opts)
+                } else {
+                    Vec::new()
+                };
             MapItem {
                 seg: Segment {
                     idx_path: path,
@@ -756,6 +756,7 @@ struct MapSource {
     tree: usize,
     measure: Measure,
     hidden: usize,
+    levels: usize,
     size: (i32, i32),
 }
 
@@ -1085,6 +1086,7 @@ impl DiskScanApp {
             tree: tree_id,
             measure: self.measure,
             hidden: self.hidden.len(),
+            levels: self.settings.map_levels,
             size: ((rect.width() / 8.0) as i32, (rect.height() / 8.0) as i32),
         };
 
@@ -1705,7 +1707,10 @@ mod tests {
             test_node("/t", 0, true, files)
         };
         let hidden: HashSet<PathBuf> = [PathBuf::from("/t/hidden")].into();
-        let settings = Settings::default();
+        let settings = Settings {
+            map_levels: 3,
+            ..Settings::default()
+        };
         // 100-byte files are big enough to see: all 62 items get a cell.
         let tree = map_tree(
             &small(100),
@@ -1748,6 +1753,10 @@ mod tests {
         let d2 = &tree.items[1].children[0];
         assert_eq!(d2.seg.idx_path, [63, 0]);
         assert!(d2.children.len() == 1 && d2.children[0].children.is_empty());
+        // At one level (the default), folders aren't split.
+        let one = Settings::default();
+        let tree = map_tree(&root, None, opts(&hidden, &one), 800.0 * 600.0, 1.0);
+        assert!(tree.items.iter().all(|i| i.children.is_empty()));
         // In a small area, folders aren't split at all.
         let tree = map_tree(&root, None, opts(&hidden, &settings), 3000.0, 1.0);
         assert_eq!(tree.items.len(), 3);
@@ -1771,7 +1780,11 @@ mod tests {
                 test_node("/t/c", 5_000, false, vec![]),
             ],
         );
-        let (hidden, settings) = (HashSet::new(), Settings::default());
+        let hidden = HashSet::new();
+        let settings = Settings {
+            map_levels: 2,
+            ..Settings::default()
+        };
         let bounds = rect_poly(egui::Rect::from_min_size(
             Pos2::ZERO,
             Vec2::new(900.0, 600.0),
@@ -1829,6 +1842,7 @@ mod tests {
         let mut app = DiskScanApp::default();
         app.settings.map_view = true;
         app.settings.animations = false;
+        app.settings.map_levels = 2;
         let files: Vec<Node> = (0..4)
             .map(|i| test_node(&format!("/t/dir/f{i}"), 1000, false, vec![]))
             .collect();
@@ -1909,6 +1923,7 @@ mod tests {
             tree: 0,
             measure: Measure::Bytes,
             hidden: 0,
+            levels: 1,
             size: (0, 0),
         });
         app.map.zoom = Some(Zoom {

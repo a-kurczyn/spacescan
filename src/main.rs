@@ -136,6 +136,8 @@ struct Settings {
     map_view: bool,
     /// The map's cells glide and zoom.
     animations: bool,
+    /// How many levels of folders the map shows at once.
+    map_levels: usize,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -153,6 +155,7 @@ impl Settings {
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
     const LOG_LINES: RangeInclusive<usize> = 50..=5000;
     const FLAT_ROWS: RangeInclusive<usize> = 100..=100_000;
+    const MAP_LEVELS: RangeInclusive<usize> = 1..=3;
 
     fn sanitized(mut self) -> Self {
         /// `v` moved into `range` if it's outside it.
@@ -175,6 +178,7 @@ impl Settings {
         clamp(&mut self.tess_px_per_step, Self::TESS);
         clamp(&mut self.max_log_lines, Self::LOG_LINES);
         clamp(&mut self.flat_rows, Self::FLAT_ROWS);
+        clamp(&mut self.map_levels, Self::MAP_LEVELS);
         self
     }
 }
@@ -215,6 +219,7 @@ impl Default for Settings {
             theme: ThemeChoice::Auto,
             map_view: false,
             animations: true,
+            map_levels: 1,
         }
     }
 }
