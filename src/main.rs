@@ -124,6 +124,8 @@ struct Settings {
     color_blind_safe: bool,
     /// Sizes measured in files instead of bytes (see `Measure`).
     measure_files: bool,
+    /// Light, dark, or as the desktop has it.
+    theme: ThemeChoice,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -200,6 +202,7 @@ impl Default for Settings {
             paths_to_clipboard: true,
             color_blind_safe: false,
             measure_files: false,
+            theme: ThemeChoice::Auto,
         }
     }
 }
@@ -376,6 +379,10 @@ struct DiskScanApp {
     /// Reads and writes the user's settings and categories (see
     /// `with_user_files`).
     user_files: bool,
+    /// The KDE color scheme's colors, read at startup.
+    kde_colors: Option<KdeColors>,
+    /// The theme the window's colors are set for; None before the first.
+    applied_theme: Option<ThemeChoice>,
 }
 
 impl Default for DiskScanApp {
@@ -477,6 +484,8 @@ impl Default for DiskScanApp {
             user_cache: std::collections::HashMap::new(),
             group_cache: std::collections::HashMap::new(),
             user_files: false,
+            kde_colors: None,
+            applied_theme: None,
         };
         app.reload_categories();
         app
@@ -490,6 +499,7 @@ impl DiskScanApp {
     fn with_user_files() -> Self {
         let mut app = DiskScanApp {
             user_files: true,
+            kde_colors: read_kde_colors(),
             ..DiskScanApp::default()
         };
         let (cfg, needs_save, problem) = Config::load();
@@ -1197,6 +1207,14 @@ impl eframe::App for DiskScanApp {
 }
 
 impl DiskScanApp {
+    /// Sets the window's colors when the theme setting has changed.
+    fn follow_theme(&mut self, ctx: &egui::Context) {
+        if self.applied_theme != Some(self.settings.theme) {
+            apply_theme(ctx, self.settings.theme, self.kde_colors.as_ref());
+            self.applied_theme = Some(self.settings.theme);
+        }
+    }
+
     /// One frame of the whole app.
     fn frame_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -1204,6 +1222,7 @@ impl DiskScanApp {
             self.settings.color_blind_safe,
             std::sync::atomic::Ordering::Relaxed,
         );
+        self.follow_theme(&ctx);
         self.follow_measure();
         self.typing = ctx.text_edit_focused();
         self.note_paste_key(&ctx);
@@ -1635,13 +1654,13 @@ fn main() -> eframe::Result<()> {
         "spacescan",
         options,
         Box::new(|cc| {
-            apply_theme(&cc.egui_ctx);
             install_fallback_fonts(&cc.egui_ctx, false);
             let mut app = DiskScanApp {
                 start_path: start.path,
                 pick: start.categories.map(Pick::Categories),
                 ..DiskScanApp::with_user_files()
             };
+            app.follow_theme(&cc.egui_ctx);
             if let Some(text) = start.filter {
                 app.filter_form.name = text;
                 app.apply_filter_form();

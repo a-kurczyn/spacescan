@@ -748,6 +748,26 @@ impl DiskScanApp {
 
                         ui.separator();
                         ui.label(tr("SETTINGS_COLORS"));
+                        ui.horizontal(|ui| {
+                            let label = ui.label(tr("SETTINGS_THEME")).id;
+                            let name = |t: ThemeChoice| match t {
+                                ThemeChoice::Auto => tr("SETTINGS_THEME_AUTO"),
+                                ThemeChoice::Light => tr("SETTINGS_THEME_LIGHT"),
+                                ThemeChoice::Dark => tr("SETTINGS_THEME_DARK"),
+                            };
+                            egui::ComboBox::from_id_salt("theme_combo")
+                                .selected_text(name(s.theme))
+                                .show_ui(ui, |ui| {
+                                    for t in
+                                        [ThemeChoice::Auto, ThemeChoice::Light, ThemeChoice::Dark]
+                                    {
+                                        ui.selectable_value(&mut s.theme, t, name(t));
+                                    }
+                                })
+                                .response
+                                .labelled_by(label)
+                                .on_hover_text(tr("SETTINGS_THEME_HOVER"));
+                        });
                         ui.checkbox(&mut s.color_blind_safe, tr("SETTINGS_COLOR_BLIND"))
                             .on_hover_text(tr("SETTINGS_COLOR_BLIND_HOVER"));
                         ui.add(

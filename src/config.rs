@@ -864,6 +864,34 @@ mod tests {
         });
     }
 
+    /// The theme is saved and read back; an unknown one falls back to Auto
+    /// and is reported.
+    #[test]
+    fn theme_is_saved_and_read_back() {
+        with_home(|_| {
+            let mut cfg = Config::default();
+            cfg.chart.theme = ThemeChoice::Dark;
+            cfg.save().unwrap();
+            assert!(
+                std::fs::read_to_string(settings_file())
+                    .unwrap()
+                    .contains(r#""theme": "dark""#)
+            );
+            let (loaded, needs_save, problem) = Config::load();
+            assert!(loaded.chart.theme == ThemeChoice::Dark && !needs_save && problem.is_none());
+
+            std::fs::write(
+                settings_file(),
+                r#"{"chart":{"theme":"purple","hub_radius_frac":0.3}}"#,
+            )
+            .unwrap();
+            let (loaded, _, problem) = Config::load();
+            assert_eq!(loaded.chart.theme, ThemeChoice::Auto);
+            assert_eq!(loaded.chart.hub_radius_frac, 0.3);
+            assert!(problem.unwrap().contains("chart.theme"));
+        });
+    }
+
     /// Numbers a setting can't hold land on the nearest allowed value:
     /// negative to the lowest, huge (beyond any integer) to the highest,
     /// fractions rounded; a number given as text keeps the default.

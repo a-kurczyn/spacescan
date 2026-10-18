@@ -4,6 +4,7 @@
 use super::*;
 
 /// The colors spacescan takes from KDE's color scheme.
+#[derive(Clone)]
 pub(crate) struct KdeColors {
     pub(crate) window_bg: Color32,
     pub(crate) view_bg: Color32,
@@ -101,11 +102,58 @@ pub(crate) fn apply_structural_style(ctx: &egui::Context) {
     });
 }
 
-/// Applies the style, and KDE's colors when available (else egui's own).
-pub(crate) fn apply_theme(ctx: &egui::Context) {
+/// The look the user picked in Settings.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ThemeChoice {
+    /// KDE's colors when there's a KDE color scheme, else light or dark as
+    /// the system prefers.
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
+/// Applies the style and the colors for `choice`.
+pub(crate) fn apply_theme(ctx: &egui::Context, choice: ThemeChoice, kde: Option<&KdeColors>) {
+    ctx.set_theme(match choice {
+        ThemeChoice::Auto => egui::ThemePreference::System,
+        ThemeChoice::Light => egui::ThemePreference::Light,
+        ThemeChoice::Dark => egui::ThemePreference::Dark,
+    });
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        ctx.set_visuals_of(theme, theme_visuals(theme, choice, kde));
+    }
+    // After the colors, which bring their own rounding.
     apply_structural_style(ctx);
-    if let Some(kde) = read_kde_colors() {
-        ctx.set_visuals(kde_visuals(&kde));
+}
+
+/// The colors for `theme`: KDE's when its scheme is that light or dark (or
+/// always, for Auto), else egui's own with KDE's selection color.
+pub(crate) fn theme_visuals(
+    theme: egui::Theme,
+    choice: ThemeChoice,
+    kde: Option<&KdeColors>,
+) -> egui::Visuals {
+    match kde {
+        Some(kde)
+            if choice == ThemeChoice::Auto
+                || is_light(kde.view_bg) == (theme == egui::Theme::Light) =>
+        {
+            kde_visuals(kde)
+        }
+        Some(kde) => {
+            let mut visuals = theme.default_visuals();
+            visuals.selection.bg_fill = kde.accent;
+            visuals.selection.stroke.color = kde.accent_text.unwrap_or(if is_light(kde.accent) {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            });
+            visuals.widgets.active.bg_fill = kde.accent;
+            visuals
+        }
+        None => theme.default_visuals(),
     }
 }
 
@@ -242,6 +290,53 @@ mod tests {
                 "weak text, light={light}"
             );
             assert!(contrast(v.selection.stroke.color, v.selection.bg_fill) > 2.0);
+        }
+    }
+
+    /// Auto keeps KDE's colors for both themes; Light and Dark keep them
+    /// only when the scheme matches, and otherwise keep its selection color.
+    #[test]
+    fn theme_choice_picks_the_colors() {
+        use egui::Theme::{Dark, Light};
+        let light_kde = parse_kde_colors(BREEZE_LIGHT).unwrap();
+        let kde_bg = light_kde.view_bg;
+        for theme in [Light, Dark] {
+            let v = theme_visuals(theme, ThemeChoice::Auto, Some(&light_kde));
+            assert!(!v.dark_mode && v.panel_fill == kde_bg);
+        }
+        let v = theme_visuals(Light, ThemeChoice::Light, Some(&light_kde));
+        assert!(!v.dark_mode && v.panel_fill == kde_bg);
+        let v = theme_visuals(Dark, ThemeChoice::Dark, Some(&light_kde));
+        assert!(v.dark_mode && v.panel_fill != kde_bg);
+        assert_eq!(v.selection.bg_fill, light_kde.accent);
+
+        let dark_kde = parse_kde_colors(BREEZE_DARK).unwrap();
+        let v = theme_visuals(Light, ThemeChoice::Light, Some(&dark_kde));
+        assert!(!v.dark_mode && v.panel_fill != dark_kde.view_bg);
+        assert!(contrast(v.selection.stroke.color, v.selection.bg_fill) > 2.0);
+
+        for (theme, dark) in [(Light, false), (Dark, true)] {
+            for choice in [ThemeChoice::Auto, ThemeChoice::Light, ThemeChoice::Dark] {
+                assert_eq!(theme_visuals(theme, choice, None).dark_mode, dark);
+            }
+        }
+    }
+
+    /// The window switches theme with the setting, keeping the rounding.
+    #[test]
+    fn theme_setting_switches_the_window() {
+        let ctx = egui::Context::default();
+        let mut app = DiskScanApp::default();
+        for (choice, dark) in [(ThemeChoice::Dark, true), (ThemeChoice::Light, false)] {
+            app.settings.theme = choice;
+            app.follow_theme(&ctx);
+            let _ = headless_frame(&ctx, Default::default(), |_| {});
+            let style = ctx.global_style();
+            assert_eq!(style.visuals.dark_mode, dark);
+            assert_eq!(
+                style.visuals.window_corner_radius,
+                egui::CornerRadius::from(6u8)
+            );
         }
     }
 
