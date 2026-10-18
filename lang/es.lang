@@ -439,3 +439,4 @@ CATS_LOW_CONTRAST_LIGHT=Se ve mal sobre fondo claro.
 TOOLBAR_MAP_VIEW=Vista de mapa
 SETTINGS_ANIMATIONS=Animaciones
 SETTINGS_ANIMATIONS_HOVER=Las celdas del mapa se deslizan al cambiar y hacen zoom al abrir o dejar una carpeta.
+MAP_IN_OTHER=Dentro de «otros»: %s elementos más pequeños (nivel %s)

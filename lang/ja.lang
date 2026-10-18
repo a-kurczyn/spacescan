@@ -418,3 +418,4 @@ CATS_LOW_CONTRAST_LIGHT=明るい背景では見えにくい色です。
 TOOLBAR_MAP_VIEW=マップ表示
 SETTINGS_ANIMATIONS=アニメーション
 SETTINGS_ANIMATIONS_HOVER=マップのセルは変化するときに滑らかに動き、フォルダーを開いたり離れたりするときにズームします。
+MAP_IN_OTHER=「その他」の中: 小さい項目 %s 個 (レベル %s)

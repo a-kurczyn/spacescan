@@ -433,3 +433,4 @@ CATS_LOW_CONTRAST_LIGHT=Peu visible sur fond clair.
 TOOLBAR_MAP_VIEW=Vue carte
 SETTINGS_ANIMATIONS=Animations
 SETTINGS_ANIMATIONS_HOVER=Les cellules de la carte glissent quand elles changent et zooment quand vous ouvrez ou quittez un dossier.
+MAP_IN_OTHER=Dans « autres » : %s éléments plus petits (niveau %s)

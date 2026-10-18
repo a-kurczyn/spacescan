@@ -1067,6 +1067,11 @@ impl DiskScanApp {
     /// parent folder, highlighting the folder just left.
     fn chart_parent_folder(&mut self) {
         let view = self.current_view().clone();
+        // On the map, out of an opened "other" first.
+        if self.settings.map_view && self.map.leave_other(&view) {
+            self.selection = None;
+            return;
+        }
         if let Some((&left, parent_view)) = view.split_last() {
             let parent_view = parent_view.to_vec();
             self.set_current_view(parent_view.clone());
@@ -1103,6 +1108,20 @@ impl DiskScanApp {
     /// where every item is listed.
     fn open_other_bucket(&mut self, ip: &[usize]) {
         let owner_rel = &ip[..ip.len() - 1];
+        // The map opens it in place, like a folder; inside a folder, it
+        // opens that folder.
+        if self.settings.map_view {
+            let view = self.current_view().clone();
+            if !owner_rel.is_empty() {
+                let mut vp = view;
+                vp.extend(owner_rel.iter().copied());
+                self.view_stack.push(vp);
+            } else {
+                self.map.open_top_other(&view);
+            }
+            self.selection = None;
+            return;
+        }
         if !owner_rel.is_empty() {
             let mut vp = self.current_view().clone();
             vp.extend(owner_rel.iter().copied());
@@ -1438,7 +1457,16 @@ impl DiskScanApp {
                 ui.set_max_width((right - 8.0 - area.left() - 8.0).max(40.0));
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.strong(short_path(&n.path()));
-                overlay_frame(ui, self.settings.map_view, |ui| folder_stats_ui(ui, n));
+                let in_other = (self.settings.map_view && selected.is_none())
+                    .then(|| self.map.other_items(self.current_view()))
+                    .flatten();
+                overlay_frame(ui, self.settings.map_view, |ui| {
+                    if let Some(items) = in_other {
+                        let depth = self.map.other_depth(self.current_view());
+                        ui.label(trf("MAP_IN_OTHER", &[&format_count(items as u64), &depth.to_string()]));
+                    }
+                    folder_stats_ui(ui, n);
+                });
             });
     }
 

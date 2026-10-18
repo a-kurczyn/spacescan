@@ -349,10 +349,11 @@ pub(crate) struct MapTree {
 /// The name "other" goes by in a layout: no file name holds a NUL.
 const OTHER_KEY: &str = "\0other";
 
-/// The map of `view`, whose cells will share about `area` square points.
-pub(crate) fn map_tree(view: &Node, opts: LayoutOpts, area: f32) -> MapTree {
+/// The map of `view` (only the items at `only`, if given), whose cells
+/// will share about `area` square points.
+pub(crate) fn map_tree(view: &Node, only: Option<&[usize]>, opts: LayoutOpts, area: f32) -> MapTree {
     MapTree {
-        items: map_items(view, &[], 0, area, opts),
+        items: map_items(view, only, &[], 0, area, opts),
     }
 }
 
@@ -360,6 +361,7 @@ pub(crate) fn map_tree(view: &Node, opts: LayoutOpts, area: f32) -> MapTree {
 /// get a cell of their own in `area`, then "other" for the rest.
 fn map_items(
     node: &Node,
+    only: Option<&[usize]>,
     idx_path: &[usize],
     depth: usize,
     area: f32,
@@ -370,7 +372,7 @@ fn map_items(
         .children
         .iter()
         .enumerate()
-        .filter(|(_, c)| weight(c) > 0 && !c.is_in(opts.hidden))
+        .filter(|(i, c)| weight(c) > 0 && !c.is_in(opts.hidden) && only.is_none_or(|o| o.contains(i)))
         .collect();
     visible.sort_by_key(|(_, c)| std::cmp::Reverse(weight(c)));
     let total: u64 = visible.iter().map(|(_, c)| weight(c)).sum();
@@ -392,7 +394,7 @@ fn map_items(
             path.push(i);
             let child_area = share(weight(c));
             let children = if c.is_dir && depth + 1 < MAP_LEVELS && child_area >= MIN_SPLIT_AREA {
-                map_items(c, &path, depth + 1, child_area, opts)
+                map_items(c, None, &path, depth + 1, child_area, opts)
             } else {
                 Vec::new()
             };
@@ -568,11 +570,20 @@ const ZOOM_SECS: f32 = 0.3;
 /// During a scan, the map is laid out again at most this often.
 const LIVE_RELAYOUT: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// What the map shows: a folder (child indices from the tree's top) or,
+/// when "other" cells were opened, only the items the last one held.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub(crate) struct MapView {
+    folder: Vec<usize>,
+    /// The items of each "other" opened, outermost first.
+    others: Vec<Vec<usize>>,
+}
+
 /// What a layout is for: the folder shown, the tree it's in, what sizes
 /// are measured in, what's hidden and the size of the area.
 #[derive(Clone, PartialEq)]
 struct MapSource {
-    view: Vec<usize>,
+    view: MapView,
     tree: usize,
     measure: Measure,
     hidden: usize,
@@ -617,8 +628,49 @@ pub(crate) struct MapState {
     last_picture: Vec<DrawnCell>,
     zoom: Option<Zoom>,
     /// Folders opened and not shown yet, in order, and the last one seen.
-    queue: std::collections::VecDeque<Vec<usize>>,
-    seen_view: Option<Vec<usize>>,
+    queue: std::collections::VecDeque<MapView>,
+    seen_view: Option<MapView>,
+    /// For each folder, the "other" cells opened in it (kept when leaving
+    /// it for a subfolder, so coming back returns there), and the tree
+    /// they're for.
+    others: HashMap<Vec<usize>, Vec<Vec<usize>>>,
+    others_tree: usize,
+    /// The items of the outer "other" cell, to open it from the keyboard.
+    top_other: Option<Vec<usize>>,
+}
+
+impl MapState {
+    /// How many "other" cells are open in `folder`.
+    pub(crate) fn other_depth(&self, folder: &[usize]) -> usize {
+        self.others.get(folder).map_or(0, Vec::len)
+    }
+
+    /// The items shown in `folder` while an "other" is open there.
+    pub(crate) fn other_items(&self, folder: &[usize]) -> Option<usize> {
+        self.others.get(folder).and_then(|o| o.last()).map(Vec::len)
+    }
+
+    /// Opens the outer "other" cell, holding `items`, in `folder`.
+    fn open_other(&mut self, folder: &[usize], items: Vec<usize>) {
+        self.others.entry(folder.to_vec()).or_default().push(items);
+    }
+
+    /// Steps out of the innermost "other" opened in `folder`; false if
+    /// there's none.
+    pub(crate) fn leave_other(&mut self, folder: &[usize]) -> bool {
+        self.others.get_mut(folder).and_then(Vec::pop).is_some()
+    }
+
+    /// Opens the outer "other" cell of the map shown, if it has one.
+    pub(crate) fn open_top_other(&mut self, folder: &[usize]) -> bool {
+        match self.top_other.clone() {
+            Some(items) => {
+                self.open_other(folder, items);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 fn ease_out(t: f32) -> f32 {
@@ -713,12 +765,17 @@ impl DiskScanApp {
         let rect = response.rect.shrink(4.0);
         let bounds = rect_poly(rect);
         let animate = self.settings.animations;
+        // "Other" cells opened in another tree mean nothing in this one.
+        if self.map.others_tree != tree_id {
+            self.map.others.clear();
+            self.map.others_tree = tree_id;
+        }
         let view = if live {
-            Vec::new()
+            MapView::default()
         } else {
             self.map_view_now()
         };
-        let view_node = get_node(top, &view);
+        let view_node = get_node(top, &view.folder);
         let source = MapSource {
             view: view.clone(),
             tree: tree_id,
@@ -734,11 +791,13 @@ impl DiskScanApp {
                 self.map.from.clear();
                 self.map.target.clear();
                 self.map.zoom = (animate && !self.map.last_picture.is_empty()).then(|| {
-                    let inward = view.starts_with(&old);
-                    let rel = if inward {
-                        view[old.len()..].to_vec()
+                    let (inward, rel) = if old.folder == view.folder {
+                        // Into or out of an "other" cell.
+                        (view.others.len() > old.others.len(), vec![OTHER_MARKER])
+                    } else if view.folder.starts_with(&old.folder) {
+                        (true, view.folder[old.folder.len()..].to_vec())
                     } else {
-                        old.get(view.len()..).unwrap_or(&[]).to_vec()
+                        (false, old.folder.get(view.folder.len()..).unwrap_or(&[]).to_vec())
                     };
                     Zoom {
                         before: std::mem::take(&mut self.map.last_picture),
@@ -754,7 +813,8 @@ impl DiskScanApp {
                 order: self.chart_order,
                 measure: self.measure,
             };
-            self.map.next_tree = Some(Arc::new(map_tree(view_node, opts, area(&bounds))));
+            let only = view.others.last().map(Vec::as_slice);
+            self.map.next_tree = Some(Arc::new(map_tree(view_node, only, opts, area(&bounds))));
             self.map.source = Some(source);
             self.map.outdated = true;
         }
@@ -883,13 +943,17 @@ impl DiskScanApp {
         if live {
             return;
         }
-        self.map_input(ui, view_node, &view, response, &cells);
+        self.map_input(ui, view_node, &view.folder, response, &cells);
     }
 
     /// The folder the map shows now: each folder opened is shown in turn,
     /// and only once the zoom to the one before has finished.
-    fn map_view_now(&mut self) -> Vec<usize> {
-        let current = self.current_view().clone();
+    fn map_view_now(&mut self) -> MapView {
+        let folder = self.current_view().clone();
+        let current = MapView {
+            others: self.map.others.get(&folder).cloned().unwrap_or_default(),
+            folder,
+        };
         if self.map.seen_view.as_ref() != Some(&current) {
             self.map.queue.push_back(current.clone());
             self.map.seen_view = Some(current.clone());
@@ -1001,6 +1065,10 @@ impl DiskScanApp {
             ));
         }
 
+        self.map.top_other = cells
+            .iter()
+            .find(|c| c.item.seg.ring == 0 && c.item.seg.is_other)
+            .map(|c| c.item.seg.rest.clone());
         // What the arrow keys move between, in drawing order.
         self.chart_segs = cells
             .iter()
@@ -1025,7 +1093,8 @@ impl DiskScanApp {
         });
         if response.clicked() {
             match outer {
-                Some(c) if c.item.seg.is_other => self.open_other_bucket(&c.item.seg.idx_path),
+                // "Other" opens like a folder holding the items it groups.
+                Some(c) if c.item.seg.is_other => self.map.open_other(view, c.item.seg.rest.clone()),
                 Some(c) if c.item.seg.is_dir => {
                     let mut vp = view.to_vec();
                     vp.extend(c.item.seg.idx_path.iter());
@@ -1277,7 +1346,7 @@ mod tests {
         let root = test_node("/t", 0, true, files);
         let hidden: HashSet<PathBuf> = [PathBuf::from("/t/hidden")].into();
         let settings = Settings::default();
-        let tree = map_tree(&root, opts(&hidden, &settings), 800.0 * 600.0);
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0);
         let names: Vec<&str> = tree.items.iter().map(|i| &*i.key).collect();
         assert_eq!(names, ["big", "d1", OTHER_KEY]);
         let other = &tree.items[2].seg;
@@ -1288,7 +1357,7 @@ mod tests {
         assert_eq!(d2.seg.idx_path, [60 + 3, 0]);
         assert!(d2.children.len() == 1 && d2.children[0].children.is_empty());
         // In a small area, folders aren't split at all.
-        let tree = map_tree(&root, opts(&hidden, &settings), 3000.0);
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 3000.0);
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
     }
 
@@ -1314,7 +1383,7 @@ mod tests {
             Pos2::ZERO,
             Vec2::new(900.0, 600.0),
         ));
-        let tree = map_tree(&root, opts(&hidden, &settings), area(&bounds));
+        let tree = map_tree(&root, None, opts(&hidden, &settings), area(&bounds));
         let places = lay_out(&tree, &bounds, &Places::new());
         assert!(places.contains_key(&Vec::new()) && places.contains_key(&vec!["a".into()]));
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
@@ -1437,9 +1506,13 @@ mod tests {
     #[test]
     fn opened_folders_queue_behind_a_zoom() {
         let mut app = DiskScanApp::default();
-        assert_eq!(app.map_view_now(), Vec::<usize>::new());
+        let at = |folder: Vec<usize>| MapView {
+            folder,
+            others: Vec::new(),
+        };
+        assert_eq!(app.map_view_now(), at(vec![]));
         app.map.source = Some(MapSource {
-            view: vec![],
+            view: at(vec![]),
             tree: 0,
             measure: Measure::Bytes,
             hidden: 0,
@@ -1452,11 +1525,64 @@ mod tests {
             start: Some(Instant::now()),
         });
         app.view_stack.push(vec![1]);
-        assert_eq!(app.map_view_now(), Vec::<usize>::new());
+        assert_eq!(app.map_view_now(), at(vec![]));
         app.view_stack.push(vec![1, 2]);
-        assert_eq!(app.map_view_now(), Vec::<usize>::new());
+        assert_eq!(app.map_view_now(), at(vec![]));
         app.map.zoom = None;
-        assert_eq!(app.map_view_now(), vec![1]);
-        assert_eq!(app.map_view_now(), vec![1, 2]);
+        assert_eq!(app.map_view_now(), at(vec![1]));
+        assert_eq!(app.map_view_now(), at(vec![1, 2]));
+    }
+
+    /// "Other" opens like a folder, again and again while there are more
+    /// items than room, and steps back out one level at a time; the
+    /// folder shown stays the same.
+    #[test]
+    fn other_opens_like_a_folder() {
+        let mut app = DiskScanApp::default();
+        app.settings.map_view = true;
+        app.settings.animations = false;
+        let mut files: Vec<Node> = (0..100).map(|i| test_node(&format!("/t/s{i:03}"), 10, false, vec![])).collect();
+        files.push(test_node("/t/big", 10_000_000, false, vec![]));
+        app.full_root = Some(Arc::new(test_node("/t", 10_001_000, true, files)));
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        let frame = |app: &mut DiskScanApp, events: Vec<egui::Event>| {
+            app.saved_config = Some(app.current_config());
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            headless_frame(&ctx, input, |ui| app.frame_ui(ui));
+        };
+        let laid_out = |app: &mut DiskScanApp| {
+            for _ in 0..300 {
+                frame(app, vec![]);
+                if app.map.tree.is_some() && app.map.job.is_none() && app.map.queue.is_empty() {
+                    frame(app, vec![]);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("no layout");
+        };
+        let shown = |app: &DiskScanApp| app.map.last_picture.len();
+        laid_out(&mut app);
+        assert_eq!(shown(&app), 2);
+        for (depth, cells) in [(1, MAX_CELLS + 1), (2, MAX_CELLS + 1), (3, 100 - 2 * MAX_CELLS)] {
+            assert!(app.map.open_top_other(&[]));
+            laid_out(&mut app);
+            assert_eq!(app.map.other_depth(&[]), depth);
+            assert_eq!(shown(&app), cells, "level {depth}");
+        }
+        assert!(!app.map.open_top_other(&[]) || shown(&app) == 0);
+        app.chart_parent_folder();
+        laid_out(&mut app);
+        assert_eq!(app.map.other_depth(&[]), 2);
+        app.chart_parent_folder();
+        app.chart_parent_folder();
+        laid_out(&mut app);
+        assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, 2));
+        assert_eq!(app.current_view(), &Vec::<usize>::new());
     }
 }

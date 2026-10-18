@@ -2243,7 +2243,8 @@ impl DiskScanApp {
                         if glyph_toolbar_button(
                             ui,
                             ButtonRole::Action { lit: false },
-                            self.view_stack.len() > 1 && !self.scanning,
+                            (self.view_stack.len() > 1 || self.map.other_depth(self.current_view()) > 0)
+                                && !self.scanning,
                             "⬆",
                             &tr("HELP_PARENT"),
                         )

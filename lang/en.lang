@@ -451,3 +451,4 @@ CATS_LOW_CONTRAST_LIGHT=Hard to see on a light background.
 TOOLBAR_MAP_VIEW=Map view
 SETTINGS_ANIMATIONS=Animations
 SETTINGS_ANIMATIONS_HOVER=The map's cells glide when they change, and zoom when you open or leave a folder.
+MAP_IN_OTHER=Inside “other”: %s smaller items (level %s)
