@@ -36,6 +36,8 @@ Options:
                            Filters window; folders count only those files
   -h, --help               show this help
   -V, --version            show the version
+  -U, --update             AppImage only: replace it with the latest release,
+                           checked against the release's SHA256SUMS
 
 Sizes in CSV and JSON are in bytes; times are local, as YYYY-MM-DDTHH:MM:SS±HH:MM.
 Names that aren't valid UTF-8 are shown escaped, as in the app (\\xFF).
@@ -100,6 +102,8 @@ enum Parsed {
     },
     Help,
     Version,
+    /// Replace the AppImage with the latest release.
+    Update,
     Report(Request),
 }
 
@@ -159,6 +163,7 @@ fn parse(args: &[OsString]) -> Result<Parsed, String> {
             "--" => only_paths = true,
             "-h" | "--help" => return Ok(Parsed::Help),
             "-V" | "--version" => return Ok(Parsed::Version),
+            "-U" | "--update" => return Ok(Parsed::Update),
             "--reverse" | "--apparent-size" if inline.is_some() => {
                 return Err(format!("{option} takes no value"));
             }
@@ -251,6 +256,7 @@ fn parse_app(args: &[OsString]) -> Result<Parsed, String> {
             "--" => only_paths = true,
             "-h" | "--help" => return Ok(Parsed::Help),
             "-V" | "--version" => return Ok(Parsed::Version),
+            "-U" | "--update" => return Ok(Parsed::Update),
             "--category" => categories = Some(value("category names")?),
             "--filter" => filter = Some(value("a name filter")?),
             _ => return Err(format!("unknown option {option}")),
@@ -367,6 +373,7 @@ pub(crate) fn run(args: &[OsString]) -> Run {
         Ok(Parsed::Version) => {
             return print_out(&format!("spacescan {}\n", env!("CARGO_PKG_VERSION")));
         }
+        Ok(Parsed::Update) => return Run::Exit(update::run()),
         Ok(Parsed::Report(req)) => req,
         Err(why) => {
             eprintln!("spacescan: {why}\nTry 'spacescan --help'.");
@@ -1042,6 +1049,9 @@ mod tests {
         }
         for version in [&["--version"][..], &["-V"], &["exts", ".", "-V"]] {
             assert_eq!(parse(&args(version)), Ok(Parsed::Version));
+        }
+        for update in [&["--update"][..], &["-U"], &["/x", "-U"]] {
+            assert_eq!(parse(&args(update)), Ok(Parsed::Update));
         }
         let ok = |a: &[&str]| match parse(&args(a)) {
             Ok(Parsed::Report(r)) => r,

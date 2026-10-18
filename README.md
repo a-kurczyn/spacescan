@@ -133,6 +133,10 @@ installing SpaceScan for you.
 On systems without FUSE, run it with
 `APPIMAGE_EXTRACT_AND_RUN=1 ./SpaceScan-x86_64.AppImage`.
 
+To update it, run `./SpaceScan-x86_64.AppImage -U`: it downloads the latest
+release, checks it against the release's checksums and replaces itself
+(this needs `curl`). SpaceScan never checks for updates on its own.
+
 It runs on most distributions from 2018 on (glibc 2.28 or newer). Every
 release is built from the tagged source in this repository.
 
@@ -265,6 +269,8 @@ Options:
                            Filters window; folders count only those files
   -h, --help               show this help
   -V, --version            show the version
+  -U, --update             AppImage only: replace it with the latest release,
+                           checked against the release's SHA256SUMS
 ```
 
 For example, the 20 biggest files in your Downloads folder, a spreadsheet

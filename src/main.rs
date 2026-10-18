@@ -27,6 +27,7 @@ mod table;
 mod theme;
 mod transfer;
 mod tree;
+mod update;
 mod widgets;
 mod x11clip;
 use category::*;
