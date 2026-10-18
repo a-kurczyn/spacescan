@@ -328,6 +328,10 @@ const MAP_LEVELS: usize = 3;
 /// clicks open, get more, to be easy to hit.
 const MIN_CELL_AREA: f32 = 500.0;
 const MIN_OUTER_CELL_AREA: f32 = 2500.0;
+/// The area of an "other" cell: a fixed size, like a button to the next
+/// items, whatever they add up to (smaller in a folder's cell).
+const OTHER_CELL_AREA: f32 = 6400.0;
+const INNER_OTHER_CELL_AREA: f32 = 1200.0;
 /// Smallest area of a folder's cell for the items inside to be shown.
 const MIN_SPLIT_AREA: f32 = 5000.0;
 /// The gap between a folder's cell and the cells inside it.
@@ -460,7 +464,7 @@ fn map_items(
                 mode: None,
                 rest: rest.iter().map(|(i, _)| *i).collect(),
             },
-            weight: laid(rest.iter().map(|(_, c)| weight(c)).sum()),
+            weight: other_weight(&items, area, depth),
             key: OTHER_KEY.into(),
             children: Vec::new(),
         });
@@ -470,6 +474,19 @@ fn map_items(
 
 /// Where an item is drawn: from its folder's key and its name.
 type PlaceOf<'a> = &'a dyn Fn(&[Box<str>], &str) -> Option<Place>;
+
+/// The weight that gives "other" its fixed area next to `items` in `area`
+/// (at most a quarter of it).
+fn other_weight(items: &[MapItem], area: f32, depth: usize) -> f64 {
+    let wanted = if depth == 0 {
+        OTHER_CELL_AREA
+    } else {
+        INNER_OTHER_CELL_AREA
+    };
+    let other = f64::from(wanted.min(area / 4.0));
+    let shown: f64 = items.iter().map(|i| i.weight).sum();
+    shown * other / (f64::from(area) - other).max(1.0)
+}
 
 /// Laid-out places: for each folder split (by its items' names from the
 /// map's top), each of its items' places, by name.
@@ -1756,5 +1773,41 @@ mod tests {
         laid_out(&mut app);
         assert_eq!((app.map.other_depth(&[]), shown(&app)), (0, MAX_CELLS));
         assert_eq!(app.current_view(), &Vec::<usize>::new());
+    }
+
+    /// Measured in files, a folder of many single files shows its largest
+    /// ones with "other" as a small cell of fixed size, not the share of
+    /// all the files it holds.
+    #[test]
+    fn other_is_a_small_fixed_cell() {
+        let files: Vec<Node> = (0..1000)
+            .map(|i| test_node(&format!("/t/m{i:04}"), 4096, false, vec![]))
+            .collect();
+        let root = test_node("/t", 0, true, files);
+        let (hidden, mut settings) = (HashSet::new(), Settings::default());
+        settings.measure_files = true;
+        let opts = LayoutOpts {
+            hidden: &hidden,
+            settings: &settings,
+            order: ChartOrder::Size,
+            measure: Measure::Files,
+        };
+        let bounds = rect_poly(egui::Rect::from_min_size(
+            Pos2::ZERO,
+            Vec2::new(900.0, 600.0),
+        ));
+        let tree = map_tree(&root, None, opts, area(&bounds));
+        assert_eq!(tree.items.len(), MAX_CELLS);
+        let places = lay_out(&tree, &bounds, &Places::new());
+        let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
+        let cells = map_cells(&tree, &bounds, &place_of);
+        let other = cells.iter().find(|c| c.item.seg.is_other).unwrap();
+        assert!(
+            (area(&other.poly) - OTHER_CELL_AREA).abs() / OTHER_CELL_AREA < 0.05,
+            "{}",
+            area(&other.poly)
+        );
+        let file = cells.iter().find(|c| !c.item.seg.is_other).unwrap();
+        assert!(area(&file.poly) > area(&other.poly) * 2.0);
     }
 }
