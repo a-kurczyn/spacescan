@@ -351,7 +351,12 @@ const OTHER_KEY: &str = "\0other";
 
 /// The map of `view` (only the items at `only`, if given), whose cells
 /// will share about `area` square points.
-pub(crate) fn map_tree(view: &Node, only: Option<&[usize]>, opts: LayoutOpts, area: f32) -> MapTree {
+pub(crate) fn map_tree(
+    view: &Node,
+    only: Option<&[usize]>,
+    opts: LayoutOpts,
+    area: f32,
+) -> MapTree {
     MapTree {
         items: map_items(view, only, &[], 0, area, opts),
     }
@@ -372,7 +377,9 @@ fn map_items(
         .children
         .iter()
         .enumerate()
-        .filter(|(i, c)| weight(c) > 0 && !c.is_in(opts.hidden) && only.is_none_or(|o| o.contains(i)))
+        .filter(|(i, c)| {
+            weight(c) > 0 && !c.is_in(opts.hidden) && only.is_none_or(|o| o.contains(i))
+        })
         .collect();
     visible.sort_by_key(|(_, c)| std::cmp::Reverse(weight(c)));
     let total: u64 = visible.iter().map(|(_, c)| weight(c)).sum();
@@ -749,7 +756,139 @@ fn zoom_transform(focus: egui::Rect, view: egui::Rect, t: f32) -> impl Fn(Pos2) 
     move |p: Pos2| center + (p - focus_center) * scale
 }
 
+/// A button of the arrow pad pressed.
+enum PadPress {
+    Move(NavDir),
+    Open,
+}
+
+/// The width of the strip left of the map.
+const STRIP_WIDTH: f32 = 190.0;
+
 impl DiskScanApp {
+    /// The map view, `size` big: the strip on the left (the folder's
+    /// details, the arrow pad, the legend), the map in the rest.
+    pub(crate) fn map_area_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        top: &Node,
+        tree_id: usize,
+        size: Vec2,
+        live: bool,
+    ) {
+        ui.horizontal_top(|ui| {
+            let pad = ui.allocate_ui_with_layout(
+                Vec2::new(STRIP_WIDTH, size.y),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    ui.set_min_size(Vec2::new(STRIP_WIDTH, size.y));
+                    ui.set_max_width(STRIP_WIDTH);
+                    self.map_strip_ui(ui, live)
+                },
+            );
+            let (response, painter) = ui.allocate_painter(
+                Vec2::new(ui.available_width(), size.y),
+                egui::Sense::click_and_drag(),
+            );
+            self.map_ui(ui, top, tree_id, &response, &painter, live);
+            // After the map, which lists the items the arrows move between.
+            match pad.inner {
+                Some(PadPress::Move(dir)) => self.move_selection(dir),
+                Some(PadPress::Open) => self.open_selection(),
+                None => {}
+            }
+        });
+    }
+
+    /// The strip: the folder shown (or the highlighted item) and its
+    /// details, the category picked, the arrow pad, and the legend at the
+    /// bottom.
+    fn map_strip_ui(&mut self, ui: &mut egui::Ui, live: bool) -> Option<PadPress> {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        if !live && let Some(root) = self.root.clone() {
+            let view_node = self.current_view_node(&root);
+            let selected = self
+                .selected_rel()
+                .and_then(|rel| try_get_node(view_node, rel));
+            let n = selected.unwrap_or(view_node);
+            ui.strong(&*n.name);
+            if selected.is_none()
+                && let Some(items) = self.map.other_items(self.current_view())
+            {
+                let depth = self.map.other_depth(self.current_view());
+                ui.add(
+                    egui::Label::new(trf(
+                        "MAP_IN_OTHER",
+                        &[&format_count(items as u64), &depth.to_string()],
+                    ))
+                    .wrap(),
+                );
+            }
+            folder_stats_ui(ui, n);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        }
+        if let Some(pick) = self.pick.clone() {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(trf("CAT_ACTIVE", &[&self.cats.pick_label(&pick)]));
+                if ui.small_button("×").named(&tr("CAT_CLEAR")).clicked() {
+                    self.pick = None;
+                    self.repick();
+                }
+            });
+        }
+        let press = if live {
+            None
+        } else {
+            ui.add_space(10.0);
+            self.arrow_pad_ui(ui)
+        };
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            ui.add_space(4.0);
+            self.legend_body(ui);
+        });
+        press
+    }
+
+    /// Buttons for the arrow keys: previous and next item, a level in and
+    /// out, and open in the middle. Returns the one pressed.
+    fn arrow_pad_ui(&mut self, ui: &mut egui::Ui) -> Option<PadPress> {
+        let out = self.view_stack.len() > 1
+            || self.map.other_depth(self.current_view()) > 0
+            || self.selection.is_some();
+        let open = self.selection.is_some();
+        let mut press = None;
+        egui::Grid::new("arrow_pad")
+            .spacing([2.0, 2.0])
+            .show(ui, |ui| {
+                let mut button =
+                    |ui: &mut egui::Ui, glyph: &str, key: &str, enabled: bool, what: PadPress| {
+                        if ui
+                            .add_enabled(
+                                enabled,
+                                egui::Button::new(glyph).min_size(Vec2::splat(30.0)),
+                            )
+                            .on_hover_text(tr(key))
+                            .named(&tr(key))
+                            .clicked()
+                        {
+                            press = Some(what);
+                        }
+                    };
+                ui.label("");
+                button(ui, "⬆", "MAP_PREV", true, PadPress::Move(NavDir::Prev));
+                ui.end_row();
+                button(ui, "⬅", "HELP_PARENT", out, PadPress::Move(NavDir::Out));
+                button(ui, "⏺", "MAP_OPEN", open, PadPress::Open);
+                button(ui, "➡", "MAP_IN", true, PadPress::Move(NavDir::In));
+                ui.end_row();
+                ui.label("");
+                button(ui, "⬇", "MAP_NEXT", true, PadPress::Move(NavDir::Next));
+                ui.end_row();
+            });
+        press
+    }
+
     /// The Voronoi map of `view_node` in `rect`: drawn, and (unless `live`,
     /// during a scan) with hover details, clicks, keys and the menu.
     pub(crate) fn map_ui(
@@ -797,7 +936,10 @@ impl DiskScanApp {
                     } else if view.folder.starts_with(&old.folder) {
                         (true, view.folder[old.folder.len()..].to_vec())
                     } else {
-                        (false, old.folder.get(view.folder.len()..).unwrap_or(&[]).to_vec())
+                        (
+                            false,
+                            old.folder.get(view.folder.len()..).unwrap_or(&[]).to_vec(),
+                        )
                     };
                     Zoom {
                         before: std::mem::take(&mut self.map.last_picture),
@@ -1094,7 +1236,9 @@ impl DiskScanApp {
         if response.clicked() {
             match outer {
                 // "Other" opens like a folder holding the items it groups.
-                Some(c) if c.item.seg.is_other => self.map.open_other(view, c.item.seg.rest.clone()),
+                Some(c) if c.item.seg.is_other => {
+                    self.map.open_other(view, c.item.seg.rest.clone())
+                }
                 Some(c) if c.item.seg.is_dir => {
                     let mut vp = view.to_vec();
                     vp.extend(c.item.seg.idx_path.iter());
@@ -1541,7 +1685,9 @@ mod tests {
         let mut app = DiskScanApp::default();
         app.settings.map_view = true;
         app.settings.animations = false;
-        let mut files: Vec<Node> = (0..100).map(|i| test_node(&format!("/t/s{i:03}"), 10, false, vec![])).collect();
+        let mut files: Vec<Node> = (0..100)
+            .map(|i| test_node(&format!("/t/s{i:03}"), 10, false, vec![]))
+            .collect();
         files.push(test_node("/t/big", 10_000_000, false, vec![]));
         app.full_root = Some(Arc::new(test_node("/t", 10_001_000, true, files)));
         app.rebuild_view_tree();
@@ -1549,7 +1695,10 @@ mod tests {
         let frame = |app: &mut DiskScanApp, events: Vec<egui::Event>| {
             app.saved_config = Some(app.current_config());
             let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1200.0, 900.0),
+                )),
                 events,
                 ..Default::default()
             };
@@ -1569,7 +1718,11 @@ mod tests {
         let shown = |app: &DiskScanApp| app.map.last_picture.len();
         laid_out(&mut app);
         assert_eq!(shown(&app), 2);
-        for (depth, cells) in [(1, MAX_CELLS + 1), (2, MAX_CELLS + 1), (3, 100 - 2 * MAX_CELLS)] {
+        for (depth, cells) in [
+            (1, MAX_CELLS + 1),
+            (2, MAX_CELLS + 1),
+            (3, 100 - 2 * MAX_CELLS),
+        ] {
             assert!(app.map.open_top_other(&[]));
             laid_out(&mut app);
             assert_eq!(app.map.other_depth(&[]), depth);

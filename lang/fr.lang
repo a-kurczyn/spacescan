@@ -434,3 +434,7 @@ TOOLBAR_MAP_VIEW=Vue carte
 SETTINGS_ANIMATIONS=Animations
 SETTINGS_ANIMATIONS_HOVER=Les cellules de la carte glissent quand elles changent et zooment quand vous ouvrez ou quittez un dossier.
 MAP_IN_OTHER=Dans « autres » : %s éléments plus petits (niveau %s)
+MAP_PREV=Élément précédent
+MAP_NEXT=Élément suivant
+MAP_IN=Surligner à l'intérieur
+MAP_OPEN=Ouvrir l'élément surligné

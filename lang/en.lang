@@ -452,3 +452,7 @@ TOOLBAR_MAP_VIEW=Map view
 SETTINGS_ANIMATIONS=Animations
 SETTINGS_ANIMATIONS_HOVER=The map's cells glide when they change, and zoom when you open or leave a folder.
 MAP_IN_OTHER=Inside “other”: %s smaller items (level %s)
+MAP_PREV=Previous item
+MAP_NEXT=Next item
+MAP_IN=Highlight inside
+MAP_OPEN=Open the highlighted item

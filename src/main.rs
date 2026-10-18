@@ -1254,20 +1254,6 @@ impl eframe::App for DiskScanApp {
     }
 }
 
-/// `add` in a panel of the window's color when `framed` (over the map,
-/// which fills its whole area), as it is otherwise.
-fn overlay_frame(ui: &mut egui::Ui, framed: bool, add: impl FnOnce(&mut egui::Ui)) {
-    if framed {
-        egui::Frame::new()
-            .fill(ui.visuals().panel_fill.gamma_multiply(0.88))
-            .corner_radius(6.0)
-            .inner_margin(6.0)
-            .show(ui, add);
-    } else {
-        add(ui);
-    }
-}
-
 impl DiskScanApp {
     /// Sets the window's colors when the theme setting has changed.
     fn follow_theme(&mut self, ctx: &egui::Context) {
@@ -1324,13 +1310,15 @@ impl DiskScanApp {
         self.log_panel_ui(ui);
         let area = self.main_area_ui(ui);
         let chart_shown = !self.summary_view && (self.root.is_some() || self.scanning);
-        if chart_shown {
+        // The map has these in its strip, beside it.
+        let sunburst_shown = chart_shown && !self.settings.map_view;
+        if sunburst_shown {
             self.chart_order_buttons(&ctx, area);
         }
-        if chart_shown && !self.scanning {
+        if sunburst_shown && !self.scanning {
             self.chart_stats_overlay(&ctx, area);
         }
-        if chart_shown {
+        if sunburst_shown {
             self.chart_legend_ui(&ctx, area);
         }
 
@@ -1457,25 +1445,25 @@ impl DiskScanApp {
                 ui.set_max_width((right - 8.0 - area.left() - 8.0).max(40.0));
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.strong(short_path(&n.path()));
-                let in_other = (self.settings.map_view && selected.is_none())
-                    .then(|| self.map.other_items(self.current_view()))
-                    .flatten();
-                overlay_frame(ui, self.settings.map_view, |ui| {
-                    if let Some(items) = in_other {
-                        let depth = self.map.other_depth(self.current_view());
-                        ui.label(trf("MAP_IN_OTHER", &[&format_count(items as u64), &depth.to_string()]));
-                    }
-                    folder_stats_ui(ui, n);
-                });
+                folder_stats_ui(ui, n);
             });
     }
 
-    /// Chart view: the categories in the category bar's order, bottom left
-    /// of `area`. While scanning, those found so far, re-sorted as totals
-    /// grow; each row glides to its new place. Clicking a category adds it
-    /// to the picked ones, or takes it out: the chart then shows only the
-    /// picked categories' files.
+    /// Chart view: the category legend, bottom left of `area`, over the
+    /// chart.
     fn chart_legend_ui(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        egui::Area::new("category_legend".into())
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
+            .show(ctx, |ui| self.legend_body(ui));
+    }
+
+    /// The categories in the category bar's order. While scanning, those
+    /// found so far, re-sorted as totals grow; each row glides to its new
+    /// place. Clicking a category adds it to the picked ones, or takes it
+    /// out: the chart then shows only the picked categories' files.
+    fn legend_body(&mut self, ui: &mut egui::Ui) {
         let rows: Vec<Category> = if self.scanning {
             self.live_looks.order()
         } else {
@@ -1483,102 +1471,83 @@ impl DiskScanApp {
             self.refresh_cat_breakdown(self.current_view_node(&root));
             self.cat_breakdown.iter().map(|r| r.cat).collect()
         };
-        let dark = ctx.global_style().visuals.dark_mode;
+        let dark = ui.visuals().dark_mode;
         let picked = self.pick.as_ref().and_then(Pick::categories);
         let mut clicked = None;
-        let map_view = self.settings.map_view;
-        egui::Area::new("category_legend".into())
-            .order(egui::Order::Foreground)
-            .pivot(egui::Align2::LEFT_BOTTOM)
-            .fixed_pos(area.left_bottom() + Vec2::new(8.0, -8.0))
-            .show(ctx, |ui| {
-                overlay_frame(ui, map_view, |ui| {
-                    let font = egui::TextStyle::Small.resolve(ui.style());
-                    // With some categories picked, the others are dimmed.
-                    let (strong, weak) =
-                        (ui.visuals().text_color(), ui.visuals().weak_text_color());
-                    let ink = |c: Category| match picked {
-                        Some(set) if !set.contains(c) => weak,
-                        _ => strong,
-                    };
-                    let labels: Vec<_> = rows
-                        .iter()
-                        .map(|&c| {
-                            ui.painter()
-                                .layout_no_wrap(self.cats.label(c), font.clone(), ink(c))
-                        })
-                        .collect();
-                    const SWATCH: f32 = 10.0;
-                    const PAD: f32 = 3.0;
-                    let gap = ui.spacing().item_spacing.x;
-                    let row_h = font.size.max(SWATCH) + ui.spacing().item_spacing.y + 4.0;
-                    let width =
-                        labels.iter().map(|g| g.size().x).fold(0.0, f32::max) + SWATCH + gap;
-                    let (rect, _) = ui.allocate_exact_size(
-                        Vec2::new(width, row_h * rows.len() as f32),
-                        egui::Sense::hover(),
-                    );
-                    for (i, (&cat, label)) in rows.iter().zip(labels).enumerate() {
-                        // Glides to row `i` when the order changes.
-                        let y = ui.ctx().animate_value_with_time(
-                            egui::Id::new(("legend_row", cat.0)),
-                            i as f32 * row_h,
-                            0.25,
-                        );
-                        let top = rect.top() + y;
-                        let mid = top + row_h / 2.0;
-                        let row_rect = egui::Rect::from_min_size(
-                            Pos2::new(rect.left() - PAD, top),
-                            Vec2::new(width + 2.0 * PAD, row_h),
-                        );
-                        let is_picked = picked.is_some_and(|set| set.contains(cat));
-                        let hit = ui
-                            .interact(
-                                row_rect,
-                                ui.id().with(("legend_row", cat.0)),
-                                egui::Sense::click(),
-                            )
-                            .on_hover_cursor(egui::CursorIcon::PointingHand);
-                        if is_picked {
-                            ui.painter().rect_filled(
-                                row_rect,
-                                3.0,
-                                ui.visuals().selection.bg_fill.gamma_multiply(0.5),
-                            );
-                        } else if hit.hovered() {
-                            ui.painter().rect_filled(
-                                row_rect,
-                                3.0,
-                                ui.visuals().widgets.hovered.weak_bg_fill,
-                            );
-                        }
-                        let swatch = egui::Rect::from_center_size(
-                            Pos2::new(rect.left() + SWATCH / 2.0, mid),
-                            Vec2::splat(SWATCH),
-                        );
-                        let color = self.cats.color(cat, dark);
-                        let color = match picked {
-                            Some(_) if !is_picked => color.gamma_multiply(0.3),
-                            _ => color,
-                        };
-                        ui.painter().rect_filled(swatch, 2.0, color);
-                        let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
-                        ui.painter().galley(at, label, ink(cat));
-                        let name = self.cats.label(cat);
-                        hit.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::Checkbox,
-                                true,
-                                is_picked,
-                                &name,
-                            )
-                        });
-                        if hit.on_hover_text(tr("LEGEND_CLICK")).clicked() {
-                            clicked = Some(cat);
-                        }
-                    }
-                })
+        let font = egui::TextStyle::Small.resolve(ui.style());
+        // With some categories picked, the others are dimmed.
+        let (strong, weak) = (ui.visuals().text_color(), ui.visuals().weak_text_color());
+        let ink = |c: Category| match picked {
+            Some(set) if !set.contains(c) => weak,
+            _ => strong,
+        };
+        let labels: Vec<_> = rows
+            .iter()
+            .map(|&c| {
+                ui.painter()
+                    .layout_no_wrap(self.cats.label(c), font.clone(), ink(c))
+            })
+            .collect();
+        const SWATCH: f32 = 10.0;
+        const PAD: f32 = 3.0;
+        let gap = ui.spacing().item_spacing.x;
+        let row_h = font.size.max(SWATCH) + ui.spacing().item_spacing.y + 4.0;
+        let width = labels.iter().map(|g| g.size().x).fold(0.0, f32::max) + SWATCH + gap;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(width, row_h * rows.len() as f32),
+            egui::Sense::hover(),
+        );
+        for (i, (&cat, label)) in rows.iter().zip(labels).enumerate() {
+            // Glides to row `i` when the order changes.
+            let y = ui.ctx().animate_value_with_time(
+                egui::Id::new(("legend_row", cat.0)),
+                i as f32 * row_h,
+                0.25,
+            );
+            let top = rect.top() + y;
+            let mid = top + row_h / 2.0;
+            let row_rect = egui::Rect::from_min_size(
+                Pos2::new(rect.left() - PAD, top),
+                Vec2::new(width + 2.0 * PAD, row_h),
+            );
+            let is_picked = picked.is_some_and(|set| set.contains(cat));
+            let hit = ui
+                .interact(
+                    row_rect,
+                    ui.id().with(("legend_row", cat.0)),
+                    egui::Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if is_picked {
+                ui.painter().rect_filled(
+                    row_rect,
+                    3.0,
+                    ui.visuals().selection.bg_fill.gamma_multiply(0.5),
+                );
+            } else if hit.hovered() {
+                ui.painter()
+                    .rect_filled(row_rect, 3.0, ui.visuals().widgets.hovered.weak_bg_fill);
+            }
+            let swatch = egui::Rect::from_center_size(
+                Pos2::new(rect.left() + SWATCH / 2.0, mid),
+                Vec2::splat(SWATCH),
+            );
+            let color = self.cats.color(cat, dark);
+            let color = match picked {
+                Some(_) if !is_picked => color.gamma_multiply(0.3),
+                _ => color,
+            };
+            ui.painter().rect_filled(swatch, 2.0, color);
+            let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
+            ui.painter().galley(at, label, ink(cat));
+            let name = self.cats.label(cat);
+            hit.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, is_picked, &name)
             });
+            if hit.on_hover_text(tr("LEGEND_CLICK")).clicked() {
+                clicked = Some(cat);
+            }
+        }
         if let Some(c) = clicked {
             let mut set = picked.unwrap_or_default();
             set.toggle(c);

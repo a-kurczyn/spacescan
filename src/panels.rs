@@ -981,8 +981,11 @@ impl DiskScanApp {
                 return;
             }
 
-            // Room above the chart for the top-left info's path line.
-            ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 12.0);
+            // Room above the chart for the top-left info's path line (the
+            // map has its details beside it).
+            if !self.settings.map_view {
+                ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 12.0);
+            }
             let avail = ui.available_size();
 
             // A fixed strip below the chart, the same as during a scan, so the chart
@@ -990,19 +993,9 @@ impl DiskScanApp {
             let hover_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
             let content_height = (avail.y - hover_strip_height).max(50.0);
 
-            let (response, painter) = ui.allocate_painter(
-                Vec2::new(avail.x, content_height),
-                egui::Sense::click_and_drag(),
-            );
             if self.settings.map_view {
-                self.map_ui(
-                    ui,
-                    &root,
-                    Arc::as_ptr(&root) as usize,
-                    &response,
-                    &painter,
-                    false,
-                );
+                let size = Vec2::new(avail.x, content_height);
+                self.map_area_ui(ui, &root, Arc::as_ptr(&root) as usize, size, false);
                 ui.add_space(6.0);
                 ui.scope(|ui| {
                     ui.set_opacity(self.color_fade());
@@ -1010,6 +1003,10 @@ impl DiskScanApp {
                 });
                 return;
             }
+            let (response, painter) = ui.allocate_painter(
+                Vec2::new(avail.x, content_height),
+                egui::Sense::click_and_drag(),
+            );
             let (center, max_radius) = self.chart_view(&ctx, &response);
             let hub_radius = max_radius * self.settings.hub_radius_frac;
             let ring_thickness = (max_radius - hub_radius) / self.settings.max_render_depth as f32;
@@ -1070,31 +1067,26 @@ impl DiskScanApp {
         let ctx = ui.ctx().clone();
         // Same layout as the finished chart, so it doesn't jump when the scan
         // ends. No hover, clicks or menu: the data keeps changing.
-        ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 12.0);
+        if !self.settings.map_view {
+            ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 12.0);
+        }
         let avail = ui.available_size();
 
         // The progress bar goes in the strip below the chart.
         let status_strip_height = ui.text_style_height(&egui::TextStyle::Body) * 3.0 + 12.0;
         let content_height = (avail.y - status_strip_height).max(50.0);
 
-        let (response, painter) =
-            ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::drag());
         if self.settings.map_view {
             let partial = std::mem::replace(&mut self.partial_root, empty_node());
-            self.map_ui(
-                ui,
-                &partial,
-                self.partial_gen as usize,
-                &response,
-                &painter,
-                true,
-            );
+            let size = Vec2::new(avail.x, content_height);
+            self.map_area_ui(ui, &partial, self.partial_gen as usize, size, true);
             self.partial_root = partial;
             ui.add_space(4.0);
-            let width = response.rect.width();
-            self.scan_progress_bar(ui, width);
+            self.scan_progress_bar(ui, avail.x);
             return;
         }
+        let (response, painter) =
+            ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::drag());
         let side = response.rect.width().min(response.rect.height());
         let (center, max_radius) = self.chart_view(&ctx, &response);
         let hub_radius = max_radius * self.settings.hub_radius_frac;
@@ -2236,23 +2228,6 @@ impl DiskScanApp {
                             clear_category = true;
                         }
                         ui.separator();
-                    }
-                    // The map has no order; it goes up a level here instead
-                    // of with the sunburst's hub.
-                    if self.settings.map_view {
-                        if glyph_toolbar_button(
-                            ui,
-                            ButtonRole::Action { lit: false },
-                            (self.view_stack.len() > 1 || self.map.other_depth(self.current_view()) > 0)
-                                && !self.scanning,
-                            "⬆",
-                            &tr("HELP_PARENT"),
-                        )
-                        .clicked()
-                        {
-                            self.chart_parent_folder();
-                        }
-                        return;
                     }
                     for (order, glyph, tip) in [
                         (ChartOrder::Size, "9", "CHART_ORDER_SIZE"),

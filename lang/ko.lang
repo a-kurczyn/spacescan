@@ -419,3 +419,7 @@ TOOLBAR_MAP_VIEW=지도 보기
 SETTINGS_ANIMATIONS=애니메이션
 SETTINGS_ANIMATIONS_HOVER=지도 셀이 바뀔 때 부드럽게 움직이고, 폴더를 열거나 나갈 때 확대·축소됩니다.
 MAP_IN_OTHER='기타' 안: 작은 항목 %s개 (단계 %s)
+MAP_PREV=이전 항목
+MAP_NEXT=다음 항목
+MAP_IN=안쪽 항목 선택
+MAP_OPEN=선택한 항목 열기

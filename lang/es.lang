@@ -440,3 +440,7 @@ TOOLBAR_MAP_VIEW=Vista de mapa
 SETTINGS_ANIMATIONS=Animaciones
 SETTINGS_ANIMATIONS_HOVER=Las celdas del mapa se deslizan al cambiar y hacen zoom al abrir o dejar una carpeta.
 MAP_IN_OTHER=Dentro de «otros»: %s elementos más pequeños (nivel %s)
+MAP_PREV=Elemento anterior
+MAP_NEXT=Elemento siguiente
+MAP_IN=Resaltar dentro
+MAP_OPEN=Abrir el elemento resaltado

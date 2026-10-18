@@ -419,3 +419,7 @@ TOOLBAR_MAP_VIEW=マップ表示
 SETTINGS_ANIMATIONS=アニメーション
 SETTINGS_ANIMATIONS_HOVER=マップのセルは変化するときに滑らかに動き、フォルダーを開いたり離れたりするときにズームします。
 MAP_IN_OTHER=「その他」の中: 小さい項目 %s 個 (レベル %s)
+MAP_PREV=前の項目
+MAP_NEXT=次の項目
+MAP_IN=中の項目を選択
+MAP_OPEN=選択した項目を開く

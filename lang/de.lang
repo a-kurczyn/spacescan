@@ -434,3 +434,7 @@ TOOLBAR_MAP_VIEW=Kartenansicht
 SETTINGS_ANIMATIONS=Animationen
 SETTINGS_ANIMATIONS_HOVER=Die Zellen der Karte gleiten bei Änderungen und zoomen beim Öffnen oder Verlassen eines Ordners.
 MAP_IN_OTHER=In „Sonstige“: %s kleinere Einträge (Ebene %s)
+MAP_PREV=Vorheriger Eintrag
+MAP_NEXT=Nächster Eintrag
+MAP_IN=Darin markieren
+MAP_OPEN=Markierten Eintrag öffnen
