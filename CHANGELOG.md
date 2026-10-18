@@ -8,9 +8,12 @@
   treemap), three levels deep, colored by category and shaded by age from
   the newest files in the middle to the oldest at the border. Hover shows
   the same details as the sunburst; a click opens the folder under the
-  pointer, the ⬆ button goes back up. The map grows live during a scan,
-  glides when it changes and zooms into and out of folders; the
-  animations can be turned off in the settings.
+  pointer, and a grey "other" cell opens like a folder holding the items
+  too small to show, as many levels deep as needed. A strip beside the map
+  holds the folder's details, an arrow pad (like the arrow keys; ⬅ and
+  Backspace go back up) and the category legend. The map grows live
+  during a scan, glides when it changes and zooms into and out of
+  folders; the animations can be turned off in the settings.
 - **Theme setting**: Auto (as before), Light or Dark.
 - **Categories window** (Settings › Edit categories…): rename, add, remove
   and reorder categories, change their extensions and pick their colors
