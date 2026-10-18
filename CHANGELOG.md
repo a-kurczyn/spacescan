@@ -8,10 +8,11 @@
   treemap), three levels deep, colored by category and shaded by age from
   the newest files in the middle to the oldest at the border. Hover shows
   the same details as the sunburst; a click opens the folder under the
-  pointer, and a grey "other" cell opens like a folder holding the items
-  that don't fit, as many levels deep as needed. Each item shown gets a
-  cell big enough to see and click, however small it is (hover shows its
-  true size). A strip beside the map, as wide as it needs, holds the
+  pointer. Every cell's area matches its item's size, at every level.
+  When a folder holds more items than can be drawn (cells under 4 × 4
+  pixels, or more than 400), its smallest items share a small grey
+  "other" corner of 6 × 6 pixels, which opens the next of them like a
+  folder, as many times as needed. A strip beside the map, as wide as it needs, holds the
   folder's details, an arrow pad (like the arrow keys; ⬅ and Backspace go
   back up) and the category legend. The map grows live during a scan,
   glides when it changes and zooms into and out of folders; the
