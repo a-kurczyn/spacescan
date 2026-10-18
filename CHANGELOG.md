@@ -9,9 +9,10 @@
   the newest files in the middle to the oldest at the border. Hover shows
   the same details as the sunburst; a click opens the folder under the
   pointer. Cells share the area by size, at every level, and even the
-  smallest item gets a cell of at least 4 × 4 pixels. Only when a folder
+  smallest item gets a cell of at least 16 × 16 pixels, easy to see and
+  click. Only when a folder
   holds more items than fit at that size (or more than 400) do the
-  smallest share a grey "other" corner of 6 × 6 pixels, which opens the
+  smallest share a grey "other" corner of 16 × 16 pixels, which opens the
   next of them like a folder, as many times as needed. A strip beside the map, as wide as it needs, holds the
   folder's details, an arrow pad (like the arrow keys; ⬅ and Backspace go
   back up) and the category legend. The map grows live during a scan,

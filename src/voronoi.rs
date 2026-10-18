@@ -529,12 +529,12 @@ pub(crate) fn rect_poly(rect: egui::Rect) -> Poly {
 
 /// Most cells a folder is split into; the rest share one "other" cell.
 const MAX_CELLS: usize = 400;
-/// Smallest area (square pixels) of an item's cell: 4 × 4, still visible
-/// inside its border.
-const MIN_CELL_PIXELS: f32 = 16.0;
+/// Smallest area (square pixels) of an item's cell: 16 × 16, easy to see
+/// and click.
+const MIN_CELL_PIXELS: f32 = 256.0;
 /// The area (square pixels) of "other" when there are more items than
-/// cells: 6 × 6, a button to the next items.
-const OTHER_CELL_PIXELS: f32 = 36.0;
+/// cells: 16 × 16, a button to the next items.
+const OTHER_CELL_PIXELS: f32 = 256.0;
 /// Smallest area of a folder's cell for the items inside to be shown.
 const MIN_SPLIT_AREA: f32 = 5000.0;
 /// The gap between a folder's cell and the cells inside it.
@@ -1917,26 +1917,29 @@ mod tests {
         assert_eq!(tiny.weight, f64::from(MIN_CELL_PIXELS));
         let sum: f64 = tree.items.iter().map(|i| i.weight).sum();
         assert!((sum - 800.0 * 600.0).abs() < 1.0);
-        assert!((big.weight - (800.0 * 600.0 - 60.0 * 16.0) / 2.0).abs() < 1.0);
-        // More items than fit at the smallest size: "other" is a 6 × 6
+        assert!((big.weight - (800.0 * 600.0 - 60.0 * 256.0) / 2.0).abs() < 1.0);
+        // More items than fit at the smallest size: "other" is a 16 × 16
         // corner and as many as fit in the rest get cells.
-        let tree = map_tree(&root, None, opts(&hidden, &settings), 900.0, 1.0);
-        assert_eq!(tree.items.len(), 54 + 1);
-        let other = &tree.items[54];
-        assert!(other.seg.is_other && other.seg.rest.len() == 62 - 54);
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 120.0 * 120.0, 1.0);
+        assert_eq!(tree.items.len(), 55 + 1);
+        let other = &tree.items[55];
+        assert!(other.seg.is_other && other.seg.rest.len() == 62 - 55);
         assert_eq!(other.seg.idx_path, [OTHER_MARKER]);
         assert_eq!(other.corner, Some(OTHER_CELL_PIXELS));
         // Laid out, it's a corner of exactly that area.
-        let bounds = rect_poly(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(30.0, 30.0)));
+        let bounds = rect_poly(egui::Rect::from_min_size(
+            Pos2::ZERO,
+            Vec2::new(120.0, 120.0),
+        ));
         let places = lay_out(&tree, &bounds, &Places::new());
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
         let cells = map_cells(&tree, &bounds, &place_of);
         let corner = cells.iter().find(|c| c.item.seg.is_other).unwrap();
         assert!((area(&corner.poly) - OTHER_CELL_PIXELS).abs() < 0.5);
-        assert!(contains(&corner.poly, Pos2::new(29.5, 29.5)));
-        // On a screen of 2 pixels per point, 36 pixels are 9 square points.
-        let tree = map_tree(&root, None, opts(&hidden, &settings), 200.0, 2.0);
-        assert_eq!(tree.items.last().unwrap().corner, Some(9.0));
+        assert!(contains(&corner.poly, Pos2::new(119.5, 119.5)));
+        // On a screen of 2 pixels per point, 256 pixels are 64 square points.
+        let tree = map_tree(&root, None, opts(&hidden, &settings), 3200.0, 2.0);
+        assert_eq!(tree.items.last().unwrap().corner, Some(64.0));
         let tree = map_tree(&root, None, opts(&hidden, &settings), 800.0 * 600.0, 1.0);
         // d1 → d2 → d3: three levels, the third not split.
         let d2 = &tree.items[1].children[0];
@@ -1948,7 +1951,7 @@ mod tests {
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
         // In a small area, folders aren't split at all.
         let tree = map_tree(&root, None, opts(&hidden, &settings), 3000.0, 1.0);
-        assert_eq!(tree.items.len(), 62);
+        assert_eq!(tree.items.len(), 10 + 1);
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
     }
 
