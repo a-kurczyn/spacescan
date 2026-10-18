@@ -436,3 +436,6 @@ CATS_DEUTAN=daltonismo verde (deuteranopía)
 CATS_TRITAN=daltonismo azul (tritanopía)
 CATS_LOW_CONTRAST_DARK=Se ve mal sobre fondo oscuro.
 CATS_LOW_CONTRAST_LIGHT=Se ve mal sobre fondo claro.
+TOOLBAR_MAP_VIEW=Vista de mapa
+SETTINGS_ANIMATIONS=Animaciones
+SETTINGS_ANIMATIONS_HOVER=Las celdas del mapa se deslizan al cambiar y hacen zoom al abrir o dejar una carpeta.

@@ -292,6 +292,27 @@ pub(crate) fn draw_chart_icon(painter: &egui::Painter, rect: egui::Rect, color: 
     }
 }
 
+/// Map icon for the Voronoi map button: a frame split into uneven cells.
+pub(crate) fn draw_map_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.3, color);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::from(1u8),
+        stroke,
+        egui::StrokeKind::Outside,
+    );
+    let at = |x: f32, y: f32| {
+        Pos2::new(
+            rect.left() + rect.width() * x,
+            rect.top() + rect.height() * y,
+        )
+    };
+    let joint = at(0.45, 0.55);
+    for end in [at(0.3, 0.0), at(1.0, 0.35), at(0.65, 1.0), at(0.0, 0.7)] {
+        painter.line_segment([joint, end], stroke);
+    }
+}
+
 /// Funnel icon for the Filters button.
 pub(crate) fn draw_filter_icon(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     let stroke = egui::Stroke::new(1.3, color);

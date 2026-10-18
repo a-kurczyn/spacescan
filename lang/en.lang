@@ -448,3 +448,6 @@ CATS_DEUTAN=green color blindness (deuteranopia)
 CATS_TRITAN=blue color blindness (tritanopia)
 CATS_LOW_CONTRAST_DARK=Hard to see on a dark background.
 CATS_LOW_CONTRAST_LIGHT=Hard to see on a light background.
+TOOLBAR_MAP_VIEW=Map view
+SETTINGS_ANIMATIONS=Animations
+SETTINGS_ANIMATIONS_HOVER=The map's cells glide when they change, and zoom when you open or leave a folder.

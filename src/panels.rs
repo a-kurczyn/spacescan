@@ -357,7 +357,7 @@ impl DiskScanApp {
         }
         if icon_toolbar_button(
             ui,
-            !self.summary_view,
+            !self.summary_view && !self.settings.map_view,
             true,
             &tr("TOOLBAR_CHART_VIEW"),
             draw_chart_icon,
@@ -365,6 +365,19 @@ impl DiskScanApp {
         .clicked()
         {
             out.set_summary = Some(false);
+            out.set_map = Some(false);
+        }
+        if icon_toolbar_button(
+            ui,
+            !self.summary_view && self.settings.map_view,
+            true,
+            &tr("TOOLBAR_MAP_VIEW"),
+            draw_map_icon,
+        )
+        .clicked()
+        {
+            out.set_summary = Some(false);
+            out.set_map = Some(true);
         }
         ui.separator();
     }
@@ -424,6 +437,9 @@ impl DiskScanApp {
         }
         if let Some(on) = right.set_summary {
             self.summary_view = on;
+        }
+        if let Some(on) = right.set_map {
+            self.settings.map_view = on;
         }
         if right.empty_bin {
             self.ask_empty_trash();
@@ -794,6 +810,9 @@ impl DiskScanApp {
                                 .text(tr("SETTINGS_FREE_GAMMA")),
                         );
 
+                        ui.checkbox(&mut s.animations, tr("SETTINGS_ANIMATIONS"))
+                            .on_hover_text(tr("SETTINGS_ANIMATIONS_HOVER"));
+
                         ui.separator();
                         ui.label(tr("SETTINGS_LINE_RENDERING"));
                         ui.add(
@@ -975,6 +994,22 @@ impl DiskScanApp {
                 Vec2::new(avail.x, content_height),
                 egui::Sense::click_and_drag(),
             );
+            if self.settings.map_view {
+                self.map_ui(
+                    ui,
+                    &root,
+                    Arc::as_ptr(&root) as usize,
+                    &response,
+                    &painter,
+                    false,
+                );
+                ui.add_space(6.0);
+                ui.scope(|ui| {
+                    ui.set_opacity(self.color_fade());
+                    age_legend_ui(ui, &self.settings.age_shades());
+                });
+                return;
+            }
             let (center, max_radius) = self.chart_view(&ctx, &response);
             let hub_radius = max_radius * self.settings.hub_radius_frac;
             let ring_thickness = (max_radius - hub_radius) / self.settings.max_render_depth as f32;
@@ -1044,6 +1079,22 @@ impl DiskScanApp {
 
         let (response, painter) =
             ui.allocate_painter(Vec2::new(avail.x, content_height), egui::Sense::drag());
+        if self.settings.map_view {
+            let partial = std::mem::replace(&mut self.partial_root, empty_node());
+            self.map_ui(
+                ui,
+                &partial,
+                self.partial_gen as usize,
+                &response,
+                &painter,
+                true,
+            );
+            self.partial_root = partial;
+            ui.add_space(4.0);
+            let width = response.rect.width();
+            self.scan_progress_bar(ui, width);
+            return;
+        }
         let side = response.rect.width().min(response.rect.height());
         let (center, max_radius) = self.chart_view(&ctx, &response);
         let hub_radius = max_radius * self.settings.hub_radius_frac;
@@ -1725,14 +1776,33 @@ impl DiskScanApp {
         colors: &SliceColoring,
     ) {
         let (center, hub_radius, ring_thickness) = geom;
+        let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
+        let dark = painter.ctx().global_style().visuals.dark_mode;
+        let colors = self.segment_colors(seg, colors, dark);
+        draw_arc_mesh(
+            painter,
+            center,
+            radii,
+            (seg.start_angle, seg.end_angle),
+            colors,
+            &self.settings,
+        );
+    }
+
+    /// A slice's colors, for its newest and its oldest part: by category
+    /// and age, paler for "other", fading in from gray once known.
+    pub(crate) fn segment_colors(
+        &self,
+        seg: &Segment,
+        colors: &SliceColoring,
+        dark: bool,
+    ) -> (Color32, Color32) {
         let SliceColoring {
             free_color,
             view,
             live,
             now,
         } = *colors;
-        let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
-        let dark = painter.ctx().global_style().visuals.dark_mode;
         let gray = self.cats.color(self.cats.other(), dark);
         // The slice's look and when it became known (to fade in from then).
         let known = |view: &Node| -> Option<(Look, Option<Instant>)> {
@@ -1775,7 +1845,7 @@ impl DiskScanApp {
                 }
             }
         };
-        let colors = if seg.is_free {
+        if seg.is_free {
             (free_color, free_color)
         } else {
             match view.and_then(known) {
@@ -1800,15 +1870,7 @@ impl DiskScanApp {
                 // Grey until the colors are known.
                 None => (gray, gray),
             }
-        };
-        draw_arc_mesh(
-            painter,
-            center,
-            radii,
-            (seg.start_angle, seg.end_angle),
-            colors,
-            &self.settings,
-        );
+        }
     }
 
     /// The sunburst for the folder being viewed, with hover details,
@@ -1927,7 +1989,7 @@ impl DiskScanApp {
     }
 
     /// Works out the slice looks of the whole tree, once per tree.
-    fn update_looks(&mut self, root: &Node) {
+    pub(crate) fn update_looks(&mut self, root: &Node) {
         if self
             .looks
             .as_ref()
@@ -1948,7 +2010,7 @@ impl DiskScanApp {
     }
 
     /// The hover details of slice `seg` of the chart of `view_node`.
-    fn hover_info(&self, view_node: &Node, seg: &Segment) -> HoverInfo {
+    pub(crate) fn hover_info(&self, view_node: &Node, seg: &Segment) -> HoverInfo {
         // "Other" and free space have no node of their own.
         let real_node = if seg.is_other || seg.is_free {
             None
@@ -2012,7 +2074,7 @@ impl DiskScanApp {
     }
 
     /// The chart's right-click menu, for `context_target`.
-    fn chart_menu_ui(&mut self, ui: &mut egui::Ui, root: &Node) {
+    pub(crate) fn chart_menu_ui(&mut self, ui: &mut egui::Ui, root: &Node) {
         let ctx = ui.ctx().clone();
         let Some(target) = self.context_target.clone() else {
             ui.close();
@@ -2080,7 +2142,7 @@ impl DiskScanApp {
     /// The hovered slice's details, floating next to the pointer `p`
     /// (away from the nearest window edge, judged from the chart's
     /// `center`). Hidden while a menu is open.
-    fn hover_details_ui(&mut self, ctx: &egui::Context, p: Pos2, center: Pos2) {
+    pub(crate) fn hover_details_ui(&mut self, ctx: &egui::Context, p: Pos2, center: Pos2) {
         if egui::Popup::is_any_open(ctx) {
             return;
         }
@@ -2174,6 +2236,22 @@ impl DiskScanApp {
                             clear_category = true;
                         }
                         ui.separator();
+                    }
+                    // The map has no order; it goes up a level here instead
+                    // of with the sunburst's hub.
+                    if self.settings.map_view {
+                        if glyph_toolbar_button(
+                            ui,
+                            ButtonRole::Action { lit: false },
+                            self.view_stack.len() > 1 && !self.scanning,
+                            "⬆",
+                            &tr("HELP_PARENT"),
+                        )
+                        .clicked()
+                        {
+                            self.chart_parent_folder();
+                        }
+                        return;
                     }
                     for (order, glyph, tip) in [
                         (ChartOrder::Size, "9", "CHART_ORDER_SIZE"),
@@ -2299,13 +2377,13 @@ fn color_fade(since: Option<Instant>) -> f32 {
 /// How slices are colored: by category and age when `view` (the folder the
 /// chart shows) is given, else by branch (during a scan).
 #[derive(Clone, Copy)]
-struct SliceColoring<'a> {
-    free_color: Color32,
-    view: Option<&'a Node>,
+pub(crate) struct SliceColoring<'a> {
+    pub(crate) free_color: Color32,
+    pub(crate) view: Option<&'a Node>,
     /// `view` is the live tree of a running scan.
-    live: bool,
+    pub(crate) live: bool,
     /// The current time, for slice ages.
-    now: i64,
+    pub(crate) now: i64,
 }
 
 /// The legend for slice brightness: one swatch per step, from new (bright)
@@ -2384,6 +2462,8 @@ struct RightBarInput {
     filters_toggled: bool,
     empty_bin: bool,
     set_summary: Option<bool>,
+    /// The chart view shows the map (true) or the sunburst.
+    set_map: Option<bool>,
 }
 
 /// The main menu's items; `by_key`: opened with F10, so the keyboard

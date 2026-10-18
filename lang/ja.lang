@@ -415,3 +415,6 @@ CATS_DEUTAN=2 型色覚 (緑)
 CATS_TRITAN=3 型色覚 (青)
 CATS_LOW_CONTRAST_DARK=暗い背景では見えにくい色です。
 CATS_LOW_CONTRAST_LIGHT=明るい背景では見えにくい色です。
+TOOLBAR_MAP_VIEW=マップ表示
+SETTINGS_ANIMATIONS=アニメーション
+SETTINGS_ANIMATIONS_HOVER=マップのセルは変化するときに滑らかに動き、フォルダーを開いたり離れたりするときにズームします。

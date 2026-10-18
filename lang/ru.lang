@@ -419,3 +419,6 @@ CATS_DEUTAN=дейтеранопии (нет восприятия зелёног
 CATS_TRITAN=тританопии (нет восприятия синего)
 CATS_LOW_CONTRAST_DARK=Плохо видно на тёмном фоне.
 CATS_LOW_CONTRAST_LIGHT=Плохо видно на светлом фоне.
+TOOLBAR_MAP_VIEW=Карта
+SETTINGS_ANIMATIONS=Анимация
+SETTINGS_ANIMATIONS_HOVER=Ячейки карты плавно смещаются при изменениях и масштабируются при входе в папку и выходе из неё.
