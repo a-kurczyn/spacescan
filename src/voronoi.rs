@@ -2,8 +2,8 @@
 //! areas match their items' sizes, folders split again inside, a few levels
 //! deep. Each level is a power diagram: every item has a site and a weight,
 //! and a point belongs to the item whose site is nearest once the weights
-//! are taken off. Sites and weights are adjusted until the cell areas match
-//! the sizes (Nocaj and Brandes, 2012).
+//! are taken off. Sites move to their cells' centers (Nocaj and Brandes,
+//! 2012) and the weights are worked out so the cell areas match the sizes.
 //!
 //! Layouts are worked out on a background thread as sites and weights,
 //! relative to the region they split. Each frame turns them into polygons,
@@ -86,14 +86,36 @@ fn clip(poly: &[Pos2], normal: Vec2, limit: f32) -> Poly {
 /// The power diagram of `sites` with `weights` inside `bounds`: each site's
 /// cell, empty if it has none.
 pub(crate) fn power_cells(bounds: &[Pos2], sites: &[Pos2], weights: &[f32]) -> Vec<Poly> {
+    sided_cells(bounds, sites, weights)
+        .into_iter()
+        .map(|c| c.poly)
+        .collect()
+}
+
+/// Across a side on the region's border: no other cell.
+const BORDER: u32 = u32::MAX;
+
+/// A cell and, for each corner, the site whose cell lies across the side
+/// from that corner to the next (`BORDER` if none).
+#[derive(Clone, Default)]
+struct SidedCell {
+    poly: Poly,
+    across: Vec<u32>,
+}
+
+/// `power_cells`, each cell knowing its neighbors.
+fn sided_cells(bounds: &[Pos2], sites: &[Pos2], weights: &[f32]) -> Vec<SidedCell> {
     let by_x = sorted_by_x(sites);
     let heaviest = weights.iter().copied().fold(f32::MIN, f32::max);
     (0..by_x.len())
         .map(|k| {
             let i = by_x[k];
             let si = sites[i];
-            let mut cell = bounds.to_vec();
-            let mut reach = farthest(&cell, si);
+            let mut cell = SidedCell {
+                poly: bounds.to_vec(),
+                across: vec![BORDER; bounds.len()],
+            };
+            let mut reach = farthest(&cell.poly, si);
             // The other sites, nearest in x first: once a site is so far in
             // x that even the heaviest weight couldn't bring its edge into
             // the cell, every site beyond it on that side is too.
@@ -127,18 +149,21 @@ pub(crate) fn power_cells(bounds: &[Pos2], sites: &[Pos2], weights: &[f32]) -> V
                     right_done = right >= by_x.len();
                 }
                 if cut(&mut cell, sites, weights, i, j) {
-                    if cell.is_empty() {
+                    if cell.poly.is_empty() {
                         break;
                     }
-                    reach = farthest(&cell, si);
+                    reach = farthest(&cell.poly, si);
                 }
             }
             (i, cell)
         })
-        .fold(vec![Poly::new(); sites.len()], |mut out, (i, cell)| {
-            out[i] = cell;
-            out
-        })
+        .fold(
+            vec![SidedCell::default(); sites.len()],
+            |mut out, (i, cell)| {
+                out[i] = cell;
+                out
+            },
+        )
 }
 
 /// Site indices in order of x.
@@ -158,23 +183,47 @@ fn farthest(poly: &[Pos2], p: Pos2) -> f32 {
 
 /// Cuts from site i's `cell` the part nearer site j, weights taken off;
 /// true if the cell changed.
-fn cut(cell: &mut Poly, sites: &[Pos2], weights: &[f32], i: usize, j: usize) -> bool {
+fn cut(cell: &mut SidedCell, sites: &[Pos2], weights: &[f32], i: usize, j: usize) -> bool {
     // Points nearer i than j: 2 (sj - si) · x <= |sj|² - |si|² - wj + wi
     let (si, sj) = (sites[i].to_vec2(), sites[j].to_vec2());
     let normal = (sj - si) * 2.0;
     if normal.length_sq() < 1e-12 {
         // Same place: the heavier one (or the first) keeps it.
         if weights[j] > weights[i] || (weights[j] == weights[i] && j < i) {
-            cell.clear();
+            *cell = SidedCell::default();
             return true;
         }
         return false;
     }
     let limit = sj.length_sq() - si.length_sq() - weights[j] + weights[i];
-    if cell.iter().all(|v| normal.dot(v.to_vec2()) <= limit) {
+    let beyond = |v: Pos2| normal.dot(v.to_vec2()) - limit;
+    if cell.poly.iter().all(|&v| beyond(v) <= 0.0) {
         return false;
     }
-    *cell = clip(cell, normal, limit);
+    // As `clip`, keeping track of the sides: the new side faces j.
+    let n = cell.poly.len();
+    let mut out = SidedCell::default();
+    for k in 0..n {
+        let (a, b) = (cell.poly[k], cell.poly[(k + 1) % n]);
+        let side = cell.across[k];
+        let (da, db) = (beyond(a), beyond(b));
+        if da <= 0.0 {
+            out.poly.push(a);
+            out.across.push(if da == 0.0 && db > 0.0 {
+                j as u32
+            } else {
+                side
+            });
+        }
+        if (da < 0.0 && db > 0.0) || (da > 0.0 && db < 0.0) {
+            out.poly.push(a + (b - a) * (da / (da - db)));
+            out.across.push(if da < 0.0 { j as u32 } else { side });
+        }
+    }
+    if out.poly.len() < 3 {
+        out = SidedCell::default();
+    }
+    *cell = out;
     true
 }
 
@@ -274,8 +323,14 @@ pub(crate) fn cells_of(bounds: &[Pos2], places: &[Place]) -> Vec<Poly> {
     power_cells(bounds, &sites, &weights)
 }
 
-/// Most rounds of adjusting a level's sites and weights.
-const MAX_ROUNDS: usize = 400;
+/// Most rounds of moving a level's sites to their cells' centers.
+const MAX_ROUNDS: usize = 60;
+/// Sites have settled when none moves this far (points) in a round.
+const SETTLED: f32 = 0.5;
+/// While sites still move, weights need only get areas this near.
+const ROUGH: f32 = 0.1;
+/// Most Newton steps when working out weights.
+const NEWTON_STEPS: usize = 40;
 /// A level is done when every cell's area is within this fraction of its
 /// item's share.
 const AREA_TOLERANCE: f32 = 0.015;
@@ -300,92 +355,164 @@ pub(crate) fn place_items(
         .iter()
         .map(|s| (s / total) as f32 * total_area)
         .collect();
-    // New items start with half an average cell's weight.
-    let fresh = total_area / n as f32 / 2.0;
     let (mut sites, mut weights): (Vec<Pos2>, Vec<f32>) = (0..n)
         .map(|i| match start.get(i).copied().flatten() {
             Some(p) => absolute(p, rect, total_area),
-            None => (point_inside(bounds, seeds[i]), fresh),
+            None => (point_inside(bounds, seeds[i]), 0.0),
         })
         .unzip();
     if n == 1 {
         return vec![relative(centroid(bounds), 0.0, rect, total_area)];
     }
-    let mut cells = power_cells(bounds, &sites, &weights);
-    // How strongly weights follow the area error; lowered when the error
-    // grows, which damps back-and-forth swings.
-    let mut strength = 1.0f32;
-    let mut last_error = f32::INFINITY;
-    for _ in 0..MAX_ROUNDS {
-        // Sites move to their cells' centers...
-        for i in 0..n {
-            if area(&cells[i]) > 1e-6 {
-                sites[i] = centroid(&cells[i]);
-            }
+    // Two sites in one place would share one cell: move the later one.
+    for i in 1..n {
+        let mut tries = 1u64;
+        while tries < 64 && (0..i).any(|j| (sites[i] - sites[j]).length_sq() < 0.25) {
+            sites[i] = point_inside(bounds, seeds[i] ^ tries.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            tries += 1;
         }
-        limit_weights(&sites, &mut weights);
-        cells = power_cells(bounds, &sites, &weights);
-        // ...then each weight grows or shrinks by how far its cell's area is
-        // from its share.
-        for i in 0..n {
-            let a = area(&cells[i]).max(targets[i] * 0.01);
-            weights[i] = (weights[i] * (targets[i] / a).powf(strength)).max(1e-3);
-        }
-        limit_weights(&sites, &mut weights);
-        cells = power_cells(bounds, &sites, &weights);
-        let worst = (0..n)
-            .map(|i| (area(&cells[i]) - targets[i]).abs() / targets[i].max(1e-6))
-            .fold(0.0f32, f32::max);
-        if worst < AREA_TOLERANCE {
+    }
+    // Weights that give every cell its share, then sites to the centers of
+    // their cells (which keeps cells round rather than long and thin), and
+    // again, until the sites settle.
+    for round in 0..MAX_ROUNDS {
+        // Roughly while the sites move; exactly at the end.
+        solve_weights(bounds, &sites, &mut weights, &targets, ROUGH);
+        if round + 1 == MAX_ROUNDS {
             break;
         }
-        // Damping follows the total error, which swings less than one cell's.
-        let error = (0..n)
-            .map(|i| (area(&cells[i]) - targets[i]).abs())
-            .sum::<f32>();
-        strength = if error > last_error {
-            (strength * 0.8).max(0.25)
-        } else {
-            (strength * 1.05).min(1.0)
-        };
-        last_error = error;
+        let cells = power_cells(bounds, &sites, &weights);
+        let mut moved = 0.0f32;
+        for i in 0..n {
+            if area(&cells[i]) > 1e-6 {
+                let to = centroid(&cells[i]);
+                moved = moved.max((to - sites[i]).length());
+                sites[i] = to;
+            }
+        }
+        if moved < SETTLED {
+            break;
+        }
     }
+    solve_weights(bounds, &sites, &mut weights, &targets, AREA_TOLERANCE);
     (0..n)
         .map(|i| relative(sites[i], weights[i], rect, total_area))
         .collect()
 }
 
-/// Keeps every site inside its own cell: no weight may exceed another's
-/// by the squared distance between their sites or more.
-fn limit_weights(sites: &[Pos2], weights: &mut [f32]) {
-    let by_x = sorted_by_x(sites);
-    let mut lightest = weights.iter().copied().fold(f32::MAX, f32::min);
-    for k in 0..by_x.len() {
-        let i = by_x[k];
-        // Only sites nearer than the root of the weight gap can be too
-        // close; sites in x order, outward on each side, until one is
-        // further than that in x.
-        let near = (weights[i] - lightest).max(0.0);
-        let left = by_x[..k].iter().rev();
-        let right = by_x[k + 1..].iter();
-        for side in [
-            Box::new(left) as Box<dyn Iterator<Item = &usize>>,
-            Box::new(right),
-        ] {
-            for &j in side {
-                let dx = sites[j].x - sites[i].x;
-                if dx * dx >= near {
-                    break;
+/// Sets `weights` so that each site's cell has its `targets` area, the
+/// sites staying put: Newton steps, shortened while one would leave a cell
+/// too small (Kitagawa, Mérigot and Thibert, 2019). A weight changes its
+/// cell's area along the sides it shares with other cells, which tells how
+/// far to move all the weights at once.
+fn solve_weights(
+    bounds: &[Pos2],
+    sites: &[Pos2],
+    weights: &mut [f32],
+    targets: &[f32],
+    tolerance: f32,
+) {
+    let n = sites.len();
+    let mut cells = sided_cells(bounds, sites, weights);
+    if cells.iter().any(|c| c.poly.is_empty()) {
+        // Without weights, every site has a cell.
+        weights.iter_mut().for_each(|w| *w = 0.0);
+        cells = sided_cells(bounds, sites, weights);
+    }
+    let shortfall = |cells: &[SidedCell]| -> Vec<f64> {
+        (0..n)
+            .map(|i| f64::from(targets[i] - area(&cells[i].poly)))
+            .collect()
+    };
+    let size = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let smallest_target = targets.iter().copied().fold(f32::MAX, f32::min);
+    for _ in 0..NEWTON_STEPS {
+        let missing = shortfall(&cells);
+        let worst = (0..n)
+            .map(|i| missing[i].abs() as f32 / targets[i].max(1e-6))
+            .fold(0.0f32, f32::max);
+        if worst < tolerance {
+            return;
+        }
+        // How much each cell's area changes with each weight.
+        let mut links: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+        for i in 0..n {
+            let poly = &cells[i].poly;
+            for (k, &j) in cells[i].across.iter().enumerate() {
+                if j == BORDER {
+                    continue;
                 }
-                let room = (sites[i] - sites[j]).length_sq();
-                let over = weights[i] - weights[j] - room;
-                if over > 0.0 {
-                    weights[i] = (weights[i] - over * 1.01).max(1e-3);
-                }
+                let j = j as usize;
+                let side = (poly[(k + 1) % poly.len()] - poly[k]).length();
+                let apart = (sites[j] - sites[i]).length().max(1e-6);
+                links[i].push((j, f64::from(side / (2.0 * apart))));
             }
         }
-        lightest = lightest.min(weights[i]);
+        let step = solve_links(&links, &missing);
+        // Shortened until no cell gets too small and the areas are nearer.
+        let smallest_now = cells.iter().map(|c| area(&c.poly)).fold(f32::MAX, f32::min);
+        let floor = smallest_target.min(smallest_now) / 2.0;
+        let before = size(&missing);
+        let mut length = 1.0f64;
+        let start = weights.to_vec();
+        loop {
+            for i in 0..n {
+                weights[i] = start[i] + (step[i] * length) as f32;
+            }
+            let tried = sided_cells(bounds, sites, weights);
+            let small = tried.iter().map(|c| area(&c.poly)).fold(f32::MAX, f32::min);
+            if (small >= floor && size(&shortfall(&tried)) <= (1.0 - length / 2.0) * before)
+                || length < 1e-3
+            {
+                cells = tried;
+                break;
+            }
+            length /= 2.0;
+        }
     }
+}
+
+/// Solves `links` · x = `rhs` (conjugate gradients): `links[i]` lists each
+/// j with its weight, the matrix having their sum on the diagonal and minus
+/// each off it.
+fn solve_links(links: &[Vec<(usize, f64)>], rhs: &[f64]) -> Vec<f64> {
+    let n = rhs.len();
+    let times = |x: &[f64]| -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                links[i]
+                    .iter()
+                    .map(|&(j, w)| w * (x[i] - x[j]))
+                    .sum::<f64>()
+                    + 1e-9 * x[i]
+            })
+            .collect()
+    };
+    let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+    // The areas add up either way: only differences between weights count.
+    let mean = rhs.iter().sum::<f64>() / n as f64;
+    let mut residual: Vec<f64> = rhs.iter().map(|r| r - mean).collect();
+    let mut x = vec![0.0; n];
+    let mut dir = residual.clone();
+    let mut rr = dot(&residual, &residual);
+    let goal = rr * 1e-12;
+    for _ in 0..4 * n.max(25) {
+        if rr <= goal {
+            break;
+        }
+        let along = times(&dir);
+        let alpha = rr / dot(&dir, &along).max(f64::MIN_POSITIVE);
+        for i in 0..n {
+            x[i] += alpha * dir[i];
+            residual[i] -= alpha * along[i];
+        }
+        let next = dot(&residual, &residual);
+        for i in 0..n {
+            dir[i] = residual[i] + next / rr * dir[i];
+        }
+        rr = next;
+    }
+    x
 }
 
 /// A rectangle as a polygon, corners clockwise on screen.
@@ -1632,6 +1759,44 @@ mod tests {
         }
     }
 
+    /// Sizes thousands of times apart still get their exact shares, also
+    /// when starting from a layout made for very different sizes (as when
+    /// the largest folder is read last during a scan).
+    #[test]
+    fn very_different_sizes_get_their_shares() {
+        let bounds = rect_poly(egui::Rect::from_min_size(
+            Pos2::ZERO,
+            Vec2::new(945.0, 592.0),
+        ));
+        let sizes = [
+            43_944.0, 15_442.0, 11_944.0, 11_504.0, 5_706.0, 5_445.0, 2_805.0, 1_566.0, 1_026.0,
+            793.0, 492.0, 216.0, 207.0, 108.0, 98.0, 50.0, 36.0, 28.0, 21.0, 20.0, 9.5,
+        ];
+        let seeds: Vec<u64> = (0..sizes.len() as u64).collect();
+        let check = |places: &[Place]| {
+            let cells = cells_of(&bounds, places);
+            let total: f64 = sizes.iter().sum();
+            for (cell, size) in cells.iter().zip(sizes) {
+                let share = (size / total) as f32 * area(&bounds);
+                let off = (area(cell) - share).abs() / share;
+                assert!(
+                    off < AREA_TOLERANCE * 1.5,
+                    "{size}: {} vs {share}",
+                    area(cell)
+                );
+            }
+        };
+        let fresh = place_items(&bounds, &sizes, &seeds, &[]);
+        check(&fresh);
+        let mut early = sizes;
+        early[0] = 1.0;
+        let start: Vec<Option<Place>> = place_items(&bounds, &early, &seeds, &[])
+            .into_iter()
+            .map(Some)
+            .collect();
+        check(&place_items(&bounds, &sizes, &seeds, &start));
+    }
+
     /// Skipping far sites gives the same cells as cutting with every site.
     #[test]
     fn power_cells_skip_only_far_sites() {
@@ -1653,13 +1818,16 @@ mod tests {
             let weights: Vec<f32> = (0..n).map(|_| next() * 4000.0).collect();
             let all: Vec<Poly> = (0..n)
                 .map(|i| {
-                    let mut cell = bounds.clone();
+                    let mut cell = SidedCell {
+                        poly: bounds.clone(),
+                        across: vec![BORDER; 4],
+                    };
                     for j in 0..n {
-                        if i != j && !cell.is_empty() {
+                        if i != j && !cell.poly.is_empty() {
                             cut(&mut cell, &sites, &weights, i, j);
                         }
                     }
-                    cell
+                    cell.poly
                 })
                 .collect();
             let fast = power_cells(&bounds, &sites, &weights);
