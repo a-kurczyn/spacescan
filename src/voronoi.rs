@@ -973,6 +973,43 @@ pub(crate) struct MapState {
     others_tree: usize,
     /// The items of the outer "other" cell, to open it from the keyboard.
     top_other: Option<Vec<usize>>,
+    /// The magnification the map is seen through, and the folder it's for.
+    lens: Lens,
+    lens_view: Option<MapView>,
+}
+
+/// How far the map is zoomed in (Ctrl+wheel) and panned (dragging).
+#[derive(Clone, Copy)]
+struct Lens {
+    /// 1 shows the whole map.
+    scale: f32,
+    /// How far the zoomed map is moved from centred.
+    offset: Vec2,
+}
+
+impl Default for Lens {
+    fn default() -> Self {
+        Lens {
+            scale: 1.0,
+            offset: Vec2::ZERO,
+        }
+    }
+}
+
+/// Most the map zooms in.
+const MAX_LENS_SCALE: f32 = 8.0;
+
+impl Lens {
+    /// Where point `p` of the map in `rect` is seen.
+    fn apply(self, rect: egui::Rect, p: Pos2) -> Pos2 {
+        rect.center() + (p - rect.center()) * self.scale + self.offset
+    }
+
+    /// Keeps the zoomed map covering `rect`.
+    fn clamp(&mut self, rect: egui::Rect) {
+        let limit = rect.size() * (self.scale - 1.0) / 2.0;
+        self.offset = self.offset.clamp(-limit, limit);
+    }
 }
 
 impl MapState {
@@ -1254,7 +1291,15 @@ impl DiskScanApp {
         }
         let state = &self.map;
         let place_of = |key: &[Box<str>], name: &str| state.place_now(key, name, glide);
-        let cells = map_cells(&tree, &bounds, &place_of);
+        let mut cells = map_cells(&tree, &bounds, &place_of);
+        let lens = self.map_lens(&ctx, response, rect, &view);
+        if lens.scale > 1.0 {
+            for c in &mut cells {
+                for p in &mut c.poly {
+                    *p = lens.apply(rect, *p);
+                }
+            }
+        }
 
         let dark = ui.visuals().dark_mode;
         let coloring = SliceColoring {
@@ -1366,6 +1411,46 @@ impl DiskScanApp {
             return;
         }
         self.map_input(ui, view_node, &view.folder, response, &cells);
+    }
+
+    /// Ctrl+wheel over the map zooms it in and out around the pointer;
+    /// dragging pans it while it's zoomed in. Opening another folder shows
+    /// it whole.
+    fn map_lens(
+        &mut self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        rect: egui::Rect,
+        view: &MapView,
+    ) -> Lens {
+        let lens = &mut self.map.lens;
+        if self.map.lens_view.as_ref() != Some(view) {
+            *lens = Lens::default();
+            self.map.lens_view = Some(view.clone());
+        }
+        if response.contains_pointer() {
+            let z = ctx.input(|i| i.zoom_delta());
+            if z != 1.0 {
+                let scale = (lens.scale * z).clamp(1.0, MAX_LENS_SCALE);
+                let z = scale / lens.scale;
+                if let Some(p) = ctx.input(|i| i.pointer.hover_pos()) {
+                    lens.offset = (p - rect.center()) * (1.0 - z) + lens.offset * z;
+                }
+                lens.scale = scale;
+            }
+        }
+        if response.dragged() {
+            lens.offset += response.drag_delta();
+        }
+        lens.clamp(rect);
+        if lens.scale > 1.0 {
+            if response.dragged() {
+                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            } else if response.hovered() {
+                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+            }
+        }
+        *lens
     }
 
     /// The folder the map shows now: each folder opened is shown in turn,
@@ -1587,6 +1672,9 @@ fn draw_labels(painter: &egui::Painter, cells: &[MapCell], picture: &[DrawnCell]
             continue;
         }
         let rect = egui::Rect::from_points(&cell.poly);
+        if !painter.clip_rect().intersects(rect) {
+            continue; // off screen while zoomed in
+        }
         // Room inside the cell: about the middle half of its bounding box.
         let width = rect.width() * 0.7;
         if width < 36.0 || rect.height() < 18.0 {
@@ -2004,6 +2092,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The zoomed map is seen around its centre, and panning stops where its
+    /// edge meets the view's.
+    #[test]
+    fn lens_zooms_and_stays_over_the_map() {
+        let rect = egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0));
+        let p = Pos2::new(300.0, 50.0);
+        assert_eq!(Lens::default().apply(rect, p), p);
+        let mut lens = Lens {
+            scale: 2.0,
+            offset: Vec2::new(1000.0, -1000.0),
+        };
+        lens.clamp(rect);
+        assert_eq!(lens.offset, Vec2::new(200.0, -100.0));
+        // The map's corners stay at or beyond the view's.
+        assert_eq!(lens.apply(rect, rect.left_top()), Pos2::new(0.0, -200.0));
+        assert_eq!(
+            lens.apply(rect, rect.right_bottom()),
+            Pos2::new(800.0, 200.0)
+        );
+        assert_eq!(lens.apply(rect, rect.center()), Pos2::new(400.0, 0.0));
     }
 
     /// Cells glide from their old places to new ones; a new item grows in.

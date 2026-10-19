@@ -20,7 +20,9 @@
   animations can be turned off in the settings. The map shows one level
   of folders by default; Settings › Map levels shows up to three, the
   items inside folders drawn within their cells. Settings › Gap between
-  map cells leaves up to 12 pixels of space between them.
+  map cells leaves up to 12 pixels of space between them. Ctrl+wheel
+  zooms the map in up to 8× around the pointer, showing the names of
+  smaller cells, and dragging moves it.
 - **Theme setting**: Auto (as before), Light or Dark.
 - **Categories window** (Settings › Edit categories…): rename, add and
   remove categories, change their extensions and pick their colors
