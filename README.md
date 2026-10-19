@@ -1,9 +1,10 @@
 # SpaceScan
 
 A fast disk-usage explorer for Linux. SpaceScan scans any drive, mount point
-or folder and shows where the space went, as an interactive sunburst chart
-or as an ncdu-style table you can drive from the keyboard. It also writes
-plain-text, CSV or JSON reports from the command line.
+or folder and shows where the space went, as an interactive sunburst chart,
+a map of cells sized by the space they use, or an ncdu-style table you can
+drive from the keyboard. It also writes plain-text, CSV or JSON reports from
+the command line.
 
 ![SpaceScan chart view: a drive as a sunburst chart, colored by file category](docs/screenshot.png)
 
@@ -13,15 +14,26 @@ plain-text, CSV or JSON reports from the command line.
   space they use, and the drive's free space is shown too. Click a slice to
   zoom in, click the center to go back up. Ctrl+scroll enlarges the chart
   and dragging pans it, to reach very thin slices.
-- **Map view.** The folder as a map of cells sized by the space they use
-  (a Voronoi treemap), three levels deep: big files and crowded folders
-  stand out at a glance. Click a cell to zoom into it; the map grows live
-  during a scan.
+- **Map view.** The folder as a map of cells whose areas match the space
+  they use (a Voronoi treemap), with the folders inside drawn within their
+  cells, two levels deep by default and up to twelve. Big files and crowded
+  folders stand out at a glance, and even the smallest file gets a cell
+  you can click. Click a cell to open it; Ctrl+scroll zooms in to read the
+  names of small cells. The map grows live during a scan.
+
+  ![SpaceScan map view: a drive as a Voronoi treemap, Backups highlighted and shown in yellow in the path bar](docs/map.png)
+
+- **Smooth navigation.** The arrow keys work the same in the chart, the map
+  and the table, as in ncdu: ⬆ ⬇ move, ➡ opens, ⬅ goes back up. The item
+  you highlight shows in yellow after the path of the folder you're in.
+  Slices and cells glide to their new places and zoom into and out of
+  folders (animations can be turned off).
 - **Colors that mean something.** A slice takes the color of the file
   category using most of it (video, audio, images, code…), and gets darker
   the longer its files have been on the disk. A color-blind-safe palette
   is one click away in the settings, and categories, their extensions and
-  colors can be edited there. Light, dark or automatic theme.
+  colors can be edited there, from 16 colors that stay easy to tell apart
+  or any color code. Light, dark or automatic theme.
 - **Hover details:** size, file count, owner, permissions, dates, and the
   newest and oldest file inside a folder.
 - **Summary table.** Keyboard-driven, like ncdu: sort by size, name, file
@@ -65,7 +77,7 @@ plain-text, CSV or JSON reports from the command line.
 
 <p align="center">
   <img src="docs/filters.png" width="370" alt="The Filters window: name patterns, a size range and dates, showing 49 of 663 files">
-  <img src="docs/settings.png" width="450" alt="The Settings window: measure by bytes or files, chart depth and grouping, colors and age shades, line rendering">
+  <img src="docs/settings.png" width="370" alt="The Settings window: unit of measure, sunburst, treemap, rendering, table and behavior controls">
 </p>
 
 ## Requirements
@@ -221,12 +233,13 @@ scan:
 - `/` scans the whole system, 🏠 scans your home folder,
 - or type a path into the path bar and press Enter.
 
-The toolbar switches between the chart and the summary table, sorts chart
-slices by size or by name, and opens the filters and settings. The ☰ menu
+The toolbar switches between the chart, the map and the summary table,
+sorts chart slices by size or by name, and opens the filters and settings. The ☰ menu
 (or F10) also holds the keyboard shortcuts, a bug-report link and About.
 
-In the chart, right-click a slice to zoom, rescan, open, hide, move to the
-trash or delete it. In the table, the main keys are:
+In the chart and the map, right-click a slice or cell to zoom, rescan,
+open, hide, move to the trash or delete it. The arrow keys work as in the
+table. In the table, the main keys are:
 
 | Key | Action |
 |-----|--------|
@@ -298,15 +311,18 @@ never open a window and never change your settings.
 ## Configuration
 
 Settings are saved to `~/.config/spacescan/settings.json` and can be changed
-in the ⚙ panel: chart depth, minimum slice angle, slices per ring, colors
-and age shades, line rendering, table columns and sort order, measuring by
-bytes or files, apparent-size mode and language.
+in the ⚙ panel: measuring by bytes or files; the sunburst's depth, minimum
+slice angle and slices per ring; the map's levels and the gap between its
+cells; theme, colors, age shades and borders; the table's flat list;
+animations, apparent-size mode, categories and language. Table columns and
+sort order are saved as you change them.
 
 ### File categories
 
-The categories and their extensions are in
-`~/.config/spacescan/categories.json`, written with the defaults on first
-start. Edit it to move an extension to another category or add your own;
+The categories, their extensions and colors can be changed in Settings ›
+Edit categories…, which warns about an extension in two categories and
+colors that are hard to tell apart. They're saved in
+`~/.config/spacescan/categories.json`, which can also be edited by hand;
 it's read again at every scan. Extensions in no category count as "Other".
 
 ### Adding a language
