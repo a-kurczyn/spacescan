@@ -325,12 +325,17 @@ pub(crate) fn cells_of(bounds: &[Pos2], places: &[Place]) -> Vec<Poly> {
 
 /// Most rounds of moving a level's sites to their cells' centers.
 const MAX_ROUNDS: usize = 60;
-/// Sites have settled when none moves this far (points) in a round.
-const SETTLED: f32 = 0.5;
+/// Sites have settled when, on average over the area, they move less than
+/// this fraction of their cell's width in a round. (Small cells squeezed
+/// between big ones keep shifting a little, which changes nothing seen.)
+const SETTLED: f32 = 0.02;
 /// While sites still move, weights need only get areas this near.
 const ROUGH: f32 = 0.1;
 /// Most Newton steps when working out weights.
 const NEWTON_STEPS: usize = 40;
+/// Most Newton steps per round while the sites still move: the weights
+/// carry over from round to round, so a rough fix is enough.
+const ROUGH_STEPS: usize = 2;
 /// A level is done when every cell's area is within this fraction of its
 /// item's share.
 const AREA_TOLERANCE: f32 = 0.015;
@@ -377,7 +382,7 @@ pub(crate) fn place_items(
     // again, until the sites settle.
     for round in 0..MAX_ROUNDS {
         // Roughly while the sites move; exactly at the end.
-        solve_weights(bounds, &sites, &mut weights, &targets, ROUGH);
+        solve_weights(bounds, &sites, &mut weights, &targets, ROUGH, ROUGH_STEPS);
         if round + 1 == MAX_ROUNDS {
             break;
         }
@@ -386,7 +391,8 @@ pub(crate) fn place_items(
         for i in 0..n {
             if area(&cells[i]) > 1e-6 {
                 let to = centroid(&cells[i]);
-                moved = moved.max((to - sites[i]).length());
+                let width = targets[i].sqrt().max(1.0);
+                moved += (to - sites[i]).length() / width * targets[i] / total_area;
                 sites[i] = to;
             }
         }
@@ -394,23 +400,31 @@ pub(crate) fn place_items(
             break;
         }
     }
-    solve_weights(bounds, &sites, &mut weights, &targets, AREA_TOLERANCE);
+    solve_weights(
+        bounds,
+        &sites,
+        &mut weights,
+        &targets,
+        AREA_TOLERANCE,
+        NEWTON_STEPS,
+    );
     (0..n)
         .map(|i| relative(sites[i], weights[i], rect, total_area))
         .collect()
 }
 
 /// Sets `weights` so that each site's cell has its `targets` area, the
-/// sites staying put: Newton steps, shortened while one would leave a cell
-/// too small (Kitagawa, Mérigot and Thibert, 2019). A weight changes its
-/// cell's area along the sides it shares with other cells, which tells how
-/// far to move all the weights at once.
+/// sites staying put: up to `steps` Newton steps, shortened while one would
+/// leave a cell too small (Kitagawa, Mérigot and Thibert, 2019). A weight
+/// changes its cell's area along the sides it shares with other cells,
+/// which tells how far to move all the weights at once.
 fn solve_weights(
     bounds: &[Pos2],
     sites: &[Pos2],
     weights: &mut [f32],
     targets: &[f32],
     tolerance: f32,
+    steps: usize,
 ) {
     let n = sites.len();
     let mut cells = sided_cells(bounds, sites, weights);
@@ -426,7 +440,7 @@ fn solve_weights(
     };
     let size = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
     let smallest_target = targets.iter().copied().fold(f32::MAX, f32::min);
-    for _ in 0..NEWTON_STEPS {
+    for _ in 0..steps {
         let missing = shortfall(&cells);
         let worst = (0..n)
             .map(|i| missing[i].abs() as f32 / targets[i].max(1e-6))
@@ -987,7 +1001,15 @@ pub(crate) struct MapState {
     /// The magnification the map is seen through, and the folder it's for.
     lens: Lens,
     lens_view: Option<MapView>,
+    /// Layouts worked out before, newest last, for the tree generation
+    /// `cache_gen`; and what the layout being worked out is for.
+    cache: Vec<(MapSource, Arc<MapTree>, Places)>,
+    cache_gen: u64,
+    job_source: Option<MapSource>,
 }
+
+/// How many layouts the map keeps, to show folders seen before at once.
+const CACHED_LAYOUTS: usize = 50;
 
 /// How far the map is zoomed in (Ctrl+wheel) and panned (dragging).
 #[derive(Clone, Copy)]
@@ -1245,6 +1267,10 @@ impl DiskScanApp {
             size: ((rect.width() / 8.0) as i32, (rect.height() / 8.0) as i32),
         };
 
+        if self.map.cache_gen != self.tree_gen {
+            self.map.cache.clear();
+            self.map.cache_gen = self.tree_gen;
+        }
         // A different folder: zoom to it once it's laid out.
         let old_view = self.map.source.as_ref().map(|s| s.view.clone());
         if self.map.source.as_ref() != Some(&source) {
@@ -1277,16 +1303,33 @@ impl DiskScanApp {
                 order: self.chart_order,
                 measure: self.measure,
             };
-            let only = view.others.last().map(Vec::as_slice);
-            self.map.next_tree = Some(Arc::new(map_tree(
-                view_node,
-                only,
-                opts,
-                area(&bounds),
-                ctx.pixels_per_point(),
-            )));
+            let cached = self
+                .map
+                .cache
+                .iter()
+                .position(|(s, _, _)| *s == source)
+                .filter(|_| !live);
+            if let Some(i) = cached {
+                // Seen before: shown as it was, without working it out again.
+                let (source, tree, places) = self.map.cache.remove(i);
+                let (tx, rx) = channel();
+                let _ = tx.send(places);
+                self.map.next_tree = Some(tree);
+                self.map.job = Some(rx);
+                self.map.job_source = Some(source);
+                self.map.outdated = false;
+            } else {
+                let only = view.others.last().map(Vec::as_slice);
+                self.map.next_tree = Some(Arc::new(map_tree(
+                    view_node,
+                    only,
+                    opts,
+                    area(&bounds),
+                    ctx.pixels_per_point(),
+                )));
+                self.map.outdated = true;
+            }
             self.map.source = Some(source);
-            self.map.outdated = true;
         }
         self.ask_map_layout(&bounds, live, &ctx);
         self.take_map_layout(animate);
@@ -1514,6 +1557,7 @@ impl DiskScanApp {
             ctx.request_repaint();
         });
         self.map.job = Some(rx);
+        self.map.job_source = self.map.source.clone().filter(|_| !live);
         self.map.asked_at = Some(Instant::now());
         self.map.outdated = false;
     }
@@ -1524,6 +1568,12 @@ impl DiskScanApp {
             return;
         };
         self.map.job = None;
+        if let (Some(source), Some(tree)) = (self.map.job_source.take(), &self.map.next_tree) {
+            if self.map.cache.len() >= CACHED_LAYOUTS {
+                self.map.cache.remove(0);
+            }
+            self.map.cache.push((source, tree.clone(), places.clone()));
+        }
         let glide = self.map.glide(animate);
         self.map.from = if animate {
             self.map.places_now(glide)
@@ -2240,7 +2290,7 @@ mod tests {
     }
 
     /// On the map, clicking a folder opens it and the Parent folder button
-    /// goes back up.
+    /// goes back up; folders seen before show without a new layout.
     #[test]
     fn map_opens_folders_and_goes_back() {
         let mut app = DiskScanApp::default();
@@ -2307,10 +2357,17 @@ mod tests {
         assert_eq!(app.current_view(), &vec![0]);
         laid_out(&mut app);
         assert_eq!(app.map.last_picture.len(), 4);
+        // Folders seen before show at once, from the layouts kept.
         app.chart_parent_folder();
-        laid_out(&mut app);
+        frame(&mut app, vec![]);
+        assert!(app.map.job.is_none());
         assert_eq!(app.current_view(), &Vec::<usize>::new());
         assert_eq!(app.map.last_picture.len(), 2 + 4);
+        app.view_stack.push(vec![0]);
+        frame(&mut app, vec![]);
+        assert!(app.map.job.is_none());
+        assert_eq!(app.map.last_picture.len(), 4);
+        assert_eq!(app.map.cache.len(), 2);
     }
 
     /// A folder opened during a zoom waits for it: each zoom plays in turn.
