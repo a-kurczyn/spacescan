@@ -19,7 +19,8 @@
   glides when it changes and zooms into and out of folders; the
   animations can be turned off in the settings. The map shows one level
   of folders by default; Settings › Map levels shows up to three, the
-  items inside folders drawn within their cells.
+  items inside folders drawn within their cells. Settings › Gap between
+  map cells leaves up to 12 pixels of space between them.
 - **Theme setting**: Auto (as before), Light or Dark.
 - **Categories window** (Settings › Edit categories…): rename, add, remove
   and reorder categories, change their extensions and pick their colors
@@ -30,6 +31,10 @@
 - **`spacescan -U`** updates the AppImage to the latest release, checked
   against the release's checksums. SpaceScan never looks for updates on
   its own.
+
+### Changed
+- ⬆ and ⬇ in the sunburst and the map stop at the first and last item
+  instead of going round to the other end, as in the table.
 
 ## 1.1.3 (2026-10-17)
 

@@ -817,6 +817,13 @@ impl DiskScanApp {
                                 .text(tr("SETTINGS_MAP_LEVELS")),
                         )
                         .on_hover_text(tr("SETTINGS_MAP_LEVELS_HOVER"));
+                        ui.add(
+                            egui::Slider::new(&mut s.map_gap, Settings::MAP_GAP)
+                                .step_by(1.0)
+                                .suffix(" px")
+                                .text(tr("SETTINGS_MAP_GAP")),
+                        )
+                        .on_hover_text(tr("SETTINGS_MAP_GAP_HOVER"));
 
                         ui.separator();
                         ui.label(tr("SETTINGS_LINE_RENDERING"));

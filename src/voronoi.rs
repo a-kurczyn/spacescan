@@ -556,6 +556,8 @@ pub(crate) struct MapItem {
 /// The folder shown, as the map lays it out.
 pub(crate) struct MapTree {
     items: Vec<MapItem>,
+    /// The empty space between neighbouring cells, in points.
+    gap: f32,
 }
 
 /// The name "other" goes by in a layout: no file name holds a NUL.
@@ -570,13 +572,17 @@ pub(crate) fn map_tree(
     area: f32,
     pixels_per_point: f32,
 ) -> MapTree {
-    let pixel = 1.0 / (pixels_per_point * pixels_per_point);
+    let gap = opts.settings.map_gap;
+    // The gap comes off each cell, so the smallest ones grow by it to stay
+    // as easy to see and click.
+    let side = |pixels: f32| (pixels.sqrt() + gap).powi(2) / (pixels_per_point * pixels_per_point);
     let sizes = CellSizes {
-        smallest: MIN_CELL_PIXELS * pixel,
-        other: OTHER_CELL_PIXELS * pixel,
+        smallest: side(MIN_CELL_PIXELS),
+        other: side(OTHER_CELL_PIXELS),
     };
     MapTree {
         items: map_items(view, only, &[], 0, area, sizes, opts),
+        gap: gap / pixels_per_point,
     }
 }
 
@@ -760,6 +766,11 @@ fn cut_corner(poly: &[Pos2], wanted: f32) -> (Poly, Poly) {
     (clip(poly, toward, at), clip(poly, -toward, -at))
 }
 
+/// Where a folder's items go: a little inside its cell as drawn.
+fn inner_region(cell: &[Pos2], gap: f32) -> Option<Poly> {
+    inset(cell, gap / 2.0 + NEST_GAP)
+}
+
 /// Laid-out places: for each folder split (by its items' names from the
 /// map's top), each of its items' places, by name.
 pub(crate) type Places = HashMap<Vec<Box<str>>, HashMap<Box<str>, Place>>;
@@ -768,13 +779,14 @@ pub(crate) type Places = HashMap<Vec<Box<str>>, HashMap<Box<str>, Place>>;
 /// there are some.
 pub(crate) fn lay_out(tree: &MapTree, bounds: &[Pos2], earlier: &Places) -> Places {
     let mut out = Places::new();
-    lay_out_level(&tree.items, bounds, Vec::new(), earlier, &mut out);
+    lay_out_level(&tree.items, bounds, tree.gap, Vec::new(), earlier, &mut out);
     out
 }
 
 fn lay_out_level(
     items: &[MapItem],
     bounds: &[Pos2],
+    gap: f32,
     key: Vec<Box<str>>,
     earlier: &Places,
     out: &mut Places,
@@ -800,10 +812,10 @@ fn lay_out_level(
         if item.children.is_empty() || area(cell) < MIN_SPLIT_AREA {
             continue;
         }
-        if let Some(inner) = inset(cell, NEST_GAP) {
+        if let Some(inner) = inner_region(cell, gap) {
             let mut inner_key = key.clone();
             inner_key.push(item.key.clone());
-            lay_out_level(&item.children, &inner, inner_key, earlier, out);
+            lay_out_level(&item.children, &inner, gap, inner_key, earlier, out);
         }
     }
     out.insert(
@@ -829,13 +841,21 @@ pub(crate) fn map_cells<'a>(
     place_of: PlaceOf,
 ) -> Vec<MapCell<'a>> {
     let mut out = Vec::new();
-    cells_level(&tree.items, bounds, &mut Vec::new(), place_of, &mut out);
+    cells_level(
+        &tree.items,
+        bounds,
+        tree.gap,
+        &mut Vec::new(),
+        place_of,
+        &mut out,
+    );
     out
 }
 
 fn cells_level<'a>(
     items: &'a [MapItem],
     bounds: &[Pos2],
+    gap: f32,
     key: &mut Vec<Box<str>>,
     place_of: PlaceOf,
     out: &mut Vec<MapCell<'a>>,
@@ -862,14 +882,14 @@ fn cells_level<'a>(
         }
         key.push(item.key.clone());
         let laid_out = !item.children.is_empty() && place_of(key, &item.children[0].key).is_some();
-        let inner = laid_out.then(|| inset(&poly, NEST_GAP)).flatten();
+        let inner = laid_out.then(|| inner_region(&poly, gap)).flatten();
         out.push(MapCell {
             item,
-            poly,
+            poly: inset(&poly, gap / 2.0).unwrap_or(poly),
             split: inner.is_some(),
         });
         if let Some(inner) = inner {
-            cells_level(&item.children, &inner, key, place_of, out);
+            cells_level(&item.children, &inner, gap, key, place_of, out);
         }
         key.pop();
     }
@@ -902,6 +922,7 @@ struct MapSource {
     measure: Measure,
     hidden: usize,
     levels: usize,
+    gap: f32,
     size: (i32, i32),
 }
 
@@ -1232,6 +1253,7 @@ impl DiskScanApp {
             measure: self.measure,
             hidden: self.hidden.len(),
             levels: self.settings.map_levels,
+            gap: self.settings.map_gap,
             size: ((rect.width() / 8.0) as i32, (rect.height() / 8.0) as i32),
         };
 
@@ -2002,6 +2024,48 @@ mod tests {
         }
     }
 
+    /// With a gap set, neighbouring cells are that far apart, and the
+    /// smallest cells grow by it.
+    #[test]
+    fn map_gap_parts_cells() {
+        let files = (0..20)
+            .map(|i| test_node(&format!("/t/f{i}"), 1 + 1000 * i, false, vec![]))
+            .collect();
+        let root = test_node("/t", 0, true, files);
+        let hidden = HashSet::new();
+        let settings = Settings {
+            map_gap: 8.0,
+            ..Settings::default()
+        };
+        let bounds = rect_poly(egui::Rect::from_min_size(
+            Pos2::ZERO,
+            Vec2::new(900.0, 600.0),
+        ));
+        let tree = map_tree(&root, None, opts(&hidden, &settings), area(&bounds), 1.0);
+        assert_eq!(tree.items.last().unwrap().weight, f64::from(24.0f32 * 24.0));
+        let places = lay_out(&tree, &bounds, &Places::new());
+        let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
+        let cells = map_cells(&tree, &bounds, &place_of);
+        assert_eq!(cells.len(), 20);
+        // Distance from `p` to the nearest edge of `poly`.
+        let to_edge = |p: Pos2, poly: &[Pos2]| {
+            (0..poly.len())
+                .map(|i| {
+                    let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+                    let t = ((p - a).dot(b - a) / (b - a).length_sq()).clamp(0.0, 1.0);
+                    p.distance(a + (b - a) * t)
+                })
+                .fold(f32::INFINITY, f32::min)
+        };
+        for (i, a) in cells.iter().enumerate() {
+            for b in &cells[i + 1..] {
+                for &p in &a.poly {
+                    assert!(!contains(&b.poly, p) && to_edge(p, &b.poly) > 7.9);
+                }
+            }
+        }
+    }
+
     /// Cells glide from their old places to new ones; a new item grows in.
     #[test]
     fn places_glide() {
@@ -2116,6 +2180,7 @@ mod tests {
             measure: Measure::Bytes,
             hidden: 0,
             levels: 1,
+            gap: 0.0,
             size: (0, 0),
         });
         app.map.zoom = Some(Zoom {

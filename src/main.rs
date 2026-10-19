@@ -138,6 +138,8 @@ struct Settings {
     animations: bool,
     /// How many levels of folders the map shows at once.
     map_levels: usize,
+    /// The empty space between the map's cells, in screen pixels.
+    map_gap: f32,
 }
 
 /// Allowed ranges, for the settings sliders and for values read from the
@@ -156,6 +158,7 @@ impl Settings {
     const LOG_LINES: RangeInclusive<usize> = 50..=5000;
     const FLAT_ROWS: RangeInclusive<usize> = 100..=100_000;
     const MAP_LEVELS: RangeInclusive<usize> = 1..=3;
+    const MAP_GAP: RangeInclusive<f32> = 0.0..=12.0;
 
     fn sanitized(mut self) -> Self {
         /// `v` moved into `range` if it's outside it.
@@ -179,6 +182,7 @@ impl Settings {
         clamp(&mut self.max_log_lines, Self::LOG_LINES);
         clamp(&mut self.flat_rows, Self::FLAT_ROWS);
         clamp(&mut self.map_levels, Self::MAP_LEVELS);
+        clamp(&mut self.map_gap, Self::MAP_GAP);
         self
     }
 }
@@ -220,6 +224,7 @@ impl Default for Settings {
             map_view: false,
             animations: true,
             map_levels: 1,
+            map_gap: 0.0,
         }
     }
 }
@@ -1015,9 +1020,9 @@ impl DiskScanApp {
     }
 
     /// Moves the slice highlight: ⬆⬇ previous/next slice in the same ring
-    /// (wrapping), ➡ first slice one ring out, ⬅ the parent slice (from the
-    /// inner ring: the parent folder). With nothing highlighted, any arrow
-    /// starts at the first inner slice.
+    /// (stopping at the first and last), ➡ first slice one ring out, ⬅ the
+    /// parent slice (from the inner ring: the parent folder). With nothing
+    /// highlighted, any arrow starts at the first inner slice.
     fn move_selection(&mut self, dir: NavDir) {
         let view = self.current_view().clone();
         let segs = &self.chart_segs;
@@ -1037,10 +1042,10 @@ impl DiskScanApp {
                         .filter(|(p, _)| p.len() == cur.len() && p[..p.len() - 1] == *parent)
                         .collect();
                     sibs.sort_by(|a, b| a.1.total_cmp(&b.1));
-                    let n = sibs.len();
-                    (n > 0).then(|| match sibs.iter().position(|(p, _)| *p == cur) {
-                        Some(i) if dir == NavDir::Next => sibs[(i + 1) % n].0.clone(),
-                        Some(i) => sibs[(i + n - 1) % n].0.clone(),
+                    let last = sibs.len().checked_sub(1);
+                    last.map(|last| match sibs.iter().position(|(p, _)| *p == cur) {
+                        Some(i) if dir == NavDir::Next => sibs[(i + 1).min(last)].0.clone(),
+                        Some(i) => sibs[i.saturating_sub(1)].0.clone(),
                         None => sibs[0].0.clone(),
                     })
                 }
@@ -1839,6 +1844,26 @@ mod pick_tests {
         click_named(&mut app, &ctx, &docs, false);
         assert_eq!(app.pick, None);
         assert_eq!(shown_files(&app), all);
+    }
+
+    /// ⬆⬇ step through the items of a ring and stop at its first and last.
+    #[test]
+    fn arrows_stop_at_the_first_and_last_item() {
+        let mut app = DiskScanApp {
+            chart_segs: (0..3).map(|i| (vec![i], i as f32)).collect(),
+            ..DiskScanApp::default()
+        };
+        let picked = |app: &DiskScanApp| app.selected_rel().cloned();
+        app.move_selection(NavDir::Next);
+        assert_eq!(picked(&app), Some(vec![0]));
+        app.move_selection(NavDir::Prev);
+        assert_eq!(picked(&app), Some(vec![0]));
+        for _ in 0..3 {
+            app.move_selection(NavDir::Next);
+        }
+        assert_eq!(picked(&app), Some(vec![2]));
+        app.move_selection(NavDir::Prev);
+        assert_eq!(picked(&app), Some(vec![1]));
     }
 
     /// A slice under the pointer shows its details, unless a dialog is
