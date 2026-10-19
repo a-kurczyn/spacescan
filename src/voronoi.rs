@@ -766,9 +766,10 @@ fn cut_corner(poly: &[Pos2], wanted: f32) -> (Poly, Poly) {
     (clip(poly, toward, at), clip(poly, -toward, -at))
 }
 
-/// Where a folder's items go: a little inside its cell as drawn.
-fn inner_region(cell: &[Pos2], gap: f32) -> Option<Poly> {
-    inset(cell, gap / 2.0 + NEST_GAP)
+/// How far inside a folder's cell its items go, on screen, with `gap`
+/// between cells: a little inside the cell as drawn.
+fn nest_margin(gap: f32) -> f32 {
+    gap / 2.0 + NEST_GAP
 }
 
 /// Laid-out places: for each folder split (by its items' names from the
@@ -779,14 +780,15 @@ pub(crate) type Places = HashMap<Vec<Box<str>>, HashMap<Box<str>, Place>>;
 /// there are some.
 pub(crate) fn lay_out(tree: &MapTree, bounds: &[Pos2], earlier: &Places) -> Places {
     let mut out = Places::new();
-    lay_out_level(&tree.items, bounds, tree.gap, Vec::new(), earlier, &mut out);
+    let margin = nest_margin(tree.gap);
+    lay_out_level(&tree.items, bounds, margin, Vec::new(), earlier, &mut out);
     out
 }
 
 fn lay_out_level(
     items: &[MapItem],
     bounds: &[Pos2],
-    gap: f32,
+    margin: f32,
     key: Vec<Box<str>>,
     earlier: &Places,
     out: &mut Places,
@@ -812,10 +814,10 @@ fn lay_out_level(
         if item.children.is_empty() || area(cell) < MIN_SPLIT_AREA {
             continue;
         }
-        if let Some(inner) = inner_region(cell, gap) {
+        if let Some(inner) = inset(cell, margin) {
             let mut inner_key = key.clone();
             inner_key.push(item.key.clone());
-            lay_out_level(&item.children, &inner, gap, inner_key, earlier, out);
+            lay_out_level(&item.children, &inner, margin, inner_key, earlier, out);
         }
     }
     out.insert(
@@ -834,9 +836,9 @@ pub(crate) struct MapCell<'a> {
 
 /// The cells of `tree` inside `bounds`, outer before inner, with the places
 /// `place_of` gives (folder key, item name). An item without a place yet
-/// starts at a point picked by its name. Each cell is drawn smaller by the
-/// gap, divided by `zoom` (how much the map will be magnified), so the gap
-/// looks the same at any zoom.
+/// starts at a point picked by its name. The gaps between cells, and
+/// around the items inside a folder's cell, are divided by `zoom` (how
+/// much the map will be magnified), so they look the same at any zoom.
 pub(crate) fn map_cells<'a>(
     tree: &'a MapTree,
     bounds: &[Pos2],
@@ -847,7 +849,7 @@ pub(crate) fn map_cells<'a>(
     cells_level(
         &tree.items,
         bounds,
-        tree.gap,
+        nest_margin(tree.gap) / zoom,
         &mut Vec::new(),
         place_of,
         &mut out,
@@ -864,7 +866,7 @@ pub(crate) fn map_cells<'a>(
 fn cells_level<'a>(
     items: &'a [MapItem],
     bounds: &[Pos2],
-    gap: f32,
+    margin: f32,
     key: &mut Vec<Box<str>>,
     place_of: PlaceOf,
     out: &mut Vec<MapCell<'a>>,
@@ -891,14 +893,14 @@ fn cells_level<'a>(
         }
         key.push(item.key.clone());
         let laid_out = !item.children.is_empty() && place_of(key, &item.children[0].key).is_some();
-        let inner = laid_out.then(|| inner_region(&poly, gap)).flatten();
+        let inner = laid_out.then(|| inset(&poly, margin)).flatten();
         out.push(MapCell {
             item,
             poly,
             split: inner.is_some(),
         });
         if let Some(inner) = inner {
-            cells_level(&item.children, &inner, gap, key, place_of, out);
+            cells_level(&item.children, &inner, margin, key, place_of, out);
         }
         key.pop();
     }
@@ -2119,6 +2121,74 @@ mod tests {
         for zoom in [1.0, 4.0] {
             let gap = closest(zoom);
             assert!((7.9..8.5).contains(&gap), "{gap} at zoom {zoom}");
+        }
+    }
+
+    /// A folder's border is as far from the cells inside it at any zoom,
+    /// and those cells keep sharing its area by size.
+    #[test]
+    fn nested_margin_stays_the_same_when_zoomed() {
+        let sub: Vec<Node> = (0..5)
+            .map(|i| test_node(&format!("/t/a/f{i}"), 1000 * (i + 1), false, vec![]))
+            .collect();
+        let root = test_node(
+            "/t",
+            0,
+            true,
+            vec![
+                test_node("/t/a", 15_000, true, sub),
+                test_node("/t/b", 10_000, false, vec![]),
+            ],
+        );
+        let hidden = HashSet::new();
+        let settings = Settings {
+            map_levels: 2,
+            map_gap: 8.0,
+            ..Settings::default()
+        };
+        let rect = egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 600.0));
+        let bounds = rect_poly(rect);
+        let tree = map_tree(&root, None, opts(&hidden, &settings), area(&bounds), 1.0);
+        let places = lay_out(&tree, &bounds, &Places::new());
+        let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
+        let to_edge = |p: Pos2, poly: &[Pos2]| {
+            (0..poly.len())
+                .map(|i| {
+                    let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+                    let t = ((p - a).dot(b - a) / (b - a).length_sq()).clamp(0.0, 1.0);
+                    p.distance(a + (b - a) * t)
+                })
+                .fold(f32::INFINITY, f32::min)
+        };
+        for zoom in [1.0, 4.0] {
+            let lens = Lens {
+                scale: zoom,
+                offset: Vec2::ZERO,
+            };
+            let cells = map_cells(&tree, &bounds, &place_of, zoom);
+            let on_screen =
+                |c: &MapCell| -> Poly { c.poly.iter().map(|p| lens.apply(rect, *p)).collect() };
+            let folder = on_screen(cells.iter().find(|c| c.split).unwrap());
+            let inner: Vec<Poly> = cells
+                .iter()
+                .filter(|c| c.item.seg.ring == 1)
+                .map(on_screen)
+                .collect();
+            assert_eq!(inner.len(), 5);
+            let margin = inner
+                .iter()
+                .flatten()
+                .map(|p| to_edge(*p, &folder))
+                .fold(f32::INFINITY, f32::min);
+            assert!((6.9..7.5).contains(&margin), "{margin} at zoom {zoom}");
+            let areas: Vec<f32> = inner.iter().map(|p| area(p)).collect();
+            let total: f32 = areas.iter().sum();
+            for (a, size) in areas.iter().zip([5.0, 4.0, 3.0, 2.0, 1.0]) {
+                assert!(
+                    (a / total - size / 15.0).abs() < 0.03,
+                    "{areas:?} at zoom {zoom}"
+                );
+            }
         }
     }
 

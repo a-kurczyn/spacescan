@@ -22,8 +22,8 @@
   items inside folders drawn within their cells. Settings › Gap between
   map cells leaves up to 12 pixels of space between them. Ctrl+wheel
   zooms the map in up to 8× around the pointer, showing the names of
-  smaller cells, and dragging moves it; the gap between cells stays the
-  same on screen.
+  smaller cells, and dragging moves it; the space between cells and
+  around the cells inside a folder stays the same on screen.
 - **Theme setting**: Auto (as before), Light or Dark.
 - **Categories window** (Settings › Edit categories…): rename, add and
   remove categories, change their extensions and pick their colors
