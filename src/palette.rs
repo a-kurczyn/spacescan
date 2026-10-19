@@ -1,51 +1,36 @@
-//! Colors a category can be given: a list of 32 to pick from, or any
+//! Colors a category can be given: a list of 16 to pick from, or any
 //! "#RRGGBB". Also how close two colors look, with normal color vision and
 //! with each common kind of color blindness, to warn about colors that are
 //! hard to tell apart.
 
 use super::*;
 
-/// The colors to pick from: eight hues in four shades, as (id, color on a
-/// dark background, color on a light one). Every color stands out from its
-/// background by at least 3:1 (the WCAG minimum for graphics); shade 4
-/// stands out most.
-pub(crate) const COLOR_LIST: [(&str, u32, u32); 32] = [
-    ("red-1", 0xe9504d, 0xe24947),
-    ("red-2", 0xff726b, 0xc92f33),
-    ("red-3", 0xffa098, 0xb00a1d),
-    ("red-4", 0xfec8c3, 0x8a0013),
-    ("orange-1", 0xd36d02, 0xc96805),
-    ("orange-2", 0xf68001, 0xac5701),
-    ("orange-3", 0xffa666, 0x8f4802),
-    ("orange-4", 0xffcba9, 0x6e3602),
-    ("yellow-1", 0xa58a07, 0x9e8406),
-    ("yellow-2", 0xc1a20b, 0x867003),
-    ("yellow-3", 0xdfbb02, 0x6f5c01),
-    ("yellow-4", 0xfdd506, 0x564700),
-    ("green-1", 0x1fa836, 0x079f2b),
-    ("green-2", 0x43c251, 0x038a24),
-    ("green-3", 0x61dc6b, 0x02721c),
-    ("green-4", 0x7cf784, 0x005813),
-    ("teal-1", 0x04a19b, 0x079a94),
-    ("teal-2", 0x03bdb6, 0x05837e),
-    ("teal-3", 0x02d9d1, 0x046c68),
-    ("teal-4", 0x16f6ed, 0x035350),
-    ("blue-1", 0x048ff4, 0x0589e9),
-    ("blue-2", 0x52a9fe, 0x0574c7),
-    ("blue-3", 0x89c3fe, 0x0060a6),
-    ("blue-4", 0xbadbfe, 0x024981),
-    ("purple-1", 0xa06aec, 0x9964e5),
-    ("purple-2", 0xb688ff, 0x854ece),
-    ("purple-3", 0xc9acff, 0x7137b6),
-    ("purple-4", 0xdecefe, 0x5b199c),
-    ("pink-1", 0xdb509c, 0xd44996),
-    ("pink-2", 0xf86ab5, 0xbc3181),
-    ("pink-3", 0xff98ca, 0xa4126c),
-    ("pink-4", 0xfec4de, 0x820154),
+/// The colors to pick from, by hue, as (id, color on a dark background,
+/// color on a light one). Every color stands out from its background by
+/// at least 3:1 (the WCAG minimum for graphics), and every two stay easy
+/// to tell apart, on both backgrounds, with normal color vision and with
+/// each common kind of color blindness.
+pub(crate) const COLOR_LIST: [(&str, u32, u32); 16] = [
+    ("pink", 0xffaabb, 0x81394b),
+    ("crimson", 0xcc2244, 0xcc2244),
+    ("orange", 0xee6600, 0xe75f00),
+    ("amber", 0xeeaa00, 0x9e5e00),
+    ("lime", 0x99dd66, 0x1e5c00),
+    ("sage", 0x779977, 0x547554),
+    ("green", 0x00aa44, 0x00a03a),
+    ("cyan", 0x00ccff, 0x0076a6),
+    ("steel", 0xbbccee, 0x43506d),
+    ("blue", 0x3355ee, 0x1300a8),
+    ("periwinkle", 0x9999ee, 0x8382d5),
+    ("violet", 0x8866dd, 0x6c47bb),
+    ("orchid", 0xcc66ff, 0xc15af3),
+    ("purple", 0xaa11cc, 0x6a008a),
+    ("magenta", 0xdd0099, 0xdd0099),
+    ("rose", 0xcc7799, 0xc46f91),
 ];
 
-/// How many shades each hue of `COLOR_LIST` has (the picker's columns).
-pub(crate) const SHADES: usize = 4;
+/// How many colors of `COLOR_LIST` the picker shows per row.
+pub(crate) const PICKER_COLUMNS: usize = 4;
 
 /// A color picked for a category.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -220,18 +205,38 @@ mod tests {
         }
         let ids: HashSet<&str> = COLOR_LIST.iter().map(|c| c.0).collect();
         assert_eq!(ids.len(), COLOR_LIST.len());
-        assert_eq!(COLOR_LIST.len() % SHADES, 0);
+        assert_eq!(COLOR_LIST.len() % PICKER_COLUMNS, 0);
+    }
+
+    #[test]
+    fn listed_colors_are_easy_to_tell_apart() {
+        for dark in [true, false] {
+            let other = CategoryModel::other_color(dark);
+            let colors: Vec<(&str, Color32)> = (0..COLOR_LIST.len())
+                .map(|i| (COLOR_LIST[i].0, CatColor::Listed(i).on(dark)))
+                .collect();
+            for (i, &(id, color)) in colors.iter().enumerate() {
+                assert_eq!(too_close(color, other, true), None, "{id} vs other");
+                for &(id2, color2) in &colors[i + 1..] {
+                    assert_eq!(
+                        too_close(color, color2, true),
+                        None,
+                        "{id} vs {id2} (dark {dark})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
     fn colors_are_read_and_written() {
-        assert_eq!(CatColor::parse("blue-3"), Some(CatColor::Listed(22)));
+        assert_eq!(CatColor::parse("blue"), Some(CatColor::Listed(9)));
         let c = CatColor::parse("#1A2b3C").unwrap();
         assert_eq!(c, CatColor::Custom(Color32::from_rgb(0x1a, 0x2b, 0x3c)));
         assert_eq!(c.to_text(), "#1a2b3c");
         assert_eq!(CatColor::parse(" 1a2b3c "), Some(c));
-        assert_eq!(CatColor::Listed(22).to_text(), "blue-3");
-        for bad in ["", "#12345", "#1234567", "#12345g", "blue-9", "Blue-3"] {
+        assert_eq!(CatColor::Listed(9).to_text(), "blue");
+        for bad in ["", "#12345", "#1234567", "#12345g", "blue-3", "Blue"] {
             assert_eq!(CatColor::parse(bad), None, "{bad}");
         }
         assert_eq!(c.on(true), c.on(false));

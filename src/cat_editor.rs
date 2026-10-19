@@ -402,7 +402,7 @@ fn color_picker_ui(ui: &mut egui::Ui, row: &mut Row, dark: bool) {
                     row.color = Some(listed);
                     row.hex = hex_text(listed.on(dark));
                 }
-                if i % SHADES == SHADES - 1 {
+                if i % PICKER_COLUMNS == PICKER_COLUMNS - 1 {
                     ui.end_row();
                 }
             }

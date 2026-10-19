@@ -24,7 +24,8 @@
 - **Theme setting**: Auto (as before), Light or Dark.
 - **Categories window** (Settings › Edit categories…): rename, add and
   remove categories, change their extensions and pick their colors
-  from a list of 32 that suit light and dark themes, or type any color as
+  from a list of 16 that suit light and dark themes and stay easy to
+  tell apart, also with color blindness, or type any color as
   `#RRGGBB`. It warns about extensions in two categories and colors that
   are hard to tell apart, also for color-blind eyes when the color-blind
   palette is on.

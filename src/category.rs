@@ -721,7 +721,7 @@ mod tests {
         assert!(model.same_classes(&CategoryModel::parse(&categories_json(&entries)).unwrap().0));
         assert!(!model.same_classes(&CategoryModel::defaults()));
         let (_, problems) =
-            CategoryModel::parse(r#"{"categories":[{"name":"A","color":"pink"}]}"#).unwrap();
+            CategoryModel::parse(r#"{"categories":[{"name":"A","color":"red-2"}]}"#).unwrap();
         assert_eq!(problems.len(), 1);
     }
 
