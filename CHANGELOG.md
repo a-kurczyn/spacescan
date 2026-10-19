@@ -14,8 +14,8 @@
   than 400) do the smallest share a grey "other" corner of 16 × 16
   pixels, which opens the next of them like a folder, as many times as
   needed. A strip beside the map, as wide as it needs, holds the
-  folder's details, an arrow pad (like the arrow keys; ⬅ and Backspace
-  go back up) and the category legend. The map grows live during a scan,
+  folder's details, an arrow pad (back, prev, next and open, like the
+  arrow keys) and the category legend. The map grows live during a scan,
   glides when it changes and zooms into and out of folders; the
   animations can be turned off in the settings. The map shows one level
   of folders by default; Settings › Map levels shows up to three, the
@@ -33,8 +33,10 @@
   its own.
 
 ### Changed
-- ⬆ and ⬇ in the sunburst and the map stop at the first and last item
-  instead of going round to the other end, as in the table.
+- The arrow keys work the same in the table, the sunburst and the map,
+  as in ncdu: ⬆ and ⬇ move to the previous and next item and stop at the
+  first and last, ➡ opens the highlighted folder, ⬅ goes to the parent
+  folder.
 
 ## 1.1.3 (2026-10-17)
 

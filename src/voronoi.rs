@@ -1085,12 +1085,6 @@ fn zoom_transform(focus: egui::Rect, view: egui::Rect, t: f32) -> impl Fn(Pos2) 
     move |p: Pos2| center + (p - focus_center) * scale
 }
 
-/// A button of the arrow pad pressed.
-enum PadPress {
-    Move(NavDir),
-    Open,
-}
-
 /// The narrowest and widest the strip left of the map gets.
 const STRIP_MIN_WIDTH: f32 = 110.0;
 const STRIP_MAX_WIDTH: f32 = 360.0;
@@ -1124,10 +1118,8 @@ impl DiskScanApp {
             );
             self.map_ui(ui, top, tree_id, &response, &painter, live);
             // After the map, which lists the items the arrows move between.
-            match pad.inner {
-                Some(PadPress::Move(dir)) => self.move_selection(dir),
-                Some(PadPress::Open) => self.open_selection(),
-                None => {}
+            if let Some(dir) = pad.inner {
+                self.move_selection(dir);
             }
         });
     }
@@ -1135,7 +1127,7 @@ impl DiskScanApp {
     /// The strip: the folder shown (or the highlighted item) and its
     /// details, the category picked, the arrow pad, and the legend at the
     /// bottom.
-    fn map_strip_ui(&mut self, ui: &mut egui::Ui, live: bool) -> Option<PadPress> {
+    fn map_strip_ui(&mut self, ui: &mut egui::Ui, live: bool) -> Option<NavDir> {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         if !live && let Some(root) = self.root.clone() {
             let view_node = self.current_view_node(&root);
@@ -1182,40 +1174,57 @@ impl DiskScanApp {
         press
     }
 
-    /// Buttons for the arrow keys: previous and next item, a level in and
-    /// out, and open in the middle. Returns the one pressed.
-    fn arrow_pad_ui(&mut self, ui: &mut egui::Ui) -> Option<PadPress> {
-        let out = self.view_stack.len() > 1
-            || self.map.other_depth(self.current_view()) > 0
-            || self.selection.is_some();
+    /// Buttons for the arrow keys, each with its arrow and a word: back
+    /// (the parent folder), previous and next item, and open. Returns the
+    /// one pressed.
+    fn arrow_pad_ui(&mut self, ui: &mut egui::Ui) -> Option<NavDir> {
+        let back = self.view_stack.len() > 1 || self.map.other_depth(self.current_view()) > 0;
         let open = self.selection.is_some();
+        let body = egui::TextStyle::Body.resolve(ui.style());
+        let small = egui::TextStyle::Small.resolve(ui.style());
         let mut press = None;
         egui::Grid::new("arrow_pad")
             .spacing([2.0, 2.0])
             .show(ui, |ui| {
-                let mut button =
-                    |ui: &mut egui::Ui, glyph: &str, key: &str, enabled: bool, what: PadPress| {
-                        if ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(glyph).min_size(Vec2::splat(30.0)),
-                            )
-                            .on_hover_text(tr(key))
-                            .named(&tr(key))
-                            .clicked()
-                        {
-                            press = Some(what);
-                        }
-                    };
+                let mut button = |ui: &mut egui::Ui,
+                                  glyph: &str,
+                                  word: &str,
+                                  hover: &str,
+                                  enabled: bool,
+                                  dir: NavDir| {
+                    let color = ui.visuals().text_color();
+                    let mut text = egui::text::LayoutJob::simple_singleline(
+                        format!("{glyph}\n"),
+                        body.clone(),
+                        color,
+                    );
+                    text.append(
+                        &tr(word),
+                        0.0,
+                        egui::TextFormat::simple(small.clone(), color),
+                    );
+                    text.halign = egui::Align::Center;
+                    if ui
+                        .add_enabled(
+                            enabled,
+                            egui::Button::new(text).min_size(Vec2::new(44.0, 36.0)),
+                        )
+                        .on_hover_text(tr(hover))
+                        .named(&tr(hover))
+                        .clicked()
+                    {
+                        press = Some(dir);
+                    }
+                };
                 ui.label("");
-                button(ui, "⬆", "MAP_PREV", true, PadPress::Move(NavDir::Prev));
+                button(ui, "⬆", "MAP_PAD_PREV", "MAP_PREV", true, NavDir::Prev);
                 ui.end_row();
-                button(ui, "⬅", "HELP_PARENT", out, PadPress::Move(NavDir::Out));
-                button(ui, "⏺", "MAP_OPEN", open, PadPress::Open);
-                button(ui, "➡", "MAP_IN", true, PadPress::Move(NavDir::In));
+                button(ui, "⬅", "MAP_PAD_BACK", "HELP_PARENT", back, NavDir::Out);
+                ui.label("");
+                button(ui, "➡", "MAP_PAD_OPEN", "MAP_OPEN", open, NavDir::In);
                 ui.end_row();
                 ui.label("");
-                button(ui, "⬇", "MAP_NEXT", true, PadPress::Move(NavDir::Next));
+                button(ui, "⬇", "MAP_PAD_NEXT", "MAP_NEXT", true, NavDir::Next);
                 ui.end_row();
             });
         press

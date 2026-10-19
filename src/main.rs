@@ -1019,11 +1019,15 @@ impl DiskScanApp {
             .map(|s| &s.rel)
     }
 
-    /// Moves the slice highlight: ⬆⬇ previous/next slice in the same ring
-    /// (stopping at the first and last), ➡ first slice one ring out, ⬅ the
-    /// parent slice (from the inner ring: the parent folder). With nothing
-    /// highlighted, any arrow starts at the first inner slice.
+    /// The arrow keys, as in the table: ⬆⬇ previous/next slice in the same
+    /// ring (stopping at the first and last), ➡ opens the highlighted
+    /// folder, ⬅ goes to the parent folder. With nothing highlighted, ⬆⬇➡
+    /// start at the first inner slice.
     fn move_selection(&mut self, dir: NavDir) {
+        if dir == NavDir::Out {
+            self.chart_parent_folder();
+            return;
+        }
         let view = self.current_view().clone();
         let segs = &self.chart_segs;
         let first_where = |pred: &dyn Fn(&Vec<usize>) -> bool| {
@@ -1049,10 +1053,8 @@ impl DiskScanApp {
                         None => sibs[0].0.clone(),
                     })
                 }
-                NavDir::In => first_where(&|p| p.len() == cur.len() + 1 && p.starts_with(&cur)),
-                NavDir::Out if cur.len() > 1 => Some(cur[..cur.len() - 1].to_vec()),
-                NavDir::Out => {
-                    self.chart_parent_folder();
+                NavDir::In | NavDir::Out => {
+                    self.open_selection();
                     return;
                 }
             },
@@ -1073,8 +1075,8 @@ impl DiskScanApp {
         try_get_node(self.current_view_node(root), rel).map(|n| n.path())
     }
 
-    /// Backspace (and ⬅ from the inner ring): steps the chart out to the
-    /// parent folder, highlighting the folder just left.
+    /// ⬅ and Backspace: steps the chart out to the parent folder,
+    /// highlighting the folder just left.
     fn chart_parent_folder(&mut self) {
         let view = self.current_view().clone();
         // On the map, out of an opened "other" first.
@@ -1864,6 +1866,41 @@ mod pick_tests {
         assert_eq!(picked(&app), Some(vec![2]));
         app.move_selection(NavDir::Prev);
         assert_eq!(picked(&app), Some(vec![1]));
+    }
+
+    /// ➡ opens the highlighted folder and ⬅ goes back to its parent, with
+    /// the folder just left highlighted, as in the table.
+    #[test]
+    fn right_opens_and_left_goes_back() {
+        let sub = test_node(
+            "/t/b",
+            200,
+            true,
+            vec![test_node("/t/b/x", 200, false, vec![])],
+        );
+        let mut app = DiskScanApp {
+            full_root: Some(Arc::new(test_node(
+                "/t",
+                600,
+                true,
+                vec![
+                    test_node("/t/a", 300, false, vec![]),
+                    sub,
+                    test_node("/t/c", 100, false, vec![]),
+                ],
+            ))),
+            ..DiskScanApp::default()
+        };
+        app.rebuild_view_tree();
+        app.chart_segs = (0..3).map(|i| (vec![i], i as f32)).collect();
+        app.move_selection(NavDir::Next);
+        app.move_selection(NavDir::Next);
+        assert_eq!(app.selected_rel(), Some(&vec![1]));
+        app.move_selection(NavDir::In);
+        assert_eq!(app.current_view(), &vec![1]);
+        app.move_selection(NavDir::Out);
+        assert_eq!(app.current_view(), &Vec::<usize>::new());
+        assert_eq!(app.selected_rel(), Some(&vec![1]));
     }
 
     /// A slice under the pointer shows its details, unless a dialog is
