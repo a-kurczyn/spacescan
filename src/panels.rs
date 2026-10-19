@@ -2601,29 +2601,58 @@ fn path_crumbs_ui(
                         ui.weak("…");
                         continue;
                     };
-                    let btn = egui::Button::new(if i == last {
+                    let text = if i == last {
                         egui::RichText::new(label).strong()
                     } else {
                         egui::RichText::new(label)
-                    })
-                    .frame(false);
-                    if ui.add(btn).on_hover_text(short_path(path)).clicked() && i != last {
+                    };
+                    let color = if i == last {
+                        ui.visuals().strong_text_color()
+                    } else {
+                        ui.visuals().text_color()
+                    };
+                    if crumb_ui(ui, text, color, path, i != last) {
                         clicked = Some(path.clone());
                     }
                 }
                 let yellow = selection_text_color(ui.visuals());
                 for (label, path, is_dir) in selected {
                     ui.weak("/");
-                    let btn =
-                        egui::Button::new(egui::RichText::new(label).color(yellow)).frame(false);
-                    let resp = ui.add(btn).on_hover_text(short_path(path));
-                    if resp.clicked() && *is_dir {
+                    if crumb_ui(ui, egui::RichText::new(label), yellow, path, *is_dir) {
                         clicked = Some(path.clone());
                     }
                 }
             });
         });
     clicked
+}
+
+/// One name in the path bar, in `color`, its full path on hover. A
+/// `clickable` one is underlined under the pointer; returns true when it's
+/// clicked.
+fn crumb_ui(
+    ui: &mut egui::Ui,
+    text: egui::RichText,
+    color: Color32,
+    path: &Path,
+    clickable: bool,
+) -> bool {
+    let resp = ui
+        .add(egui::Button::new(text.color(color)).frame(false))
+        .on_hover_text(short_path(path));
+    if !clickable {
+        return false;
+    }
+    if resp.hovered() {
+        let pad = ui.spacing().button_padding;
+        ui.painter().hline(
+            resp.rect.x_range().shrink(pad.x),
+            resp.rect.bottom() - pad.y,
+            egui::Stroke::new(1.0, color),
+        );
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 /// The color of the highlighted item's name in the path bar: yellow on
