@@ -1456,7 +1456,6 @@ impl DiskScanApp {
                     .unwrap_or(area.right() - 90.0);
                 ui.set_max_width((right - 8.0 - area.left() - 8.0).max(40.0));
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                ui.strong(short_path(&n.path()));
                 folder_stats_ui(ui, n);
             });
     }
@@ -1901,6 +1900,42 @@ mod pick_tests {
         app.move_selection(NavDir::Out);
         assert_eq!(app.current_view(), &Vec::<usize>::new());
         assert_eq!(app.selected_rel(), Some(&vec![1]));
+    }
+
+    /// The path bar's yellow part: the highlighted item and the folders
+    /// down to it, only in the chart views and not for "other".
+    #[test]
+    fn path_bar_shows_the_highlighted_item() {
+        let sub = test_node(
+            "/t/b",
+            200,
+            true,
+            vec![test_node("/t/b/x", 200, false, vec![])],
+        );
+        let mut app = DiskScanApp {
+            full_root: Some(Arc::new(test_node("/t", 200, true, vec![sub]))),
+            ..DiskScanApp::default()
+        };
+        app.rebuild_view_tree();
+        assert!(app.selected_crumbs().is_empty());
+        app.selection = Some(ChartSel {
+            view: vec![],
+            rel: vec![0, 0],
+        });
+        let names: Vec<(String, bool)> = app
+            .selected_crumbs()
+            .into_iter()
+            .map(|(name, _, dir)| (name, dir))
+            .collect();
+        assert_eq!(names, [("b".to_string(), true), ("x".to_string(), false)]);
+        app.summary_view = true;
+        assert!(app.selected_crumbs().is_empty());
+        app.summary_view = false;
+        app.selection = Some(ChartSel {
+            view: vec![],
+            rel: vec![OTHER_MARKER],
+        });
+        assert!(app.selected_crumbs().is_empty());
     }
 
     /// A slice under the pointer shows its details, unless a dialog is

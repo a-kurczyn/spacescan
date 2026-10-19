@@ -1135,7 +1135,6 @@ impl DiskScanApp {
                 .selected_rel()
                 .and_then(|rel| try_get_node(view_node, rel));
             let n = selected.unwrap_or(view_node);
-            ui.strong(&*n.name);
             if selected.is_none()
                 && let Some(items) = self.map.other_items(self.current_view())
             {

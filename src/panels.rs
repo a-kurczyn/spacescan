@@ -183,6 +183,28 @@ impl DiskScanApp {
         self.apply_toolbar_input(&ctx, left, right);
     }
 
+    /// In the chart and map views, the highlighted item and the folders
+    /// between it and the folder shown: each one's name, path and whether
+    /// it's a folder. Empty when nothing (or "other") is highlighted.
+    pub(crate) fn selected_crumbs(&self) -> Vec<(String, PathBuf, bool)> {
+        let (Some(root), Some(rel)) = (&self.root, self.selected_rel()) else {
+            return Vec::new();
+        };
+        if self.summary_view || is_other_marker(rel) {
+            return Vec::new();
+        }
+        let mut node = self.current_view_node(root);
+        let mut out = Vec::new();
+        for &i in rel {
+            let Some(child) = node.children.get(i) else {
+                return Vec::new();
+            };
+            out.push((child.name.to_string(), child.path(), child.is_dir));
+            node = child;
+        }
+        out
+    }
+
     /// The top bar's left side: starting points (folder dialog, root, home,
     /// rescan), then the path bar, as clickable folders or a text field.
     fn toolbar_left_ui(
@@ -273,7 +295,11 @@ impl DiskScanApp {
                 out.stop_path_edit = true;
             }
         } else {
-            out.crumb_click = path_crumbs_ui(ui, current_path.map(path_crumbs).unwrap_or_default());
+            out.crumb_click = path_crumbs_ui(
+                ui,
+                current_path.map(path_crumbs).unwrap_or_default(),
+                &self.selected_crumbs(),
+            );
             // A clickable label: no button padding.
             let pencil = ui.add(egui::Label::new("✏").sense(egui::Sense::click()));
             if pencil
@@ -2528,10 +2554,14 @@ fn path_crumbs(path: &Path) -> Vec<Option<(String, PathBuf)>> {
     }
 }
 
-/// The path bar's folders, scrolled so the deepest stay visible, with
-/// room for ✏ at the far right. Returns the folder clicked (never the
-/// last, which is the one shown).
-fn path_crumbs_ui(ui: &mut egui::Ui, crumbs: Vec<Option<(String, PathBuf)>>) -> Option<PathBuf> {
+/// The path bar's folders, then `selected` (the highlighted item's path
+/// from there) in yellow, scrolled so the end stays visible, with room for
+/// ✏ at the far right. Returns the folder clicked (never the one shown).
+fn path_crumbs_ui(
+    ui: &mut egui::Ui,
+    crumbs: Vec<Option<(String, PathBuf)>>,
+    selected: &[(String, PathBuf, bool)],
+) -> Option<PathBuf> {
     let mut clicked = None;
     let edit_w = 28.0;
     let max_w = (ui.available_width() - edit_w).max(0.0);
@@ -2581,9 +2611,29 @@ fn path_crumbs_ui(ui: &mut egui::Ui, crumbs: Vec<Option<(String, PathBuf)>>) -> 
                         clicked = Some(path.clone());
                     }
                 }
+                let yellow = selection_text_color(ui.visuals());
+                for (label, path, is_dir) in selected {
+                    ui.weak("/");
+                    let btn =
+                        egui::Button::new(egui::RichText::new(label).color(yellow)).frame(false);
+                    let resp = ui.add(btn).on_hover_text(short_path(path));
+                    if resp.clicked() && *is_dir {
+                        clicked = Some(path.clone());
+                    }
+                }
             });
         });
     clicked
+}
+
+/// The color of the highlighted item's name in the path bar: yellow on
+/// dark themes, a darker amber that stays readable on light ones.
+fn selection_text_color(visuals: &egui::Visuals) -> Color32 {
+    if visuals.dark_mode {
+        Color32::from_rgb(255, 214, 10)
+    } else {
+        Color32::from_rgb(160, 110, 0)
+    }
 }
 
 /// Where the category bar's segments and labels go.

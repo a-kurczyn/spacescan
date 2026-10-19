@@ -41,6 +41,9 @@
   control, Colors, Line rendering (both charts), Table control and
   Behavior control (apparent size, clipboard, log lines, categories,
   language).
+- In the sunburst and the map, the highlighted item's path from the
+  folder shown follows the path bar in yellow (its folders can be
+  clicked); the corner stats and the map's strip no longer repeat it.
 
 ## 1.1.3 (2026-10-17)
 
