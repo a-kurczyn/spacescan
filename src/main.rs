@@ -1478,6 +1478,9 @@ impl DiskScanApp {
             .show(ctx, |ui| self.legend_body(ui));
     }
 
+    /// Widest a category's name is shown in the legend, in points.
+    const LEGEND_TEXT_WIDTH: f32 = 200.0;
+
     /// The categories in the category bar's order. While scanning, those
     /// found so far, re-sorted as totals grow; each row glides to its new
     /// place. Clicking a category adds it to the picked ones, or takes it
@@ -1500,11 +1503,23 @@ impl DiskScanApp {
             Some(set) if !set.contains(c) => weak,
             _ => strong,
         };
+        // A long name is cut with "…" (in full on hover), so the chart
+        // keeps its room.
         let labels: Vec<_> = rows
             .iter()
             .map(|&c| {
-                ui.painter()
-                    .layout_no_wrap(self.cats.label(c), font.clone(), ink(c))
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    self.cats.label(c),
+                    font.clone(),
+                    ink(c),
+                );
+                job.wrap = egui::text::TextWrapping {
+                    max_width: Self::LEGEND_TEXT_WIDTH,
+                    max_rows: 1,
+                    break_anywhere: true,
+                    overflow_character: Some('…'),
+                };
+                ui.painter().layout_job(job)
             })
             .collect();
         const SWATCH: f32 = 10.0;
@@ -1558,12 +1573,18 @@ impl DiskScanApp {
             };
             ui.painter().rect_filled(swatch, 2.0, color);
             let at = Pos2::new(swatch.right() + gap, mid - label.size().y / 2.0);
+            let cut = label.elided;
             ui.painter().galley(at, label, ink(cat));
             let name = self.cats.label(cat);
             hit.widget_info(|| {
                 egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, is_picked, &name)
             });
-            if hit.on_hover_text(tr("LEGEND_CLICK")).clicked() {
+            let hover = if cut {
+                format!("{name}\n{}", tr("LEGEND_CLICK"))
+            } else {
+                tr("LEGEND_CLICK")
+            };
+            if hit.on_hover_text(hover).clicked() {
                 clicked = Some(cat);
             }
         }
@@ -1959,6 +1980,64 @@ mod pick_tests {
         app_frame(&mut app, &ctx, vec![]);
         let editor = app.cat_editor.as_ref().expect("window still open");
         assert_eq!(editor.entries().len(), before + 1);
+    }
+
+    /// A very long category name is cut in the legend, in both charts, so
+    /// the map keeps most of the window.
+    #[test]
+    fn long_category_names_leave_the_charts_their_room() {
+        let long = "x".repeat(150);
+        let mut entries = CategoryModel::defaults().entries();
+        let video = entries
+            .iter()
+            .position(|e| e.extensions.contains(&"mkv".to_string()))
+            .unwrap();
+        entries[video].name = long.clone();
+        let (model, _) = CategoryModel::parse(&categories_json(&entries)).unwrap();
+        let mut app = DiskScanApp {
+            cats: Arc::new(model),
+            ..DiskScanApp::default()
+        };
+        let cats = app.cats.clone();
+        let files = ["a.mkv", "b.txt"]
+            .iter()
+            .map(|name| {
+                let mut n = test_node(&format!("/t/{name}"), 100, false, vec![]);
+                n.cat = cat_byte(cats.of_name(&n.name));
+                n
+            })
+            .collect();
+        app.full_root = Some(Arc::new(test_node("/t", 200, true, files)));
+        app.tree_cats = Some(cats);
+        app.rebuild_view_tree();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let width_of = |out: &egui::FullOutput, label: &dyn Fn(&str) -> bool| {
+            let update = out
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("accesskit output");
+            let b = update
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label().is_some_and(label))
+                .and_then(|(_, n)| n.bounds())
+                .expect("the widget");
+            (b.x1 - b.x0) as f32
+        };
+        for map in [false, true] {
+            app.settings.map_view = map;
+            app_frame(&mut app, &ctx, vec![]);
+            let out = app_frame(&mut app, &ctx, vec![]);
+            assert!(
+                width_of(&out, &|l| l == long) < 260.0,
+                "legend row, map {map}"
+            );
+            if map {
+                assert!(width_of(&out, &|l| l.starts_with("Chart of")) > 1000.0);
+            }
+        }
     }
 
     /// A slice under the pointer shows its details, unless a dialog is

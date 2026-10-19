@@ -1073,7 +1073,8 @@ impl Lens {
 
     /// Keeps the zoomed map covering `rect`.
     fn clamp(&mut self, rect: egui::Rect) {
-        let limit = rect.size() * (self.scale - 1.0) / 2.0;
+        // A window too small for the map leaves `rect` with no size.
+        let limit = (rect.size() * (self.scale - 1.0) / 2.0).max(Vec2::ZERO);
         self.offset = self.offset.clamp(-limit, limit);
     }
 }
@@ -2347,6 +2348,10 @@ mod tests {
             Pos2::new(800.0, 200.0)
         );
         assert_eq!(lens.apply(rect, rect.center()), Pos2::new(400.0, 0.0));
+        // A map area with no room left (a tiny window) can't be panned.
+        let none = egui::Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0)).shrink(60.0);
+        lens.clamp(none);
+        assert_eq!(lens.offset, Vec2::ZERO);
     }
 
     /// Cells glide from their old places to new ones; a new item grows in.
