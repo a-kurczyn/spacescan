@@ -1046,6 +1046,12 @@ impl Lens {
 }
 
 impl MapState {
+    /// True once a layout is shown and none is being worked out.
+    #[cfg(test)]
+    pub(crate) fn laid_out(&self) -> bool {
+        self.tree.is_some() && self.job.is_none()
+    }
+
     /// How many "other" cells are open in `folder`.
     pub(crate) fn other_depth(&self, folder: &[usize]) -> usize {
         self.others.get(folder).map_or(0, Vec::len)
@@ -1379,7 +1385,7 @@ impl DiskScanApp {
 
         let painter = painter.with_clip_rect(response.rect);
         let stroke = egui::Stroke::new(
-            self.settings.stroke_width,
+            self.settings.stroke_width / ctx.pixels_per_point(),
             Color32::from_black_alpha(self.settings.stroke_alpha),
         );
         match self.map.zoom.as_ref().and_then(|z| Some((z, z.start?))) {
@@ -2006,6 +2012,7 @@ mod tests {
         let hidden: HashSet<PathBuf> = [PathBuf::from("/t/hidden")].into();
         let settings = Settings {
             map_levels: 3,
+            map_gap: 0.0,
             ..Settings::default()
         };
         // 100-byte files are big enough to see: all 62 items get a cell.
@@ -2056,8 +2063,11 @@ mod tests {
         let d2 = &tree.items[1].children[0];
         assert_eq!(d2.seg.idx_path, [63, 0]);
         assert!(d2.children.len() == 1 && d2.children[0].children.is_empty());
-        // At one level (the default), folders aren't split.
-        let one = Settings::default();
+        // At one level, folders aren't split.
+        let one = Settings {
+            map_levels: 1,
+            ..settings
+        };
         let tree = map_tree(&root, None, opts(&hidden, &one), 800.0 * 600.0, 1.0);
         assert!(tree.items.iter().all(|i| i.children.is_empty()));
         // In a small area, folders aren't split at all.

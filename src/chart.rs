@@ -501,7 +501,7 @@ pub(crate) fn draw_arc_mesh(
     painter.add(egui::Shape::mesh(mesh));
 
     let stroke = egui::Stroke::new(
-        settings.stroke_width,
+        settings.stroke_width / painter.pixels_per_point(),
         Color32::from_black_alpha(settings.stroke_alpha).gamma_multiply(opacity),
     );
     painter.add(egui::Shape::closed_line(

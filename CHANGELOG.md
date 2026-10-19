@@ -17,12 +17,13 @@
   folder's details and the category legend. Its button sits between
   the sunburst's and the table's. The map grows live during a scan,
   glides when it changes and zooms into and out of folders; the
-  animations can be turned off in the settings. The map shows one level
-  of folders by default; Settings › Map levels shows up to three, the
+  animations can be turned off in the settings. The map shows two levels
+  of folders by default; Settings › Map levels shows up to twelve, the
   items inside folders drawn within their cells. Settings › Gap between
-  map cells leaves up to 12 pixels of space between them. Ctrl+wheel
-  zooms the map in up to 8× around the pointer, showing the names of
-  smaller cells, and dragging moves it; the space between cells and
+  map cells leaves up to 12 pixels of space between them (4 by
+  default). Ctrl+wheel zooms the map in up to 8× around the pointer,
+  showing the names of smaller cells, and dragging moves it; the space
+  between cells and
   around the cells inside a folder stays the same on screen. A folder's
   map is worked out in about a fifth of a second even with 400 cells on
   a 4K screen, and folders seen before show at once.
@@ -47,7 +48,8 @@
   as in ncdu: ⬆ and ⬇ move to the previous and next item and stop at the
   first and last, ➡ opens the highlighted folder, ⬅ goes to the parent
   folder.
-- Settings are grouped by what they change: Measure unit, Sunburst
+- Border thickness is set in whole screen pixels, 1 to 3.
+- Settings are grouped by what they change: Unit of measure, Sunburst
   control, Treemap control, Rendering controls (colors and lines, both
   charts), Table control and Behavior control (apparent size,
   clipboard, log lines, categories, language).

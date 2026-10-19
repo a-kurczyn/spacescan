@@ -115,6 +115,7 @@ struct Settings {
     /// Brightness of the darkest shade, in percent.
     age_darkest_pct: u8,
     free_space_gamma: f32,
+    /// The slices' and cells' borders, in screen pixels.
     stroke_width: f32,
     stroke_alpha: u8,
     tess_px_per_step: f32,
@@ -154,11 +155,11 @@ impl Settings {
     const AGE_STEPS: RangeInclusive<u8> = 2..=10;
     const AGE_DARKEST: RangeInclusive<u8> = 10..=90;
     const FREE_GAMMA: RangeInclusive<f32> = 0.2..=1.5;
-    const STROKE_WIDTH: RangeInclusive<f32> = 0.0..=3.0;
+    const STROKE_WIDTH: RangeInclusive<f32> = 1.0..=3.0;
     const TESS: RangeInclusive<f32> = 1.0..=10.0;
     const LOG_LINES: RangeInclusive<usize> = 50..=5000;
     const FLAT_ROWS: RangeInclusive<usize> = 100..=100_000;
-    const MAP_LEVELS: RangeInclusive<usize> = 1..=3;
+    const MAP_LEVELS: RangeInclusive<usize> = 1..=12;
     const MAP_GAP: RangeInclusive<f32> = 0.0..=12.0;
 
     fn sanitized(mut self) -> Self {
@@ -178,6 +179,9 @@ impl Settings {
         clamp(&mut self.age_steps, Self::AGE_STEPS);
         clamp(&mut self.age_darkest_pct, Self::AGE_DARKEST);
         clamp(&mut self.free_space_gamma, Self::FREE_GAMMA);
+        // Whole pixels.
+        self.stroke_width = self.stroke_width.round();
+        self.map_gap = self.map_gap.round();
         clamp(&mut self.stroke_width, Self::STROKE_WIDTH);
         clamp(&mut self.tess_px_per_step, Self::TESS);
         clamp(&mut self.max_log_lines, Self::LOG_LINES);
@@ -224,8 +228,8 @@ impl Default for Settings {
             theme: ThemeChoice::Auto,
             map_view: false,
             animations: true,
-            map_levels: 1,
-            map_gap: 0.0,
+            map_levels: 2,
+            map_gap: 4.0,
         }
     }
 }
@@ -2365,6 +2369,50 @@ mod frame_bench {
         app.repick();
 
         app.summary_view = true;
+        // The map of the folder with the most items, once laid out.
+        app.summary_view = false;
+        app.settings.map_view = true;
+        app.settings.animations = false;
+        let busiest = {
+            fn walk(n: &Node, path: &mut Vec<usize>, best: &mut (usize, Vec<usize>)) {
+                if n.children.len() > best.0 {
+                    *best = (n.children.len(), path.clone());
+                }
+                for (i, c) in n.children.iter().enumerate() {
+                    if c.is_dir {
+                        path.push(i);
+                        walk(c, path, best);
+                        path.pop();
+                    }
+                }
+            }
+            let mut best = (0, Vec::new());
+            walk(app.root.as_ref().unwrap(), &mut Vec::new(), &mut best);
+            best
+        };
+        eprintln!("map folder: {} items", busiest.0);
+        for levels in [1, 2] {
+            app.settings.map_levels = levels;
+            app.view_stack = vec![vec![], busiest.1.clone()];
+            for _ in 0..500 {
+                frames(&mut app, &ctx, 1, 0, |_, _| vec![]);
+                if app.map.laid_out() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            report(
+                &format!("map ({levels} level), still"),
+                &frames(&mut app, &ctx, 3, n, |_, _| vec![]),
+            );
+            report(
+                &format!("map ({levels} level), hover"),
+                &frames(&mut app, &ctx, 3, n, |_, i| circle(i)),
+            );
+        }
+        app.settings.map_view = false;
+        app.view_stack = vec![vec![]];
+
         report("table, still", &frames(&mut app, &ctx, 3, n, |_, _| vec![]));
         let key = |k: egui::Key| egui::Event::Key {
             key: k,

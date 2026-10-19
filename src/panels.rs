@@ -806,6 +806,7 @@ impl DiskScanApp {
                         ui.add(
                             egui::Slider::new(&mut s.map_gap, Settings::MAP_GAP)
                                 .step_by(1.0)
+                                .fixed_decimals(0)
                                 .suffix(" px")
                                 .text(tr("SETTINGS_MAP_GAP")),
                         )
@@ -853,6 +854,9 @@ impl DiskScanApp {
                         .on_hover_text(tr("SETTINGS_AGE_DARKEST_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.stroke_width, Settings::STROKE_WIDTH)
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .suffix(" px")
                                 .text(tr("SETTINGS_BORDER_THICKNESS")),
                         );
                         ui.add(
