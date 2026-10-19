@@ -1,9 +1,9 @@
 # Changelog
 
-## 1.2.0 (not released yet)
+## 1.2.0 (2026-10-19)
 
 ### New
-- **Map view**: a third view next to the table and the sunburst. The
+- **Cell view**: a third view next to the table and the sunburst. The
   folder is split into cells whose areas match their sizes (a Voronoi
   treemap), colored by category and shaded by age from the newest files
   in the middle to the oldest at the border. Hover shows the same

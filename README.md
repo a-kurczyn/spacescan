@@ -1,10 +1,9 @@
 # SpaceScan
 
-A fast disk-usage explorer for Linux. SpaceScan scans any drive, mount point
+A fast disk-usage explorer for Linux. SpaceScan analyzes any drive, mount point
 or folder and shows where the space went, as an interactive sunburst chart,
-a map of cells sized by the space they use, or an ncdu-style table you can
-drive from the keyboard. It also writes plain-text, CSV or JSON reports from
-the command line.
+a map of cells, or an ncdu-style table you can drive from the keyboard.
+It also writes plain-text, CSV or JSON reports from the command line.
 
 ![SpaceScan chart view: a drive as a sunburst chart, colored by file category](docs/screenshot.png)
 
@@ -13,18 +12,18 @@ the command line.
 - **Sunburst chart.** Each ring is one folder level; slices are sized by the
   space they use, and the drive's free space is shown too. Click a slice to
   zoom in, click the center to go back up. Ctrl+scroll enlarges the chart
-  and dragging pans it, to reach very thin slices.
-- **Map view.** The folder as a map of cells whose areas match the space
+  and dragging pans it to reach very thin slices.
+- **Cell view.** The folder as a map of cells whose areas match the space
   they use (a Voronoi treemap), with the folders inside drawn within their
   cells, two levels deep by default and up to twelve. Big files and crowded
-  folders stand out at a glance, and even the smallest file gets a cell
-  you can click. Click a cell to open it; Ctrl+scroll zooms in to read the
-  names of small cells. The map grows live during a scan.
+  folders stand out at a glance, and even the smallest file gets a cell.
+  Click a cell to open it; Ctrl+scroll zooms in to read the names of
+  small cells. The map grows live during a scan.
 
-  ![SpaceScan map view: a drive as a Voronoi treemap, Backups highlighted and shown in yellow in the path bar](docs/map.png)
+  ![SpaceScan cell view: a drive as a Voronoi treemap, Backups highlighted and shown in yellow in the path bar](docs/map.png)
 
-- **Smooth navigation.** The arrow keys work the same in the chart, the map
-  and the table, as in ncdu: ⬆ ⬇ move, ➡ opens, ⬅ goes back up. The item
+- **Smooth navigation.** The arrow keys work the same in the chart, the cell
+  view and the table, as in ncdu: ⬆ ⬇ move, ➡ opens, ⬅ goes back up. The item
   you highlight shows in yellow after the path of the folder you're in.
   Slices and cells glide to their new places and zoom into and out of
   folders (animations can be turned off).
@@ -233,11 +232,12 @@ scan:
 - `/` scans the whole system, 🏠 scans your home folder,
 - or type a path into the path bar and press Enter.
 
-The toolbar switches between the chart, the map and the summary table,
-sorts chart slices by size or by name, and opens the filters and settings. The ☰ menu
-(or F10) also holds the keyboard shortcuts, a bug-report link and About.
+The toolbar switches between the chart, the cell view and the summary
+table, sorts chart slices by size or by name, and opens the filters and
+settings. The ☰ menu (or F10) also holds the keyboard shortcuts, a
+bug-report link and About.
 
-In the chart and the map, right-click a slice or cell to zoom, rescan,
+In the chart and the cell view, right-click a slice or cell to zoom, rescan,
 open, hide, move to the trash or delete it. The arrow keys work as in the
 table. In the table, the main keys are:
 
