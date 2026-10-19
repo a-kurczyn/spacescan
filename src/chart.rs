@@ -451,7 +451,8 @@ pub(crate) fn draw_arc_outline(
 }
 
 /// Draws one slice with a thin dark border, filled with a blend along its
-/// arc from `colors.0` at its start angle to `colors.1` at its end.
+/// arc from `colors.0` at its start angle to `colors.1` at its end, at
+/// `opacity`.
 pub(crate) fn draw_arc_mesh(
     painter: &egui::Painter,
     center: Pos2,
@@ -459,7 +460,12 @@ pub(crate) fn draw_arc_mesh(
     angles: (f32, f32),
     colors: (Color32, Color32),
     settings: &Settings,
+    opacity: f32,
 ) {
+    let colors = (
+        colors.0.gamma_multiply(opacity),
+        colors.1.gamma_multiply(opacity),
+    );
     let ((r0, r1), (a0, a1)) = (radii, angles);
     let span = (a1 - a0).abs();
     // One segment every few pixels of the outer arc, so curves stay smooth.
@@ -496,7 +502,7 @@ pub(crate) fn draw_arc_mesh(
 
     let stroke = egui::Stroke::new(
         settings.stroke_width,
-        Color32::from_black_alpha(settings.stroke_alpha),
+        Color32::from_black_alpha(settings.stroke_alpha).gamma_multiply(opacity),
     );
     painter.add(egui::Shape::closed_line(
         slice_outline(center, radii, angles, steps),

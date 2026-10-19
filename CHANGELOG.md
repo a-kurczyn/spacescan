@@ -24,6 +24,10 @@
   zooms the map in up to 8× around the pointer, showing the names of
   smaller cells, and dragging moves it; the space between cells and
   around the cells inside a folder stays the same on screen.
+- **Sunburst animations**: slices glide to their new angles when the
+  order, a filter or the measure changes, and the chart zooms into a
+  folder's slice when it opens and back out when it's left. Settings ›
+  Behavior control › Animations turns them off for both charts.
 - **Theme setting**: Auto (as before), Light or Dark.
 - **Categories window** (Settings › Edit categories…): rename, add and
   remove categories, change their extensions and pick their colors

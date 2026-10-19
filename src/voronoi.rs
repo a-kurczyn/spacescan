@@ -1061,7 +1061,7 @@ fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
 }
 
-fn ease_in_out(t: f32) -> f32 {
+pub(crate) fn ease_in_out(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     if t < 0.5 {
         4.0 * t * t * t
@@ -1071,7 +1071,7 @@ fn ease_in_out(t: f32) -> f32 {
 }
 
 /// 0 below `a`, 1 above `b`, smooth between.
-fn smoothstep(a: f32, b: f32, t: f32) -> f32 {
+pub(crate) fn smoothstep(a: f32, b: f32, t: f32) -> f32 {
     let x = ((t - a) / (b - a)).clamp(0.0, 1.0);
     x * x * (3.0 - 2.0 * x)
 }

@@ -25,6 +25,7 @@ mod look;
 mod palette;
 mod panels;
 mod scan;
+mod sun_motion;
 mod table;
 mod theme;
 mod transfer;
@@ -134,7 +135,7 @@ struct Settings {
     theme: ThemeChoice,
     /// The chart view shows the Voronoi map instead of the sunburst.
     map_view: bool,
-    /// The map's cells glide and zoom.
+    /// The sunburst's slices and the map's cells glide and zoom.
     animations: bool,
     /// How many levels of folders the map shows at once.
     map_levels: usize,
@@ -325,6 +326,8 @@ struct DiskScanApp {
     chart_scale: f32,
     /// Pan of a zoomed-in chart from its centred position (drag to move).
     chart_offset: Vec2,
+    /// How the sunburst moves between layouts.
+    sun_motion: sun_motion::SunMotion,
     /// Slice highlighted by the arrow keys.
     selection: Option<ChartSel>,
     /// Selectable slices of the chart drawn this frame: (idx_path relative
@@ -448,6 +451,7 @@ impl Default for DiskScanApp {
             chart_order: ChartOrder::Size,
             chart_scale: 1.0,
             chart_offset: Vec2::ZERO,
+            sun_motion: Default::default(),
             selection: None,
             chart_segs: Vec::new(),
             typing: false,

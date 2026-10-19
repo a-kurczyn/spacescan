@@ -798,8 +798,6 @@ impl DiskScanApp {
 
                         ui.separator();
                         ui.label(tr("SETTINGS_MAP"));
-                        ui.checkbox(&mut s.animations, tr("SETTINGS_ANIMATIONS"))
-                            .on_hover_text(tr("SETTINGS_ANIMATIONS_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.map_levels, Settings::MAP_LEVELS)
                                 .text(tr("SETTINGS_MAP_LEVELS")),
@@ -876,6 +874,8 @@ impl DiskScanApp {
 
                         ui.separator();
                         ui.label(tr("SETTINGS_BEHAVIOR"));
+                        ui.checkbox(&mut s.animations, tr("SETTINGS_ANIMATIONS"))
+                            .on_hover_text(tr("SETTINGS_ANIMATIONS_HOVER"));
                         ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
                             .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
                         ui.checkbox(&mut s.paths_to_clipboard, tr("SETTINGS_PATHS_CLIPBOARD"))
@@ -1812,6 +1812,7 @@ impl DiskScanApp {
             (seg.start_angle, seg.end_angle),
             colors,
             &self.settings,
+            1.0,
         );
     }
 
@@ -1956,8 +1957,9 @@ impl DiskScanApp {
             live: false,
             now: now_secs(),
         };
-        for seg in &segs {
-            self.draw_segment(painter, seg, geom, &colors);
+        let moving = self.draw_moving_chart(root, view_node, &segs, geom, painter, &colors);
+        if moving {
+            ctx.request_repaint();
         }
         // Only where nothing else (a dialog, a menu, the legend) is over the
         // chart.
@@ -1978,7 +1980,7 @@ impl DiskScanApp {
             .filter(|s| !s.is_free)
             .map(|s| (s.idx_path.clone(), s.start_angle))
             .collect();
-        if let Some(rel) = self.selected_rel()
+        if let Some(rel) = self.selected_rel().filter(|_| !moving)
             && let Some(seg) = segs.iter().find(|s| !s.is_free && s.idx_path == *rel)
         {
             let radii = ring_radii(seg.ring, hub_radius, ring_thickness);
@@ -2012,6 +2014,85 @@ impl DiskScanApp {
         if let Some(p) = pointer {
             self.hover_details_ui(&ctx, p, center);
         }
+    }
+
+    /// Draws the sunburst's slices `segs` of `view_node`, gliding or zooming
+    /// from what was drawn before when animations are on. Returns whether
+    /// anything is still moving.
+    fn draw_moving_chart(
+        &mut self,
+        root: &Node,
+        view_node: &Node,
+        segs: &[Segment],
+        geom: (Pos2, f32, f32),
+        painter: &egui::Painter,
+        colors: &SliceColoring,
+    ) -> bool {
+        let (center, hub_radius, ring_thickness) = geom;
+        let dark = painter.ctx().global_style().visuals.dark_mode;
+        // The folder shown, by names from the scan's top.
+        let mut names = vec![root.name.clone()];
+        let mut node = root;
+        for &i in self.current_view() {
+            let Some(child) = node.children.get(i) else {
+                break;
+            };
+            node = child;
+            names.push(node.name.clone());
+        }
+        let view_key = names
+            .iter()
+            .fold(0, |k, name| sun_motion::child_key(k, name));
+        let key_of = |seg: &Segment| {
+            if seg.is_free {
+                return sun_motion::child_key(view_key, "\0free");
+            }
+            let mut key = view_key;
+            let mut n = view_node;
+            for &i in &seg.idx_path {
+                match n.children.get(i) {
+                    Some(c) => {
+                        key = sun_motion::child_key(key, &c.name);
+                        n = c;
+                    }
+                    None => key = sun_motion::child_key(key, "\0other"),
+                }
+            }
+            key
+        };
+        let target = segs
+            .iter()
+            .map(|seg| sun_motion::DrawnSlice {
+                key: key_of(seg),
+                angles: (seg.start_angle, seg.end_angle),
+                ring: seg.ring as f32,
+                colors: self.segment_colors(seg, colors, dark),
+            })
+            .collect();
+        let (shown, moving) = self.sun_motion.frame(
+            &names,
+            view_key,
+            target,
+            self.settings.animations,
+            painter.ctx().cumulative_pass_nr(),
+        );
+        for (slice, opacity) in &shown {
+            let inner = hub_radius + slice.ring.max(0.0) * ring_thickness;
+            let outer = hub_radius + (slice.ring + 1.0) * ring_thickness;
+            if *opacity <= 0.0 || outer <= inner || slice.angles.1 - slice.angles.0 < 1e-4 {
+                continue;
+            }
+            draw_arc_mesh(
+                painter,
+                center,
+                (inner, outer),
+                slice.angles,
+                slice.colors,
+                &self.settings,
+                *opacity,
+            );
+        }
+        moving
     }
 
     /// Works out the slice looks of the whole tree, once per tree.
