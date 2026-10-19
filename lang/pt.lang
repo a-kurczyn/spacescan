@@ -56,7 +56,7 @@ ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=Configurações
-SETTINGS_DEPTH_GROUPING=Profundidade e agrupamento
+SETTINGS_SUNBURST=Controlo do sunburst
 SETTINGS_DEPTH_LEVELS=Níveis de profundidade mostrados
 SETTINGS_MIN_SLICE_ANGLE=Ângulo mínimo da fatia (°)
 SETTINGS_MAX_SLICES=Máximo de fatias por anel
@@ -76,16 +76,16 @@ SETTINGS_LINE_RENDERING=Desenho das linhas
 SETTINGS_BORDER_THICKNESS=Espessura das bordas
 SETTINGS_BORDER_DARKNESS=Escurecimento das bordas
 SETTINGS_CURVE_SMOOTH=Suavidade das curvas (px/passo, menor = mais suave)
-SETTINGS_TABLE=Tabela de conteúdo
+SETTINGS_TABLE=Controlo da tabela
+SETTINGS_MAP=Controlo do mapa
+SETTINGS_BEHAVIOR=Comportamento
 SETTINGS_FLAT_ROWS=Linhas da lista plana
 SETTINGS_FLAT_ROWS_HOVER=A lista plana mostra no máximo esta quantidade de arquivos, os primeiros na ordem atual (os maiores, ordenando por tamanho).
 SETTINGS_FLAT_ALL=Mostrar todos os arquivos na lista plana
 SETTINGS_FLAT_ALL_HOVER=A lista plana mostra todos os arquivos, sem limite de linhas. Com milhões de arquivos, ordená-la leva alguns segundos.
 SETTINGS_PATHS_CLIPBOARD=Ctrl+C / Ctrl+X põem os arquivos na área de transferência do sistema
 SETTINGS_PATHS_CLIPBOARD_HOVER=Também coloca os arquivos escolhidos na área de transferência do sistema, para colar num gerenciador de arquivos (movidos após Ctrl+X) ou como caminhos em outros programas. Desligado, Ctrl+V no SpaceScan usa a própria seleção; "Colar nesta pasta" do menu do clique direito sempre funciona.
-SETTINGS_LOG=Registro
 SETTINGS_MAX_LOG_LINES=Linhas de problemas guardadas (máx.)
-SETTINGS_SCANNING=Análise
 SETTINGS_APPARENT_SIZE=Contar tamanho aparente
 SETTINGS_APPARENT_SIZE_HOVER=Conta o comprimento de cada arquivo em vez do espaço em disco que ele ocupa. Desligado: arquivos esparsos contam o que realmente ocupam e arquivos com links físicos contam uma vez só, como o du. Ligue para discos de rede ou FUSE que não informam o espaço ocupado. Vale a partir da próxima análise.
 SETTINGS_DEFAULTS=Padrões

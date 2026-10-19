@@ -56,7 +56,7 @@ ERR_FIELD_PREFIX=%s: %s
 
 # ---- Settings panel ----
 SETTINGS_TITLE=Impostazioni
-SETTINGS_DEPTH_GROUPING=Profondità e raggruppamento
+SETTINGS_SUNBURST=Controllo del sunburst
 SETTINGS_DEPTH_LEVELS=Livelli di profondità mostrati
 SETTINGS_MIN_SLICE_ANGLE=Angolo minimo di uno spicchio (°)
 SETTINGS_MAX_SLICES=Spicchi massimi per anello
@@ -76,16 +76,16 @@ SETTINGS_LINE_RENDERING=Resa delle linee
 SETTINGS_BORDER_THICKNESS=Spessore dei bordi
 SETTINGS_BORDER_DARKNESS=Scurezza dei bordi
 SETTINGS_CURVE_SMOOTH=Morbidezza delle curve (px/passo, più basso = più morbido)
-SETTINGS_TABLE=Tabella dei contenuti
+SETTINGS_TABLE=Controllo della tabella
+SETTINGS_MAP=Controllo della mappa
+SETTINGS_BEHAVIOR=Comportamento
 SETTINGS_FLAT_ROWS=Righe dell'elenco piatto
 SETTINGS_FLAT_ROWS_HOVER=L'elenco piatto mostra al massimo questo numero di file, i primi nell'ordinamento attuale (i più grandi, ordinando per dimensione).
 SETTINGS_FLAT_ALL=Mostra tutti i file nell'elenco piatto
 SETTINGS_FLAT_ALL_HOVER=L'elenco piatto mostra tutti i file, senza limite di righe. Con milioni di file, ordinarlo richiede alcuni secondi.
 SETTINGS_PATHS_CLIPBOARD=Ctrl+C / Ctrl+X mettono i file negli appunti di sistema
 SETTINGS_PATHS_CLIPBOARD_HOVER=Mette anche i file scelti negli appunti di sistema, da incollare in un gestore di file (spostati dopo Ctrl+X) o come percorsi in altri programmi. Se disattivato, Ctrl+V in SpaceScan usa la propria selezione; «Incolla in questa cartella» del menu del clic destro funziona sempre.
-SETTINGS_LOG=Registro
 SETTINGS_MAX_LOG_LINES=Righe di problemi conservate (max.)
-SETTINGS_SCANNING=Analisi
 SETTINGS_APPARENT_SIZE=Conta la dimensione apparente
 SETTINGS_APPARENT_SIZE_HOVER=Conta la lunghezza di ogni file invece dello spazio su disco che occupa. Disattivato: i file sparsi contano ciò che occupano davvero e i file con collegamenti fisici una volta sola, come du. Attivalo per unità di rete o FUSE che non riportano lo spazio occupato. Ha effetto dalla prossima analisi.
 SETTINGS_DEFAULTS=Valori predefiniti

@@ -740,7 +740,7 @@ impl DiskScanApp {
                         .on_hover_text(tr("SETTINGS_MEASURE_HOVER"));
                         ui.separator();
 
-                        ui.label(tr("SETTINGS_DEPTH_GROUPING"));
+                        ui.label(tr("SETTINGS_SUNBURST"));
                         ui.add(
                             egui::Slider::new(&mut s.max_render_depth, Settings::DEPTH)
                                 .text(tr("SETTINGS_DEPTH_LEVELS")),
@@ -761,6 +761,31 @@ impl DiskScanApp {
                             egui::Slider::new(&mut s.hub_radius_frac, Settings::HUB)
                                 .text(tr("SETTINGS_HUB_SIZE")),
                         );
+                        ui.add(
+                            egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
+                                .text(tr("SETTINGS_FREE_GAMMA")),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut s.tess_px_per_step, Settings::TESS)
+                                .text(tr("SETTINGS_CURVE_SMOOTH")),
+                        );
+
+                        ui.separator();
+                        ui.label(tr("SETTINGS_MAP"));
+                        ui.checkbox(&mut s.animations, tr("SETTINGS_ANIMATIONS"))
+                            .on_hover_text(tr("SETTINGS_ANIMATIONS_HOVER"));
+                        ui.add(
+                            egui::Slider::new(&mut s.map_levels, Settings::MAP_LEVELS)
+                                .text(tr("SETTINGS_MAP_LEVELS")),
+                        )
+                        .on_hover_text(tr("SETTINGS_MAP_LEVELS_HOVER"));
+                        ui.add(
+                            egui::Slider::new(&mut s.map_gap, Settings::MAP_GAP)
+                                .step_by(1.0)
+                                .suffix(" px")
+                                .text(tr("SETTINGS_MAP_GAP")),
+                        )
+                        .on_hover_text(tr("SETTINGS_MAP_GAP_HOVER"));
 
                         ui.separator();
                         ui.label(tr("SETTINGS_COLORS"));
@@ -786,9 +811,6 @@ impl DiskScanApp {
                         });
                         ui.checkbox(&mut s.color_blind_safe, tr("SETTINGS_COLOR_BLIND"))
                             .on_hover_text(tr("SETTINGS_COLOR_BLIND_HOVER"));
-                        if ui.button(tr("CATS_EDIT")).clicked() && self.cat_editor.is_none() {
-                            self.cat_editor = Some(CategoryEditor::new(self.cats.entries()));
-                        }
                         ui.add(
                             egui::Slider::new(&mut s.age_days, Settings::AGE_DAYS)
                                 .logarithmic(true)
@@ -805,25 +827,6 @@ impl DiskScanApp {
                                 .text(tr("SETTINGS_AGE_DARKEST")),
                         )
                         .on_hover_text(tr("SETTINGS_AGE_DARKEST_HOVER"));
-                        ui.add(
-                            egui::Slider::new(&mut s.free_space_gamma, Settings::FREE_GAMMA)
-                                .text(tr("SETTINGS_FREE_GAMMA")),
-                        );
-
-                        ui.checkbox(&mut s.animations, tr("SETTINGS_ANIMATIONS"))
-                            .on_hover_text(tr("SETTINGS_ANIMATIONS_HOVER"));
-                        ui.add(
-                            egui::Slider::new(&mut s.map_levels, Settings::MAP_LEVELS)
-                                .text(tr("SETTINGS_MAP_LEVELS")),
-                        )
-                        .on_hover_text(tr("SETTINGS_MAP_LEVELS_HOVER"));
-                        ui.add(
-                            egui::Slider::new(&mut s.map_gap, Settings::MAP_GAP)
-                                .step_by(1.0)
-                                .suffix(" px")
-                                .text(tr("SETTINGS_MAP_GAP")),
-                        )
-                        .on_hover_text(tr("SETTINGS_MAP_GAP_HOVER"));
 
                         ui.separator();
                         ui.label(tr("SETTINGS_LINE_RENDERING"));
@@ -834,10 +837,6 @@ impl DiskScanApp {
                         ui.add(
                             egui::Slider::new(&mut s.stroke_alpha, 0..=255)
                                 .text(tr("SETTINGS_BORDER_DARKNESS")),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut s.tess_px_per_step, Settings::TESS)
-                                .text(tr("SETTINGS_CURVE_SMOOTH")),
                         );
 
                         ui.separator();
@@ -851,47 +850,47 @@ impl DiskScanApp {
                         .on_hover_text(tr("SETTINGS_FLAT_ROWS_HOVER"));
                         ui.checkbox(&mut s.flat_all, tr("SETTINGS_FLAT_ALL"))
                             .on_hover_text(tr("SETTINGS_FLAT_ALL_HOVER"));
-                        ui.checkbox(&mut s.paths_to_clipboard, tr("SETTINGS_PATHS_CLIPBOARD"))
-                            .on_hover_text(tr("SETTINGS_PATHS_CLIPBOARD_HOVER"));
 
                         ui.separator();
-                        ui.label(tr("SETTINGS_LOG"));
+                        ui.label(tr("SETTINGS_BEHAVIOR"));
+                        ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
+                            .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
+                        ui.checkbox(&mut s.paths_to_clipboard, tr("SETTINGS_PATHS_CLIPBOARD"))
+                            .on_hover_text(tr("SETTINGS_PATHS_CLIPBOARD_HOVER"));
                         ui.add(
                             egui::Slider::new(&mut s.max_log_lines, Settings::LOG_LINES)
                                 .text(tr("SETTINGS_MAX_LOG_LINES")),
                         );
-
-                        ui.separator();
-                        ui.label(tr("SETTINGS_SCANNING"));
-                        ui.checkbox(&mut s.apparent_size, tr("SETTINGS_APPARENT_SIZE"))
-                            .on_hover_text(tr("SETTINGS_APPARENT_SIZE_HOVER"));
+                        if ui.button(tr("CATS_EDIT")).clicked() && self.cat_editor.is_none() {
+                            self.cat_editor = Some(CategoryEditor::new(self.cats.entries()));
+                        }
+                        ui.horizontal(|ui| {
+                            let lang_label = ui.label(tr("SETTINGS_LANGUAGE")).id;
+                            let langs = available_languages();
+                            let current = current_lang_code();
+                            let current_name = langs
+                                .iter()
+                                .find(|(c, _)| *c == current)
+                                .map(|(_, n)| n.clone())
+                                .unwrap_or_else(|| current.clone());
+                            egui::ComboBox::from_id_salt("lang_combo")
+                                .selected_text(current_name)
+                                .show_ui(ui, |ui| {
+                                    for (code, name) in &langs {
+                                        if ui.selectable_label(*code == current, name).clicked() {
+                                            set_language(code);
+                                            lang_problem = lang_file_problem(code);
+                                        }
+                                    }
+                                })
+                                .response
+                                .labelled_by(lang_label);
+                        });
 
                         ui.separator();
                         if ui.button(tr("SETTINGS_DEFAULTS")).clicked() {
                             *s = Settings::default();
                         }
-
-                        ui.separator();
-                        let lang_label = ui.label(tr("SETTINGS_LANGUAGE")).id;
-                        let langs = available_languages();
-                        let current = current_lang_code();
-                        let current_name = langs
-                            .iter()
-                            .find(|(c, _)| *c == current)
-                            .map(|(_, n)| n.clone())
-                            .unwrap_or_else(|| current.clone());
-                        egui::ComboBox::from_id_salt("lang_combo")
-                            .selected_text(current_name)
-                            .show_ui(ui, |ui| {
-                                for (code, name) in &langs {
-                                    if ui.selectable_label(*code == current, name).clicked() {
-                                        set_language(code);
-                                        lang_problem = lang_file_problem(code);
-                                    }
-                                }
-                            })
-                            .response
-                            .labelled_by(lang_label);
                     });
                 },
             );

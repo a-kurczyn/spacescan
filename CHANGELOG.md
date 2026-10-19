@@ -37,6 +37,10 @@
   as in ncdu: ⬆ and ⬇ move to the previous and next item and stop at the
   first and last, ➡ opens the highlighted folder, ⬅ goes to the parent
   folder.
+- Settings are grouped by what they change: Sunburst control, Maptree
+  control, Colors, Line rendering (both charts), Table control and
+  Behavior control (apparent size, clipboard, log lines, categories,
+  language).
 
 ## 1.1.3 (2026-10-17)
 
