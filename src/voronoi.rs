@@ -843,9 +843,28 @@ fn lay_out_level(
 /// A cell as drawn: the item, its polygon on screen and how deep it is.
 pub(crate) struct MapCell<'a> {
     pub(crate) item: &'a MapItem,
+    /// Where the item is in the tree: its index at each level.
+    at: Vec<usize>,
     pub(crate) poly: Poly,
     /// Its items are drawn inside it.
     pub(crate) split: bool,
+}
+
+/// The item at `at` in `tree` (as `MapCell::at` gives it).
+fn item_at<'a>(tree: &'a MapTree, at: &[usize]) -> Option<&'a MapItem> {
+    let (&first, rest) = at.split_first()?;
+    rest.iter()
+        .try_fold(tree.items.get(first)?, |item, &i| item.children.get(i))
+}
+
+/// The cells' shapes as last worked out, drawn again while nothing moves:
+/// for which tree, area, zoom and layout.
+struct KeptShapes {
+    tree: *const MapTree,
+    bounds: egui::Rect,
+    zoom: f32,
+    layout: u64,
+    cells: Vec<(Vec<usize>, Poly, bool)>,
 }
 
 /// The cells of `tree` inside `bounds`, outer before inner, with the places
@@ -865,6 +884,7 @@ pub(crate) fn map_cells<'a>(
         bounds,
         nest_margin(tree.gap) / zoom,
         &mut Vec::new(),
+        &mut Vec::new(),
         place_of,
         &mut out,
     );
@@ -882,6 +902,7 @@ fn cells_level<'a>(
     bounds: &[Pos2],
     margin: f32,
     key: &mut Vec<Box<str>>,
+    at: &mut Vec<usize>,
     place_of: PlaceOf,
     out: &mut Vec<MapCell<'a>>,
 ) {
@@ -901,22 +922,25 @@ fn cells_level<'a>(
         .collect();
     let mut cells = cells_of(&region, &places);
     cells.extend(corner);
-    for (item, poly) in items.iter().zip(cells) {
+    for (i, (item, poly)) in items.iter().zip(cells).enumerate() {
         if poly.len() < 3 {
             continue;
         }
         key.push(item.key.clone());
+        at.push(i);
         let laid_out = !item.children.is_empty() && place_of(key, &item.children[0].key).is_some();
         let inner = laid_out.then(|| inset(&poly, margin)).flatten();
         out.push(MapCell {
             item,
+            at: at.clone(),
             poly,
             split: inner.is_some(),
         });
         if let Some(inner) = inner {
-            cells_level(&item.children, &inner, margin, key, place_of, out);
+            cells_level(&item.children, &inner, margin, key, at, place_of, out);
         }
         key.pop();
+        at.pop();
     }
 }
 
@@ -1006,6 +1030,9 @@ pub(crate) struct MapState {
     cache: Vec<(MapSource, Arc<MapTree>, Places)>,
     cache_gen: u64,
     job_source: Option<MapSource>,
+    /// Counts the layouts taken, to tell when the kept shapes are stale.
+    layouts_taken: u64,
+    shapes: Option<KeptShapes>,
 }
 
 /// How many layouts the map keeps, to show folders seen before at once.
@@ -1350,9 +1377,46 @@ impl DiskScanApp {
             ctx.request_repaint();
         }
         let lens = self.map_lens(&ctx, response, rect, &view);
-        let state = &self.map;
-        let place_of = |key: &[Box<str>], name: &str| state.place_now(key, name, glide);
-        let mut cells = map_cells(&tree, &bounds, &place_of, lens.scale);
+        // While nothing glides, the shapes worked out last frame still hold.
+        let still = glide >= 1.0;
+        let kept = self.map.shapes.take().filter(|k| {
+            still
+                && std::ptr::eq(k.tree, Arc::as_ptr(&tree))
+                && k.bounds == rect
+                && k.zoom == lens.scale
+                && k.layout == self.map.layouts_taken
+        });
+        let mut cells = match &kept {
+            Some(k) => k
+                .cells
+                .iter()
+                .filter_map(|(at, poly, split)| {
+                    Some(MapCell {
+                        item: item_at(&tree, at)?,
+                        at: at.clone(),
+                        poly: poly.clone(),
+                        split: *split,
+                    })
+                })
+                .collect(),
+            None => {
+                let state = &self.map;
+                let place_of = |key: &[Box<str>], name: &str| state.place_now(key, name, glide);
+                map_cells(&tree, &bounds, &place_of, lens.scale)
+            }
+        };
+        self.map.shapes = kept.or_else(|| {
+            still.then(|| KeptShapes {
+                tree: Arc::as_ptr(&tree),
+                bounds: rect,
+                zoom: lens.scale,
+                layout: self.map.layouts_taken,
+                cells: cells
+                    .iter()
+                    .map(|c| (c.at.clone(), c.poly.clone(), c.split))
+                    .collect(),
+            })
+        });
         if lens.scale > 1.0 {
             for c in &mut cells {
                 for p in &mut c.poly {
@@ -1587,6 +1651,7 @@ impl DiskScanApp {
             Places::new()
         };
         self.map.target = places;
+        self.map.layouts_taken += 1;
         self.map.glide_start = Some(Instant::now());
         self.map.tree = self.map.next_tree.clone();
         if let Some(zoom) = &mut self.map.zoom
@@ -2108,6 +2173,10 @@ mod tests {
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
         let cells = map_cells(&tree, &bounds, &place_of, 1.0);
         assert_eq!(cells.len(), 3 + 5);
+        // Each cell's place in the tree leads back to its item.
+        for c in &cells {
+            assert!(std::ptr::eq(item_at(&tree, &c.at).unwrap(), c.item));
+        }
         let top: Vec<&MapCell> = cells.iter().filter(|c| c.item.seg.ring == 0).collect();
         let total = area(&bounds);
         for (cell, share) in top.iter().zip([0.5, 1.0 / 3.0, 1.0 / 6.0]) {
