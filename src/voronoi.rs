@@ -107,64 +107,70 @@ struct SidedCell {
 fn sided_cells(bounds: &[Pos2], sites: &[Pos2], weights: &[f32]) -> Vec<SidedCell> {
     let by_x = sorted_by_x(sites);
     let heaviest = weights.iter().copied().fold(f32::MIN, f32::max);
-    (0..by_x.len())
-        .map(|k| {
-            let i = by_x[k];
-            let si = sites[i];
-            let mut cell = SidedCell {
-                poly: bounds.to_vec(),
-                across: vec![BORDER; bounds.len()],
+    let cell_of = |k: usize| {
+        let i = by_x[k];
+        let si = sites[i];
+        let mut cell = SidedCell {
+            poly: bounds.to_vec(),
+            across: vec![BORDER; bounds.len()],
+        };
+        let mut reach = farthest(&cell.poly, si);
+        // The other sites, nearest in x first: once a site is so far in
+        // x that even the heaviest weight couldn't bring its edge into
+        // the cell, every site beyond it on that side is too.
+        let (mut left, mut right) = (k, k + 1);
+        let (mut left_done, mut right_done) = (k == 0, right >= by_x.len());
+        while !(left_done && right_done) {
+            let left_dx = (!left_done).then(|| si.x - sites[by_x[left - 1]].x);
+            let right_dx = (!right_done).then(|| sites[by_x[right]].x - si.x);
+            let go_left = match (left_dx, right_dx) {
+                (Some(l), Some(r)) => l <= r,
+                (l, _) => l.is_some(),
             };
-            let mut reach = farthest(&cell.poly, si);
-            // The other sites, nearest in x first: once a site is so far in
-            // x that even the heaviest weight couldn't bring its edge into
-            // the cell, every site beyond it on that side is too.
-            let (mut left, mut right) = (k, k + 1);
-            let (mut left_done, mut right_done) = (k == 0, right >= by_x.len());
-            while !(left_done && right_done) {
-                let left_dx = (!left_done).then(|| si.x - sites[by_x[left - 1]].x);
-                let right_dx = (!right_done).then(|| sites[by_x[right]].x - si.x);
-                let go_left = match (left_dx, right_dx) {
-                    (Some(l), Some(r)) => l <= r,
-                    (l, _) => l.is_some(),
-                };
-                let (j, dx) = if go_left {
-                    (by_x[left - 1], left_dx.unwrap())
-                } else {
-                    (by_x[right], right_dx.unwrap())
-                };
-                if dx > 0.0 && (dx * dx + weights[i] - heaviest) / (2.0 * dx) >= reach {
-                    if go_left {
-                        left_done = true;
-                    } else {
-                        right_done = true;
-                    }
-                    continue;
-                }
+            let (j, dx) = if go_left {
+                (by_x[left - 1], left_dx.unwrap())
+            } else {
+                (by_x[right], right_dx.unwrap())
+            };
+            if dx > 0.0 && (dx * dx + weights[i] - heaviest) / (2.0 * dx) >= reach {
                 if go_left {
-                    left -= 1;
-                    left_done = left == 0;
+                    left_done = true;
                 } else {
-                    right += 1;
-                    right_done = right >= by_x.len();
+                    right_done = true;
                 }
-                if cut(&mut cell, sites, weights, i, j) {
-                    if cell.poly.is_empty() {
-                        break;
-                    }
-                    reach = farthest(&cell.poly, si);
-                }
+                continue;
             }
-            (i, cell)
-        })
-        .fold(
-            vec![SidedCell::default(); sites.len()],
-            |mut out, (i, cell)| {
-                out[i] = cell;
-                out
-            },
-        )
+            if go_left {
+                left -= 1;
+                left_done = left == 0;
+            } else {
+                right += 1;
+                right_done = right >= by_x.len();
+            }
+            if cut(&mut cell, sites, weights, i, j) {
+                if cell.poly.is_empty() {
+                    break;
+                }
+                reach = farthest(&cell.poly, si);
+            }
+        }
+        (i, cell)
+    };
+    // Each cell is worked out on its own: many at once on several cores.
+    let found: Vec<(usize, SidedCell)> = if by_x.len() >= PARALLEL_CELLS {
+        (0..by_x.len()).into_par_iter().map(cell_of).collect()
+    } else {
+        (0..by_x.len()).map(cell_of).collect()
+    };
+    let mut out = vec![SidedCell::default(); sites.len()];
+    for (i, cell) in found {
+        out[i] = cell;
+    }
+    out
 }
+
+/// From how many cells `sided_cells` works on several cores.
+const PARALLEL_CELLS: usize = 64;
 
 /// Site indices in order of x.
 fn sorted_by_x(sites: &[Pos2]) -> Vec<usize> {
