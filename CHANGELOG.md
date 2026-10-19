@@ -23,8 +23,8 @@
   map cells leaves up to 12 pixels of space between them (4 by
   default). Ctrl+wheel zooms the map in up to 8× around the pointer,
   showing the names of smaller cells, and dragging moves it; the space
-  between cells and
-  around the cells inside a folder stays the same on screen. A folder's
+  between cells and around the cells inside a folder stays the same on
+  screen. A folder's
   map is worked out in about a fifth of a second even with 400 cells on
   a 4K screen, and folders seen before show at once.
 - **Sunburst animations**: slices glide to their new angles when the
