@@ -383,18 +383,6 @@ impl DiskScanApp {
         }
         if icon_toolbar_button(
             ui,
-            !self.summary_view && !self.settings.map_view,
-            true,
-            &tr("TOOLBAR_CHART_VIEW"),
-            draw_chart_icon,
-        )
-        .clicked()
-        {
-            out.set_summary = Some(false);
-            out.set_map = Some(false);
-        }
-        if icon_toolbar_button(
-            ui,
             !self.summary_view && self.settings.map_view,
             true,
             &tr("TOOLBAR_MAP_VIEW"),
@@ -404,6 +392,18 @@ impl DiskScanApp {
         {
             out.set_summary = Some(false);
             out.set_map = Some(true);
+        }
+        if icon_toolbar_button(
+            ui,
+            !self.summary_view && !self.settings.map_view,
+            true,
+            &tr("TOOLBAR_CHART_VIEW"),
+            draw_chart_icon,
+        )
+        .clicked()
+        {
+            out.set_summary = Some(false);
+            out.set_map = Some(false);
         }
         ui.separator();
     }
@@ -2627,9 +2627,8 @@ fn path_crumbs_ui(
     clicked
 }
 
-/// One name in the path bar, in `color`, its full path on hover. A
-/// `clickable` one is underlined under the pointer; returns true when it's
-/// clicked.
+/// One name in the path bar, in `color`, its full path on hover; returns
+/// true when a `clickable` one is clicked.
 fn crumb_ui(
     ui: &mut egui::Ui,
     text: egui::RichText,
@@ -2640,19 +2639,10 @@ fn crumb_ui(
     let resp = ui
         .add(egui::Button::new(text.color(color)).frame(false))
         .on_hover_text(short_path(path));
-    if !clickable {
-        return false;
-    }
-    if resp.hovered() {
-        let pad = ui.spacing().button_padding;
-        ui.painter().hline(
-            resp.rect.x_range().shrink(pad.x),
-            resp.rect.bottom() - pad.y,
-            egui::Stroke::new(1.0, color),
-        );
-    }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
+    clickable
+        && resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
 }
 
 /// The color of the highlighted item's name in the path bar: yellow on

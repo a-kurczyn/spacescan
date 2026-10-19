@@ -14,8 +14,8 @@
   than 400) do the smallest share a grey "other" corner of 16 × 16
   pixels, which opens the next of them like a folder, as many times as
   needed. A strip beside the map, as wide as it needs, holds the
-  folder's details, an arrow pad (back, prev, next and open, like the
-  arrow keys) and the category legend. The map grows live during a scan,
+  folder's details and the category legend. Its button sits between
+  the sunburst's and the table's. The map grows live during a scan,
   glides when it changes and zooms into and out of folders; the
   animations can be turned off in the settings. The map shows one level
   of folders by default; Settings › Map levels shows up to three, the

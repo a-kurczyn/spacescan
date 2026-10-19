@@ -1091,7 +1091,7 @@ const STRIP_MAX_WIDTH: f32 = 360.0;
 
 impl DiskScanApp {
     /// The map view, `size` big: the strip on the left (the folder's
-    /// details, the arrow pad, the legend), the map in the rest.
+    /// details and the legend), the map in the rest.
     pub(crate) fn map_area_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1103,7 +1103,7 @@ impl DiskScanApp {
         ui.horizontal_top(|ui| {
             // As wide as its contents, within limits; the map takes the rest.
             let widest = (size.x * 0.35).clamp(STRIP_MIN_WIDTH, STRIP_MAX_WIDTH);
-            let pad = ui.allocate_ui_with_layout(
+            ui.allocate_ui_with_layout(
                 Vec2::new(widest, size.y),
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
@@ -1117,17 +1117,12 @@ impl DiskScanApp {
                 egui::Sense::click_and_drag(),
             );
             self.map_ui(ui, top, tree_id, &response, &painter, live);
-            // After the map, which lists the items the arrows move between.
-            if let Some(dir) = pad.inner {
-                self.move_selection(dir);
-            }
         });
     }
 
-    /// The strip: the folder shown (or the highlighted item) and its
-    /// details, the category picked, the arrow pad, and the legend at the
-    /// bottom.
-    fn map_strip_ui(&mut self, ui: &mut egui::Ui, live: bool) -> Option<NavDir> {
+    /// The strip: the details of the folder shown (or the highlighted
+    /// item), the category picked, and the legend at the bottom.
+    fn map_strip_ui(&mut self, ui: &mut egui::Ui, live: bool) {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         if !live && let Some(root) = self.root.clone() {
             let view_node = self.current_view_node(&root);
@@ -1160,73 +1155,10 @@ impl DiskScanApp {
                 }
             });
         }
-        let press = if live {
-            None
-        } else {
-            ui.add_space(10.0);
-            self.arrow_pad_ui(ui)
-        };
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             ui.add_space(4.0);
             self.legend_body(ui);
         });
-        press
-    }
-
-    /// Buttons for the arrow keys, each with its arrow and a word: back
-    /// (the parent folder), previous and next item, and open. Returns the
-    /// one pressed.
-    fn arrow_pad_ui(&mut self, ui: &mut egui::Ui) -> Option<NavDir> {
-        let back = self.view_stack.len() > 1 || self.map.other_depth(self.current_view()) > 0;
-        let open = self.selection.is_some();
-        let body = egui::TextStyle::Body.resolve(ui.style());
-        let small = egui::TextStyle::Small.resolve(ui.style());
-        let mut press = None;
-        egui::Grid::new("arrow_pad")
-            .spacing([2.0, 2.0])
-            .show(ui, |ui| {
-                let mut button = |ui: &mut egui::Ui,
-                                  glyph: &str,
-                                  word: &str,
-                                  hover: &str,
-                                  enabled: bool,
-                                  dir: NavDir| {
-                    let color = ui.visuals().text_color();
-                    let mut text = egui::text::LayoutJob::simple_singleline(
-                        format!("{glyph}\n"),
-                        body.clone(),
-                        color,
-                    );
-                    text.append(
-                        &tr(word),
-                        0.0,
-                        egui::TextFormat::simple(small.clone(), color),
-                    );
-                    text.halign = egui::Align::Center;
-                    if ui
-                        .add_enabled(
-                            enabled,
-                            egui::Button::new(text).min_size(Vec2::new(44.0, 36.0)),
-                        )
-                        .on_hover_text(tr(hover))
-                        .named(&tr(hover))
-                        .clicked()
-                    {
-                        press = Some(dir);
-                    }
-                };
-                ui.label("");
-                button(ui, "⬆", "MAP_PAD_PREV", "MAP_PREV", true, NavDir::Prev);
-                ui.end_row();
-                button(ui, "⬅", "MAP_PAD_BACK", "HELP_PARENT", back, NavDir::Out);
-                ui.label("");
-                button(ui, "➡", "MAP_PAD_OPEN", "MAP_OPEN", open, NavDir::In);
-                ui.end_row();
-                ui.label("");
-                button(ui, "⬇", "MAP_PAD_NEXT", "MAP_NEXT", true, NavDir::Next);
-                ui.end_row();
-            });
-        press
     }
 
     /// The Voronoi map of `view_node` in `rect`: drawn, and (unless `live`,
