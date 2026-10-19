@@ -1938,6 +1938,21 @@ mod pick_tests {
         assert!(app.selected_crumbs().is_empty());
     }
 
+    /// Adding a category in the Categories window shows the new row at
+    /// once.
+    #[test]
+    fn categories_window_adds_a_row() {
+        let mut app = DiskScanApp::default();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        app.cat_editor = Some(CategoryEditor::new(app.cats.entries()));
+        let before = app.cats.entries().len();
+        click_named(&mut app, &ctx, &tr("CATS_ADD"), false);
+        app_frame(&mut app, &ctx, vec![]);
+        let editor = app.cat_editor.as_ref().expect("window still open");
+        assert_eq!(editor.entries().len(), before + 1);
+    }
+
     /// A slice under the pointer shows its details, unless a dialog is
     /// open over the chart.
     #[test]

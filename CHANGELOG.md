@@ -22,8 +22,8 @@
   items inside folders drawn within their cells. Settings › Gap between
   map cells leaves up to 12 pixels of space between them.
 - **Theme setting**: Auto (as before), Light or Dark.
-- **Categories window** (Settings › Edit categories…): rename, add, remove
-  and reorder categories, change their extensions and pick their colors
+- **Categories window** (Settings › Edit categories…): rename, add and
+  remove categories, change their extensions and pick their colors
   from a list of 32 that suit light and dark themes, or type any color as
   `#RRGGBB`. It warns about extensions in two categories and colors that
   are hard to tell apart, also for color-blind eyes when the color-blind

@@ -1,6 +1,6 @@
 //! The Categories window, opened from Settings: each category's name,
-//! extensions and color, which can be added, removed, reordered and reset
-//! to the built-in ones, then saved to categories.json.
+//! extensions and color, which can be added, removed and reset to the
+//! built-in ones, then saved to categories.json.
 
 use super::*;
 use panels::tool_window;
@@ -239,6 +239,9 @@ impl CategoryEditor {
         let problems = self.problems(dark, color_blind);
         let blocked = problems.iter().flatten().any(|p| p.blocks);
         let (mut keep_open, mut saved) = (true, false);
+        // Rows are added, reset or removed after both panels are drawn, so
+        // `problems` matches the rows drawn.
+        let mut action = None;
 
         egui::Panel::bottom("cats_buttons").show(ui, |ui| {
             ui.add_space(6.0);
@@ -249,15 +252,10 @@ impl CategoryEditor {
             }
             ui.horizontal(|ui| {
                 if ui.button(tr("CATS_ADD")).clicked() {
-                    let row = self.row(CategoryEntry {
-                        name: tr("CATS_NEW_NAME"),
-                        extensions: Vec::new(),
-                        color: None,
-                    });
-                    self.rows.push(row);
+                    action = Some(EditAction::Add);
                 }
                 if ui.button(tr("CATS_RESET")).clicked() {
-                    self.set_entries(CategoryModel::defaults().entries());
+                    action = Some(EditAction::Reset);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
@@ -288,50 +286,53 @@ impl CategoryEditor {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    let mut action = None;
-                    let count = self.rows.len();
-                    for (i, row) in self.rows.iter_mut().enumerate() {
+                    for (i, (row, problems)) in self.rows.iter_mut().zip(&problems).enumerate() {
                         ui.push_id(row.id, |ui| {
-                            if let Some(a) =
-                                row_ui(ui, row, i, count, dark, color_blind, &problems[i])
-                            {
-                                action = Some((i, a));
+                            if row_ui(ui, row, i, dark, color_blind, problems) {
+                                action = Some(EditAction::Remove(i));
                             }
                         });
                         ui.separator();
                     }
-                    match action {
-                        Some((i, RowAction::Up)) if i > 0 => self.rows.swap(i, i - 1),
-                        Some((i, RowAction::Down)) if i + 1 < count => self.rows.swap(i, i + 1),
-                        Some((i, RowAction::Remove)) => {
-                            self.rows.remove(i);
-                        }
-                        _ => {}
-                    }
                 });
         });
+        match action {
+            Some(EditAction::Add) => {
+                let row = self.row(CategoryEntry {
+                    name: tr("CATS_NEW_NAME"),
+                    extensions: Vec::new(),
+                    color: None,
+                });
+                self.rows.push(row);
+            }
+            Some(EditAction::Reset) => self.set_entries(CategoryModel::defaults().entries()),
+            Some(EditAction::Remove(i)) => {
+                self.rows.remove(i);
+            }
+            None => {}
+        }
         (keep_open, saved)
     }
 }
 
-enum RowAction {
-    Up,
-    Down,
-    Remove,
+/// A change to the list of rows, asked for this frame.
+enum EditAction {
+    Add,
+    Reset,
+    Remove(usize),
 }
 
-/// One category: color, name, move and remove buttons, its extensions and
-/// its problems.
+/// One category: color, name, remove button, its extensions and its
+/// problems. Returns true when it's to be removed.
 fn row_ui(
     ui: &mut egui::Ui,
     row: &mut Row,
     index: usize,
-    count: usize,
     dark: bool,
     color_blind: bool,
     problems: &[Problem],
-) -> Option<RowAction> {
-    let mut action = None;
+) -> bool {
+    let mut remove = false;
     let color = row
         .color
         .map_or(position_color(index, dark, color_blind), |c| c.on(dark));
@@ -353,21 +354,7 @@ fn row_ui(
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("🗑").on_hover_text(tr("CATS_REMOVE")).clicked() {
-                action = Some(RowAction::Remove);
-            }
-            if ui
-                .add_enabled(index + 1 < count, egui::Button::new("⬇"))
-                .on_hover_text(tr("CATS_DOWN"))
-                .clicked()
-            {
-                action = Some(RowAction::Down);
-            }
-            if ui
-                .add_enabled(index > 0, egui::Button::new("⬆"))
-                .on_hover_text(tr("CATS_UP"))
-                .clicked()
-            {
-                action = Some(RowAction::Up);
+                remove = true;
             }
         });
     });
@@ -385,7 +372,7 @@ fn row_ui(
         };
         ui.label(egui::RichText::new(&p.text).small().color(color));
     }
-    action
+    remove
 }
 
 /// The color picker: automatic, one of the listed colors, or a typed code.
