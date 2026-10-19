@@ -814,7 +814,7 @@ impl DiskScanApp {
                         .on_hover_text(tr("SETTINGS_MAP_GAP_HOVER"));
 
                         ui.separator();
-                        ui.label(tr("SETTINGS_COLORS"));
+                        ui.label(tr("SETTINGS_RENDERING"));
                         ui.horizontal(|ui| {
                             let label = ui.label(tr("SETTINGS_THEME")).id;
                             let name = |t: ThemeChoice| match t {
@@ -853,9 +853,6 @@ impl DiskScanApp {
                                 .text(tr("SETTINGS_AGE_DARKEST")),
                         )
                         .on_hover_text(tr("SETTINGS_AGE_DARKEST_HOVER"));
-
-                        ui.separator();
-                        ui.label(tr("SETTINGS_LINE_RENDERING"));
                         ui.add(
                             egui::Slider::new(&mut s.stroke_width, Settings::STROKE_WIDTH)
                                 .text(tr("SETTINGS_BORDER_THICKNESS")),
