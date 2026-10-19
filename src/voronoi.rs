@@ -834,11 +834,14 @@ pub(crate) struct MapCell<'a> {
 
 /// The cells of `tree` inside `bounds`, outer before inner, with the places
 /// `place_of` gives (folder key, item name). An item without a place yet
-/// starts at a point picked by its name.
+/// starts at a point picked by its name. Each cell is drawn smaller by the
+/// gap, divided by `zoom` (how much the map will be magnified), so the gap
+/// looks the same at any zoom.
 pub(crate) fn map_cells<'a>(
     tree: &'a MapTree,
     bounds: &[Pos2],
     place_of: PlaceOf,
+    zoom: f32,
 ) -> Vec<MapCell<'a>> {
     let mut out = Vec::new();
     cells_level(
@@ -849,6 +852,12 @@ pub(crate) fn map_cells<'a>(
         place_of,
         &mut out,
     );
+    let shrink = tree.gap / 2.0 / zoom;
+    for cell in &mut out {
+        if let Some(poly) = inset(&cell.poly, shrink) {
+            cell.poly = poly;
+        }
+    }
     out
 }
 
@@ -885,7 +894,7 @@ fn cells_level<'a>(
         let inner = laid_out.then(|| inner_region(&poly, gap)).flatten();
         out.push(MapCell {
             item,
-            poly: inset(&poly, gap / 2.0).unwrap_or(poly),
+            poly,
             split: inner.is_some(),
         });
         if let Some(inner) = inner {
@@ -1289,10 +1298,10 @@ impl DiskScanApp {
         if glide < 1.0 {
             ctx.request_repaint();
         }
+        let lens = self.map_lens(&ctx, response, rect, &view);
         let state = &self.map;
         let place_of = |key: &[Box<str>], name: &str| state.place_now(key, name, glide);
-        let mut cells = map_cells(&tree, &bounds, &place_of);
-        let lens = self.map_lens(&ctx, response, rect, &view);
+        let mut cells = map_cells(&tree, &bounds, &place_of, lens.scale);
         if lens.scale > 1.0 {
             for c in &mut cells {
                 for p in &mut c.poly {
@@ -1983,7 +1992,7 @@ mod tests {
         ));
         let places = lay_out(&tree, &bounds, &Places::new());
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
-        let cells = map_cells(&tree, &bounds, &place_of);
+        let cells = map_cells(&tree, &bounds, &place_of, 1.0);
         let corner = cells.iter().find(|c| c.item.seg.is_other).unwrap();
         assert!((area(&corner.poly) - OTHER_CELL_PIXELS).abs() < 0.5);
         assert!(contains(&corner.poly, Pos2::new(119.5, 119.5)));
@@ -2035,7 +2044,7 @@ mod tests {
         let places = lay_out(&tree, &bounds, &Places::new());
         assert!(places.contains_key(&Vec::new()) && places.contains_key(&vec!["a".into()]));
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
-        let cells = map_cells(&tree, &bounds, &place_of);
+        let cells = map_cells(&tree, &bounds, &place_of, 1.0);
         assert_eq!(cells.len(), 3 + 5);
         let top: Vec<&MapCell> = cells.iter().filter(|c| c.item.seg.ring == 0).collect();
         let total = area(&bounds);
@@ -2052,8 +2061,8 @@ mod tests {
         }
     }
 
-    /// With a gap set, neighbouring cells are that far apart, and the
-    /// smallest cells grow by it.
+    /// With a gap set, neighbouring cells are that far apart on screen at
+    /// any zoom, and the smallest cells grow by it.
     #[test]
     fn map_gap_parts_cells() {
         let files = (0..20)
@@ -2073,8 +2082,6 @@ mod tests {
         assert_eq!(tree.items.last().unwrap().weight, f64::from(24.0f32 * 24.0));
         let places = lay_out(&tree, &bounds, &Places::new());
         let place_of = |key: &[Box<str>], name: &str| places.get(key)?.get(name).copied();
-        let cells = map_cells(&tree, &bounds, &place_of);
-        assert_eq!(cells.len(), 20);
         // Distance from `p` to the nearest edge of `poly`.
         let to_edge = |p: Pos2, poly: &[Pos2]| {
             (0..poly.len())
@@ -2085,12 +2092,33 @@ mod tests {
                 })
                 .fold(f32::INFINITY, f32::min)
         };
-        for (i, a) in cells.iter().enumerate() {
-            for b in &cells[i + 1..] {
-                for &p in &a.poly {
-                    assert!(!contains(&b.poly, p) && to_edge(p, &b.poly) > 7.9);
+        // The closest two cells come on screen, at `zoom`.
+        let closest = |zoom: f32| {
+            let lens = Lens {
+                scale: zoom,
+                offset: Vec2::ZERO,
+            };
+            let rect = egui::Rect::from_points(&bounds);
+            let polys: Vec<Poly> = map_cells(&tree, &bounds, &place_of, zoom)
+                .iter()
+                .map(|c| c.poly.iter().map(|p| lens.apply(rect, *p)).collect())
+                .collect();
+            assert_eq!(polys.len(), 20);
+            let mut closest = f32::INFINITY;
+            for (i, a) in polys.iter().enumerate() {
+                for b in &polys[i + 1..] {
+                    for &p in a {
+                        assert!(!contains(b, p));
+                        closest = closest.min(to_edge(p, b));
+                    }
                 }
             }
+            closest
+        };
+        // The gap looks the same however far the map is zoomed in.
+        for zoom in [1.0, 4.0] {
+            let gap = closest(zoom);
+            assert!((7.9..8.5).contains(&gap), "{gap} at zoom {zoom}");
         }
     }
 
