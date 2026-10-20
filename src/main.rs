@@ -2029,6 +2029,14 @@ mod pick_tests {
         for map in [false, true] {
             app.settings.map_view = map;
             app_frame(&mut app, &ctx, vec![]);
+            // The map is laid out on another thread; it's drawn once ready.
+            for _ in 0..500 {
+                if !map || app.map.laid_out() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                app_frame(&mut app, &ctx, vec![]);
+            }
             let out = app_frame(&mut app, &ctx, vec![]);
             assert!(
                 width_of(&out, &|l| l == long) < 260.0,
